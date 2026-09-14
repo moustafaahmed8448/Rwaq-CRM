@@ -1,0 +1,3 @@
+import { NextRequest, NextResponse } from "next/server";
+import { validateRequest } from "twilio";
+export async function POST(request: NextRequest) { const token = process.env.TWILIO_AUTH_TOKEN; if (!token) return NextResponse.json({ error: "TWILIO_AUTH_TOKEN is not configured" }, { status: 503 }); const form = Object.fromEntries((await request.formData()).entries()) as Record<string, string>; if (!validateRequest(token, request.headers.get("x-twilio-signature") || "", request.url, form)) return NextResponse.json({ error: "Invalid Twilio signature" }, { status: 403 }); return NextResponse.json({ received: true, from: form.From, message: form.Body }); }

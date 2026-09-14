@@ -1,69 +1,90 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CalendarDays, ChevronDown, Download, Grid2X2, LayoutDashboard, Pencil, Plus, Search, Trash2, UsersRound } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+type Metric = { channel: string; platform: string; spend: number; reach: number; totalClients: number; won: number; lost: number; waiting: number; cpa: number };
+type Client = { id: string; name: string; phoneNumber: string; status: "WAITING" | "WON" | "LOST"; project: string; location: string; acquisitionChannel: string; operationToTake: string; firstContactPerson: string; secondContactPerson: string; createdAt?: string; lastUpdateDate?: string };
+type User = { name: string; initials: string; role: string };
+type SecondSalesperson = { name: string; won: number; lost: number; waiting: number; total: number };
+type Filters = { query: string; status: string; channel: string; location: string; salesperson: string; startDate: string; endDate: string };
+
+const money = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const colors: Record<string, string> = { FACEBOOK: "#2e7df6", INSTAGRAM: "#e43f79", X: "#111827", TIKTOK: "#111827", GOOGLE_ADS: "#ef9e13", WHATSAPP: "#22a95c", CALLS: "#f59e0b", SALES: "#8b5cf6" };
+const labels: Record<string, string> = { FACEBOOK: "Facebook", INSTAGRAM: "Instagram", X: "X", TIKTOK: "TikTok", GOOGLE_ADS: "Google Ads", WHATSAPP: "WhatsApp", CALLS: "Calls", SALES: "Sales" };
+const trend = [{ day: "Aug 31", clients: 38, spend: 420 }, { day: "Sep 2", clients: 42, spend: 448 }, { day: "Sep 4", clients: 46, spend: 470 }, { day: "Sep 7", clients: 49, spend: 505 }];
+const initialFilters: Filters = { query: "", status: "ALL", channel: "ALL", location: "ALL", salesperson: "ALL", startDate: "", endDate: "" };
+
+function matchesFilters(client: Client, filters: Filters) {
+  const date = (client.createdAt || "").slice(0, 10);
+  return (filters.status === "ALL" || client.status === filters.status) &&
+    (filters.channel === "ALL" || client.acquisitionChannel === filters.channel) &&
+    (filters.location === "ALL" || client.location === filters.location) &&
+    (filters.salesperson === "ALL" || client.firstContactPerson === filters.salesperson || client.secondContactPerson === filters.salesperson) &&
+    (!filters.startDate || date >= filters.startDate) && (!filters.endDate || date <= filters.endDate) &&
+    `${client.name} ${client.phoneNumber} ${client.project}`.toLowerCase().includes(filters.query.toLowerCase());
+}
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [secondSalespeople, setSecondSalespeople] = useState<SecondSalesperson[]>([]);
+  const [view, setView] = useState<"dashboard" | "clients">("dashboard");
+  const [mode, setMode] = useState<"table" | "kanban">("table");
+  const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => { fetch("/api/auth/me").then(async response => { if (!response.ok) { router.replace("/login"); return null; } return response.json(); }).then(data => data?.user && setUser(data.user)); }, [router]);
+  useEffect(() => { if (!user) return; Promise.all([fetch("/api/analytics/weekly"), fetch("/api/crm/clients")]).then(async ([analytics, crm]) => { if (!analytics.ok || !crm.ok) throw new Error("Unable to load workspace"); return Promise.all([analytics.json(), crm.json()]); }).then(([analytics, crm]) => { setMetrics(analytics.rows); setSecondSalespeople(analytics.secondSalespersonReport || []); setClients(crm.clients); }).catch(() => undefined); }, [user]);
+
+  const filteredClients = useMemo(() => clients.filter(client => matchesFilters(client, filters)), [clients, filters]);
+  const salespeople = useMemo(() => [...new Set(clients.flatMap(client => [client.firstContactPerson, client.secondContactPerson].filter(Boolean)))], [clients]);
+  const totalSpend = metrics.reduce((sum, metric) => sum + metric.spend, 0);
+  const totalReach = metrics.reduce((sum, metric) => sum + metric.reach, 0);
+  const won = metrics.reduce((sum, metric) => sum + metric.won, 0);
+  const lost = metrics.reduce((sum, metric) => sum + metric.lost, 0);
+
+  const updateFilter = (key: keyof Filters, value: string) => setFilters(current => ({ ...current, [key]: value }));
+  const visibleMetrics = useMemo(() => metrics.map(metric => { const scoped = filteredClients.filter(client => client.acquisitionChannel === metric.channel); const wonCount = scoped.filter(client => client.status === "WON").length; return { ...metric, totalClients: scoped.length, customerCount: scoped.length, won: wonCount, lost: scoped.filter(client => client.status === "LOST").length, waiting: scoped.filter(client => client.status === "WAITING").length, cpa: wonCount ? metric.spend / wonCount : 0 }; }), [metrics, filteredClients]);
+  const exportExcel = () => { const headers = ["Client ID", "Created Date", "Client Name", "Phone Number", "Status", "Project", "Location", "Acquisition Channel", "Next Operation", "First Salesperson", "Second Salesperson", "Last Update Date"]; const rows = filteredClients.map(client => [client.id, client.createdAt || "", client.name, client.phoneNumber, client.status, client.project, client.location, labels[client.acquisitionChannel], client.operationToTake, client.firstContactPerson, client.secondContactPerson, client.lastUpdateDate || ""]); const csv = [headers, ...rows].map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\r\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" })); link.download = `rwaq-clients-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(link.href); };
+  const updateStatus = async (id: string, status: Client["status"]) => { await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) }); setClients(current => current.map(client => client.id === id ? { ...client, status, lastUpdateDate: new Date().toISOString() } : client)); };
+  const exportReport = async () => { setExporting(true); try { const response = await fetch("/api/sync/sheets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "report", ...filters }) }); if (!response.ok) { const data = await response.json(); throw new Error(data.error || "Export failed"); } exportExcel(); window.alert("Report exported to Google Sheets and downloaded as Excel-compatible CSV."); } catch (error) { window.alert(error instanceof Error ? error.message : "Export failed"); } finally { setExporting(false); } };
+  const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); };
+  if (!user) return <main className="auth-loading"><strong>Loading workspace...</strong></main>;
+
+  return <main className="reports-shell"><header className="reports-nav"><strong>Reports</strong><nav><button className={view === "dashboard" ? "nav-active" : ""} onClick={() => setView("dashboard")}><LayoutDashboard size={15} />Dashboard</button><button className={view === "clients" ? "nav-active" : ""} onClick={() => setView("clients")}><UsersRound size={15} />Clients</button><button className="user-menu" onClick={logout}>{user.initials}<span>{user.name}</span></button></nav></header><div className="reports-content">{view === "dashboard" ? <Dashboard metrics={visibleMetrics} totalSpend={totalSpend} totalReach={totalReach} won={won} lost={lost} clients={filteredClients} filters={filters} updateFilter={updateFilter} salespeople={salespeople} secondSalespeople={secondSalespeople} onExport={exportReport} onExportExcel={exportExcel} exporting={exporting} /> : <ClientsView clients={filteredClients} allClients={clients} mode={mode} setMode={setMode} filters={filters} updateFilter={updateFilter} salespeople={salespeople} updateStatus={updateStatus} onExportExcel={exportExcel} />}</div></main>;
+}
+
+function FilterBar({ filters, updateFilter, salespeople, compact = false }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; salespeople: string[]; compact?: boolean }) {
+  void compact;
+  return <><div className="filter-bar"><label><Search size={16} /><input placeholder="Search name, phone..." value={filters.query} onChange={event => updateFilter("query", event.target.value)} /></label><select value={filters.status} onChange={event => updateFilter("status", event.target.value)}><option value="ALL">All statuses</option><option value="WAITING">Waiting</option><option value="WON">Won</option><option value="LOST">Lost</option></select><select value={filters.channel} onChange={event => updateFilter("channel", event.target.value)}><option value="ALL">All channels</option>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select value={filters.location} onChange={event => updateFilter("location", event.target.value)}><option value="ALL">All locations</option><option>New Cairo</option><option>6th of October</option><option>North Coast</option></select><select value={filters.salesperson} onChange={event => updateFilter("salesperson", event.target.value)}><option value="ALL">All salespeople</option>{salespeople.map(person => <option key={person}>{person}</option>)}</select></div><div className="date-filter"><span>Date</span><input type="date" value={filters.startDate} onChange={event => updateFilter("startDate", event.target.value)} /><span>to</span><input type="date" value={filters.endDate} onChange={event => updateFilter("endDate", event.target.value)} /></div></>;
+}
+
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, clients, filters, updateFilter, salespeople, secondSalespeople, onExport, onExportExcel, exporting }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; clients: Client[]; filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; salespeople: string[]; secondSalespeople: SecondSalesperson[]; onExport: () => void; onExportExcel?: () => void; exporting: boolean }) {
+  void secondSalespeople;
+  void onExportExcel;
+  return <><div className="view-title"><div><div className="crumb"><LayoutDashboard size={15} /> Reports</div><h1>Marketing dashboard</h1><p>Weekly spend, reach, customers, and conversion efficiency.</p></div><div className="title-actions"><button className="date-button"><CalendarDays size={15} />Sep 07 - Sep 13, 2026 <ChevronDown size={14} /></button><button className="add-client" onClick={onExport} disabled={exporting}><Download size={15} />{exporting ? "Exporting..." : "Export report"}</button></div></div><FilterBar filters={filters} updateFilter={updateFilter} salespeople={salespeople} compact /><section className="metric-cards"><div><span>Total spend</span><strong>${money.format(totalSpend)}</strong><small>Weekly investment</small></div><div><span>Total reach</span><strong>{money.format(totalReach)}</strong><small>Across eight channels</small></div><div><span>Customers won</span><strong>{won}</strong><small className="green">{won + lost ? Math.round(won / (won + lost) * 100) : 0}% won ratio</small></div><div><span>Won / lost</span><strong>{won} / {lost}</strong><small>Conversion outcomes</small></div></section><section className="dashboard-grid"><div className="white-panel chart-panel"><h3>Spend vs customers by platform</h3><ResponsiveContainer width="100%" height={235}><BarChart data={metrics}><CartesianGrid stroke="#edf0f3" vertical={false} /><XAxis dataKey="platform" tick={{ fontSize: 10 }} /><YAxis yAxisId="left" tick={{ fontSize: 10 }} /><YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} /><Tooltip /><Bar yAxisId="left" dataKey="spend" fill="#111827" radius={[3, 3, 0, 0]} /><Bar yAxisId="right" dataKey="totalClients" fill="#8b5cf6" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></div><div className="white-panel chart-panel"><h3>Weekly trend - clients & spend</h3><ResponsiveContainer width="100%" height={235}><AreaChart data={trend}><CartesianGrid stroke="#edf0f3" vertical={false} /><XAxis dataKey="day" tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 10 }} /><Tooltip /><Area dataKey="spend" stroke="#111827" fill="#e5e7eb" /><Area dataKey="clients" stroke="#8b5cf6" fill="transparent" /></AreaChart></ResponsiveContainer></div></section><ReportEntries metrics={metrics} clients={clients} /></>;
+}
+
+function ReportEntries({ metrics, clients }: { metrics: Metric[]; clients: Client[] }) {
+  const secondSalespeople = [...new Set(clients.map(client => client.secondContactPerson).filter(Boolean))].map(name => ({ name, won: clients.filter(client => client.secondContactPerson === name && client.status === "WON").length, lost: clients.filter(client => client.secondContactPerson === name && client.status === "LOST").length, waiting: clients.filter(client => client.secondContactPerson === name && client.status === "WAITING").length }));
+  return <><section className="white-panel report-table"><h3>All entries <small className="report-count">{clients.length} filtered clients</small></h3><div className="report-row report-head"><span>Week</span><span>Week ending</span><span>Platform</span><span>Spend</span><span>Reach</span><span>Clients</span><span>Cost / client</span></div>{metrics.map(item => <div className="report-row" key={item.channel}><span>Sep 7, 2026</span><span>Sep 13, 2026</span><span><i className="dot" style={{ background: colors[item.channel] }} />{item.platform}</span><span>{money.format(item.spend)}</span><span>{money.format(item.reach)}</span><span>{item.totalClients}</span><span>{item.cpa.toFixed(2)}</span></div>)}</section><section className="white-panel report-table salesperson-report"><h3>Second salesperson outcomes</h3><div className="report-row salesperson-head"><span>Salesperson</span><span>Won</span><span>Lost</span><span>Waiting</span><span>Total</span></div>{secondSalespeople.map(person => <div className="report-row salesperson-row" key={person.name}><span>{person.name}</span><span className="green">{person.won}</span><span className="red-text">{person.lost}</span><span>{person.waiting}</span><span>{person.won + person.lost + person.waiting}</span></div>)}</section></>;
+}
+
+function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, salespeople, updateStatus, onExportExcel }: { clients: Client[]; allClients: Client[]; mode: "table" | "kanban"; setMode: (mode: "table" | "kanban") => void; filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; salespeople: string[]; updateStatus: (id: string, status: Client["status"]) => void; onExportExcel?: () => void }) {
+  void onExportExcel;
+  return <><div className="view-title clients-title"><div><div className="crumb"><UsersRound size={15} /> CRM</div><h1>Clients</h1><p>Track every client through the pipeline.</p></div><div className="title-actions"><div className="segmented"><button className={mode === "table" ? "selected" : ""} onClick={() => setMode("table")}><LayoutDashboard size={15} />Table</button><button className={mode === "kanban" ? "selected" : ""} onClick={() => setMode("kanban")}><Grid2X2 size={15} />Kanban</button></div><button className="add-client"><Plus size={16} />Add client</button></div></div><FilterBar filters={filters} updateFilter={updateFilter} salespeople={salespeople} /><div className="result-note">Showing {clients.length} of {allClients.length} clients</div>{mode === "table" ? <ClientTable clients={clients} updateStatus={updateStatus} /> : <Kanban clients={clients} updateStatus={updateStatus} />}</>;
+}
+
+function ClientTable({ clients, updateStatus }: { clients: Client[]; updateStatus: (id: string, status: Client["status"]) => void }) { return <div className="client-table"><div className="client-row client-head"><span>CLIENT</span><span>STATUS</span><span>SOURCE</span><span>PROJECT</span><span>LOCATION</span><span>DATE</span><span>OPERATION</span><span>1st contact</span><span>2nd contact</span><span>UPDATED</span><span /></div>{clients.map(client => <div className="client-row" key={client.id}><span className="client-person"><b>{client.name}</b><small>{client.phoneNumber}</small></span><select className={`status-select ${client.status.toLowerCase()}`} value={client.status} onChange={event => updateStatus(client.id, event.target.value as Client["status"])}><option>WAITING</option><option>WON</option><option>LOST</option></select><span><i className="dot" style={{ background: colors[client.acquisitionChannel] }} />{labels[client.acquisitionChannel]}</span><span>{client.project}</span><span>{client.location}</span><span>{client.createdAt ? new Date(client.createdAt).toLocaleDateString() : "Sep 13, 2026"}</span><span className="operation">{client.operationToTake}</span><span>{client.firstContactPerson}</span><span>{client.secondContactPerson || "-"}</span><span className="muted">Sep 13, 2026</span><span className="row-actions"><Pencil size={15} /><Trash2 size={15} /></span></div>)}</div>; }
+
+function Kanban({ clients, updateStatus }: { clients: Client[]; updateStatus: (id: string, status: Client["status"]) => void }) {
+  const [dragged, setDragged] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<Client["status"] | null>(null);
+  const columns: Client["status"][] = ["WAITING", "WON", "LOST"];
+  return <div className="kanban-board">{columns.map(column => <section key={column} className={dropTarget === column ? "drop-target" : ""} onDragEnter={() => setDropTarget(column)} onDragOver={event => { event.preventDefault(); setDropTarget(column); }} onDragLeave={() => setDropTarget(null)} onDrop={() => { if (dragged) updateStatus(dragged, column); setDragged(null); setDropTarget(null); }}><div className="kanban-heading"><span className={`kanban-dot ${column.toLowerCase()}`} />{column}<small>{clients.filter(client => client.status === column).length}</small></div>{clients.filter(client => client.status === column).map(client => <article className={`client-card ${dragged === client.id ? "dragging" : ""}`} key={client.id} draggable onDragStart={() => setDragged(client.id)} onDragEnd={() => { setDragged(null); setDropTarget(null); }}><div className="card-top"><b>{client.name}</b><Pencil size={15} /></div><p><i className="dot" style={{ background: colors[client.acquisitionChannel] }} />{labels[client.acquisitionChannel]} <span>⌕ {client.phoneNumber}</span></p><p>{client.location}</p><strong>{client.operationToTake}</strong><footer><span>1st: {client.firstContactPerson}</span><span>2nd: {client.secondContactPerson || "-"}</span></footer><select value={client.status} onChange={event => updateStatus(client.id, event.target.value as Client["status"])}><option>WAITING</option><option>WON</option><option>LOST</option></select></article>)}</section>)}</div>;
 }
