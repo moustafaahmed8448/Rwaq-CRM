@@ -12,6 +12,7 @@
     "db:deploy": "prisma migrate deploy"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "googleapis": "^180.0.0",
     "lucide-react": "^1.46.0",
