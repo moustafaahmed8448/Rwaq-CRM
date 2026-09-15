@@ -1,0 +1,54 @@
+[
+  {
+    "id": "m1",
+    "startDate": "2026-09-13",
+    "endDate": "2026-09-19",
+    "channel": "FACEBOOK",
+    "spend": 111111,
+    "reach": 84200,
+    "impressions": 120000,
+    "clicks": 3200,
+    "notes": "Q3 campaign",
+    "createdAt": "2026-09-14T20:00:40.278Z",
+    "updatedAt": "2026-09-15T16:25:54.568Z"
+  },
+  {
+    "id": "m2",
+    "startDate": "2026-09-13",
+    "endDate": "2026-09-19",
+    "channel": "GOOGLE_ADS",
+    "spend": 11111111,
+    "reach": 52100,
+    "impressions": 80000,
+    "clicks": 2100,
+    "notes": "",
+    "createdAt": "2026-09-14T20:00:40.278Z",
+    "updatedAt": "2026-09-15T16:06:49.018Z"
+  },
+  {
+    "id": "m3",
+    "startDate": "2026-09-13",
+    "endDate": "2026-09-19",
+    "channel": "TIKTOK",
+    "spend": 1111,
+    "reach": 91400,
+    "impressions": 150000,
+    "clicks": 4500,
+    "notes": "Viral ad set",
+    "createdAt": "2026-09-14T20:00:40.278Z",
+    "updatedAt": "2026-09-15T16:06:44.255Z"
+  },
+  {
+    "id": "m4",
+    "startDate": "2026-09-13",
+    "endDate": "2026-09-19",
+    "channel": "INSTAGRAM",
+    "spend": 2222222,
+    "reach": 41000,
+    "impressions": 60000,
+    "clicks": 1800,
+    "notes": "asssssssssssssss",
+    "createdAt": "2026-09-14T20:00:40.278Z",
+    "updatedAt": "2026-09-15T16:06:36.711Z"
+  }
+]

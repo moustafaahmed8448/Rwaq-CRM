@@ -1,0 +1,102 @@
+[
+  {
+    "id": "notif-1789489492880-tyv21",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:52.880Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Salma Farid” as 1st contact",
+    "clientId": "c5",
+    "clientName": "Salma Farid"
+  },
+  {
+    "id": "notif-1789489489297-h1yh8",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:49.297Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Karim Youssef” as 1st contact",
+    "clientId": "c4",
+    "clientName": "Karim Youssef"
+  },
+  {
+    "id": "notif-1789489488074-o2cpu",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:48.074Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Mariam Adel” as 1st contact",
+    "clientId": "c3",
+    "clientName": "Mariam Adel"
+  },
+  {
+    "id": "notif-1789489487136-h7icn",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:47.136Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Omar Khalil” as 1st contact",
+    "clientId": "c2",
+    "clientName": "Omar Khalil"
+  },
+  {
+    "id": "notif-1789489463905-y7xpx",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:23.905Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Salma Farid” as 2nd contact",
+    "clientId": "c5",
+    "clientName": "Salma Farid"
+  },
+  {
+    "id": "notif-1789489460320-gkoz7",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:20.320Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Karim Youssef” as 2nd contact",
+    "clientId": "c4",
+    "clientName": "Karim Youssef"
+  },
+  {
+    "id": "notif-1789489459329-zj3l0",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:19.329Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Mariam Adel” as 2nd contact",
+    "clientId": "c3",
+    "clientName": "Mariam Adel"
+  },
+  {
+    "id": "notif-1789489458456-0a8t3",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:18.456Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Omar Khalil” as 2nd contact",
+    "clientId": "c2",
+    "clientName": "Omar Khalil"
+  },
+  {
+    "id": "notif-1789489441489-esv38",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:01.489Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Nour El-Din” as 2nd contact",
+    "clientId": "c1",
+    "clientName": "Nour El-Din"
+  },
+  {
+    "id": "notif-1789489440153-ph4gd",
+    "read": true,
+    "createdAt": "2026-09-15T16:24:00.153Z",
+    "recipient": "Moustafa",
+    "type": "ASSIGNED",
+    "message": "You were assigned “Nour El-Din” as 1st contact",
+    "clientId": "c1",
+    "clientName": "Nour El-Din"
+  }
+]

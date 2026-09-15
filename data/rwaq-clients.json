@@ -1,0 +1,612 @@
+[
+  {
+    "id": "c1",
+    "createdAt": "2026-09-13T08:00:00Z",
+    "lastUpdateDate": "2026-09-15T17:13:23.478Z",
+    "name": "Nour El-Din",
+    "phoneNumber": "+20 101 824 0912",
+    "status": "NEW",
+    "project": "Palm Hills",
+    "location": "hello",
+    "acquisitionChannel": "INSTAGRAM",
+    "operationToTake": "Schedule site tour",
+    "firstContactPerson": "Moustafa",
+    "secondContactPerson": "Moustafa",
+    "notes": "Interested in 3-bed villa, prefers ground floor",
+    "activityLog": [
+      {
+        "id": "act-1",
+        "timestamp": "2026-09-13T08:00:00Z",
+        "actor": "System",
+        "action": "CREATED",
+        "summary": "Client created"
+      },
+      {
+        "id": "act-1789414696507-qvngn",
+        "timestamp": "2026-09-14T19:38:16.507Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "WON",
+        "summary": "Status changed: WAITING → WON"
+      },
+      {
+        "id": "act-1789414753926-90h2e",
+        "timestamp": "2026-09-14T19:39:13.926Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "LOST",
+        "summary": "Status changed: WON → LOST"
+      },
+      {
+        "id": "act-1789482381759-v27x2",
+        "timestamp": "2026-09-15T14:26:21.759Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "SSSS",
+        "summary": "Status changed: LOST → SSSS"
+      },
+      {
+        "id": "act-1789488128842-xqgew",
+        "timestamp": "2026-09-15T16:02:08.842Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "SSSS",
+        "newValue": "Moustafa",
+        "summary": "Status changed: SSSS → Moustafa"
+      },
+      {
+        "id": "act-1789489175234-f8dep",
+        "timestamp": "2026-09-15T16:19:35.234Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "Moustafa",
+        "newValue": "WON",
+        "summary": "Status changed: Moustafa → WON"
+      },
+      {
+        "id": "act-1789489185618-6n5vo",
+        "timestamp": "2026-09-15T16:19:45.618Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "WAITING",
+        "summary": "Status changed: WON → WAITING"
+      },
+      {
+        "id": "act-1789489440152-vtbbf",
+        "timestamp": "2026-09-15T16:24:00.152Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "1st Contact",
+        "oldValue": "Amira",
+        "newValue": "Moustafa",
+        "summary": "1st Contact updated"
+      },
+      {
+        "id": "act-1789489441488-hi23t",
+        "timestamp": "2026-09-15T16:24:01.488Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "2nd Contact",
+        "oldValue": "Hany",
+        "newValue": "Moustafa",
+        "summary": "2nd Contact updated"
+      },
+      {
+        "id": "act-1789489650408-ogk14",
+        "timestamp": "2026-09-15T16:27:30.408Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "LOST",
+        "summary": "Status changed: WAITING → LOST"
+      },
+      {
+        "id": "act-1789489682194-qph26",
+        "timestamp": "2026-09-15T16:28:02.194Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "WON",
+        "summary": "Status changed: LOST → WON"
+      },
+      {
+        "id": "act-1789490400647-blhp6",
+        "timestamp": "2026-09-15T16:40:00.647Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "WAITING",
+        "summary": "Status changed: WON → WAITING"
+      },
+      {
+        "id": "act-1789490410791-hdw2j",
+        "timestamp": "2026-09-15T16:40:10.791Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "FFFFF",
+        "summary": "Status changed: WAITING → FFFFF"
+      },
+      {
+        "id": "act-1789490420487-0688c",
+        "timestamp": "2026-09-15T16:40:20.487Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "FFFFF",
+        "newValue": "WAITING",
+        "summary": "Status changed: FFFFF → WAITING"
+      },
+      {
+        "id": "act-1789491579645-tn8cj",
+        "timestamp": "2026-09-15T16:59:39.645Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "Location",
+        "oldValue": "New Cairo",
+        "newValue": "hello",
+        "summary": "Location updated"
+      },
+      {
+        "id": "act-1789491579645-gvhpn",
+        "timestamp": "2026-09-15T16:59:39.645Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "Channel",
+        "oldValue": "FACEBOOK",
+        "newValue": "FORSA",
+        "summary": "Channel updated"
+      },
+      {
+        "id": "act-1789491624884-1fx7u",
+        "timestamp": "2026-09-15T17:00:24.884Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "NEW",
+        "summary": "Status changed: WAITING → NEW"
+      },
+      {
+        "id": "act-1789492403478-nupxb",
+        "timestamp": "2026-09-15T17:13:23.478Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "Channel",
+        "oldValue": "FORSA",
+        "newValue": "INSTAGRAM",
+        "summary": "Channel updated"
+      }
+    ]
+  },
+  {
+    "id": "c2",
+    "createdAt": "2026-09-13T07:20:00Z",
+    "lastUpdateDate": "2026-09-15T16:46:23.525Z",
+    "name": "Omar Khalil",
+    "phoneNumber": "+20 115 442 8801",
+    "status": "WAITING",
+    "project": "ZED West",
+    "location": "6th of October",
+    "acquisitionChannel": "GOOGLE_ADS",
+    "operationToTake": "Send price sheet",
+    "firstContactPerson": "Moustafa",
+    "secondContactPerson": "Moustafa",
+    "notes": "Budget-conscious, comparing with compound options",
+    "activityLog": [
+      {
+        "id": "act-2",
+        "timestamp": "2026-09-13T07:20:00Z",
+        "actor": "System",
+        "action": "CREATED",
+        "summary": "Client created"
+      },
+      {
+        "id": "act-1789414697685-tx211",
+        "timestamp": "2026-09-14T19:38:17.685Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "LOST",
+        "summary": "Status changed: WAITING → LOST"
+      },
+      {
+        "id": "act-1789476981767-4jijc",
+        "timestamp": "2026-09-15T12:56:21.767Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "WON",
+        "summary": "Status changed: LOST → WON"
+      },
+      {
+        "id": "act-1789488079025-v9zoe",
+        "timestamp": "2026-09-15T16:01:19.025Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "LOST",
+        "summary": "Status changed: WON → LOST"
+      },
+      {
+        "id": "act-1789488131753-dctsb",
+        "timestamp": "2026-09-15T16:02:11.753Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "Moustafa",
+        "summary": "Status changed: LOST → Moustafa"
+      },
+      {
+        "id": "act-1789489176264-p45t8",
+        "timestamp": "2026-09-15T16:19:36.264Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "Moustafa",
+        "newValue": "WON",
+        "summary": "Status changed: Moustafa → WON"
+      },
+      {
+        "id": "act-1789489458455-wc183",
+        "timestamp": "2026-09-15T16:24:18.455Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "2nd Contact",
+        "oldValue": "Amira",
+        "newValue": "Moustafa",
+        "summary": "2nd Contact updated"
+      },
+      {
+        "id": "act-1789489487135-yxc7d",
+        "timestamp": "2026-09-15T16:24:47.135Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "1st Contact",
+        "oldValue": "Hany",
+        "newValue": "Moustafa",
+        "summary": "1st Contact updated"
+      },
+      {
+        "id": "act-1789490774184-7nkc2",
+        "timestamp": "2026-09-15T16:46:14.184Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "LOST",
+        "summary": "Status changed: WON → LOST"
+      },
+      {
+        "id": "act-1789490776879-jeq6h",
+        "timestamp": "2026-09-15T16:46:16.879Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "SSSS",
+        "summary": "Status changed: LOST → SSSS"
+      },
+      {
+        "id": "act-1789490783525-iv0dd",
+        "timestamp": "2026-09-15T16:46:23.525Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "SSSS",
+        "newValue": "WAITING",
+        "summary": "Status changed: SSSS → WAITING"
+      }
+    ]
+  },
+  {
+    "id": "c3",
+    "createdAt": "2026-09-13T06:00:00Z",
+    "lastUpdateDate": "2026-09-15T16:28:03.006Z",
+    "name": "Mariam Adel",
+    "phoneNumber": "+20 102 763 4490",
+    "status": "WON",
+    "project": "Marassi",
+    "location": "North Coast",
+    "acquisitionChannel": "WHATSAPP",
+    "operationToTake": "Handover to success",
+    "firstContactPerson": "Moustafa",
+    "secondContactPerson": "Moustafa",
+    "notes": "VIP client — expedited paperwork",
+    "activityLog": [
+      {
+        "id": "act-3",
+        "timestamp": "2026-09-13T06:00:00Z",
+        "actor": "System",
+        "action": "CREATED",
+        "summary": "Client created"
+      },
+      {
+        "id": "act-4",
+        "timestamp": "2026-09-13T07:00:00Z",
+        "actor": "System",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "WON",
+        "summary": "Status changed: WAITING → WON"
+      },
+      {
+        "id": "act-1789484406088-qg2zu",
+        "timestamp": "2026-09-15T15:00:06.088Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "WAITING",
+        "summary": "Status changed: WON → WAITING"
+      },
+      {
+        "id": "act-1789488133615-0qesy",
+        "timestamp": "2026-09-15T16:02:13.615Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "Moustafa",
+        "summary": "Status changed: WAITING → Moustafa"
+      },
+      {
+        "id": "act-1789489177609-o2525",
+        "timestamp": "2026-09-15T16:19:37.609Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "Moustafa",
+        "newValue": "LOST",
+        "summary": "Status changed: Moustafa → LOST"
+      },
+      {
+        "id": "act-1789489459328-ek977",
+        "timestamp": "2026-09-15T16:24:19.328Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "2nd Contact",
+        "oldValue": "Rana",
+        "newValue": "Moustafa",
+        "summary": "2nd Contact updated"
+      },
+      {
+        "id": "act-1789489488074-iqg92",
+        "timestamp": "2026-09-15T16:24:48.074Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "1st Contact",
+        "oldValue": "Amira",
+        "newValue": "Moustafa",
+        "summary": "1st Contact updated"
+      },
+      {
+        "id": "act-1789489683006-vus52",
+        "timestamp": "2026-09-15T16:28:03.006Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "WON",
+        "summary": "Status changed: LOST → WON"
+      }
+    ]
+  },
+  {
+    "id": "c4",
+    "createdAt": "2026-09-12T17:00:00Z",
+    "lastUpdateDate": "2026-09-15T16:28:03.782Z",
+    "name": "Karim Youssef",
+    "phoneNumber": "+20 111 904 2218",
+    "status": "WON",
+    "project": "Villette",
+    "location": "New Cairo",
+    "acquisitionChannel": "TIKTOK",
+    "operationToTake": "First contact",
+    "firstContactPerson": "Moustafa",
+    "secondContactPerson": "Moustafa",
+    "notes": "Found us via TikTok ad, needs financing info",
+    "activityLog": [
+      {
+        "id": "act-5",
+        "timestamp": "2026-09-12T17:00:00Z",
+        "actor": "System",
+        "action": "CREATED",
+        "summary": "Client created"
+      },
+      {
+        "id": "act-1789479440986-j8s85",
+        "timestamp": "2026-09-15T13:37:20.986Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "WON",
+        "summary": "Status changed: WAITING → WON"
+      },
+      {
+        "id": "act-1789484400978-yyvna",
+        "timestamp": "2026-09-15T15:00:00.978Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "DFGDGD",
+        "summary": "Status changed: WON → DFGDGD"
+      },
+      {
+        "id": "act-1789488135071-qb8m6",
+        "timestamp": "2026-09-15T16:02:15.071Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "DFGDGD",
+        "newValue": "Moustafa",
+        "summary": "Status changed: DFGDGD → Moustafa"
+      },
+      {
+        "id": "act-1789489178718-oi4cd",
+        "timestamp": "2026-09-15T16:19:38.718Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "Moustafa",
+        "newValue": "LOST",
+        "summary": "Status changed: Moustafa → LOST"
+      },
+      {
+        "id": "act-1789489460320-gbslk",
+        "timestamp": "2026-09-15T16:24:20.320Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "2nd Contact",
+        "oldValue": "Amira",
+        "newValue": "Moustafa",
+        "summary": "2nd Contact updated"
+      },
+      {
+        "id": "act-1789489489297-83yld",
+        "timestamp": "2026-09-15T16:24:49.297Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "1st Contact",
+        "oldValue": "Rana",
+        "newValue": "Moustafa",
+        "summary": "1st Contact updated"
+      },
+      {
+        "id": "act-1789489683782-2s68h",
+        "timestamp": "2026-09-15T16:28:03.782Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "WON",
+        "summary": "Status changed: LOST → WON"
+      }
+    ]
+  },
+  {
+    "id": "c5",
+    "createdAt": "2026-09-12T15:00:00Z",
+    "lastUpdateDate": "2026-09-15T16:47:27.935Z",
+    "name": "Salma Farid",
+    "phoneNumber": "+20 100 218 6673",
+    "status": "SSSS",
+    "project": "Sodic East",
+    "location": "New Cairo",
+    "acquisitionChannel": "CALLS",
+    "operationToTake": "Archive reason",
+    "firstContactPerson": "Moustafa",
+    "secondContactPerson": "Moustafa",
+    "notes": "Went with competitor — price too high",
+    "activityLog": [
+      {
+        "id": "act-6",
+        "timestamp": "2026-09-12T15:00:00Z",
+        "actor": "System",
+        "action": "CREATED",
+        "summary": "Client created"
+      },
+      {
+        "id": "act-7",
+        "timestamp": "2026-09-12T16:00:00Z",
+        "actor": "System",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "LOST",
+        "summary": "Status changed: WAITING → LOST"
+      },
+      {
+        "id": "act-1789488137432-zglyw",
+        "timestamp": "2026-09-15T16:02:17.432Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "LOST",
+        "newValue": "Moustafa",
+        "summary": "Status changed: LOST → Moustafa"
+      },
+      {
+        "id": "act-1789489180048-zndhx",
+        "timestamp": "2026-09-15T16:19:40.048Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "Moustafa",
+        "newValue": "WON",
+        "summary": "Status changed: Moustafa → WON"
+      },
+      {
+        "id": "act-1789489366960-5e4qc",
+        "timestamp": "2026-09-15T16:22:46.960Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "FFFFF",
+        "summary": "Status changed: WON → FFFFF"
+      },
+      {
+        "id": "act-1789489376057-msch9",
+        "timestamp": "2026-09-15T16:22:56.057Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "FFFFF",
+        "newValue": "WON",
+        "summary": "Status changed: FFFFF → WON"
+      },
+      {
+        "id": "act-1789489463904-dmdw3",
+        "timestamp": "2026-09-15T16:24:23.904Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "2nd Contact",
+        "oldValue": "Rana",
+        "newValue": "Moustafa",
+        "summary": "2nd Contact updated"
+      },
+      {
+        "id": "act-1789489492879-juh4j",
+        "timestamp": "2026-09-15T16:24:52.879Z",
+        "actor": "moustafa",
+        "action": "FIELD_EDIT",
+        "field": "1st Contact",
+        "oldValue": "Hany",
+        "newValue": "Moustafa",
+        "summary": "1st Contact updated"
+      },
+      {
+        "id": "act-1789490847935-ywztr",
+        "timestamp": "2026-09-15T16:47:27.935Z",
+        "actor": "moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "SSSS",
+        "summary": "Status changed: WON → SSSS"
+      }
+    ]
+  }
+]
