@@ -3,18 +3,19 @@
 import { useEffect, useState } from "react";
 import {
   Bell, ChevronDown, LayoutDashboard, UsersRound, Layers, Settings, LogOut,
-  Sun, Moon, Menu, X as XIcon,
+  Sun, Moon, Menu, X as XIcon, Archive, CheckCheck,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export type HeaderUser = { name: string; initials: string; role?: string };
-export type NavTab = "dashboard" | "clients" | "marketing" | "settings";
+export type NavTab = "dashboard" | "clients" | "archived" | "marketing" | "settings";
 
 type Notif = { id: string; message: string; read: boolean; createdAt: string };
 
 const NAV: { key: NavTab; label: string; icon: React.ReactNode }[] = [
   { key: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={15} /> },
   { key: "clients", label: "Clients", icon: <UsersRound size={15} /> },
+  { key: "archived", label: "Archived", icon: <Archive size={15} /> },
   { key: "marketing", label: "Marketing", icon: <Layers size={15} /> },
   { key: "settings", label: "Settings", icon: <Settings size={15} /> },
 ];
@@ -40,6 +41,12 @@ export default function AppHeader({
 
   useEffect(() => { refreshNotifications(); }, []);
 
+  useEffect(() => {
+    const onChange = () => refreshNotifications();
+    window.addEventListener("rwaq-notifications-changed", onChange);
+    return () => window.removeEventListener("rwaq-notifications-changed", onChange);
+  }, []);
+
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markAllRead = async () => {
@@ -48,11 +55,14 @@ export default function AppHeader({
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
+  const visibleNav = NAV.filter(item => item.key !== "marketing" || user.role === "Admin");
   const go = (tab: NavTab) => {
+    if (tab === "marketing" && user.role !== "Admin") return;
     setMobileMenuOpen(false);
     if (onNavigate) { onNavigate(tab); return; }
     if (tab === "dashboard") router.push("/");
     else if (tab === "clients") router.push("/?view=clients");
+    else if (tab === "archived") router.push("/archived");
     else if (tab === "marketing") router.push("/marketing");
     else router.push("/settings");
   };
@@ -69,7 +79,7 @@ export default function AppHeader({
           {badge}
         </div>
         <nav className="topbar-nav">
-          {NAV.map((item) => (
+          {visibleNav.map((item) => (
             <button key={item.key} onClick={() => go(item.key)} className={active === item.key ? "nav-active" : ""}>
               {item.icon}{item.label}
             </button>
@@ -85,13 +95,18 @@ export default function AppHeader({
             </button>
             <div className={`dropdown-menu notif-menu ${notifOpen ? "open" : ""}`}>
               <div className="notif-head"><strong>Notifications</strong>{unreadCount > 0 && <button onClick={markAllRead}>Mark all read</button>}</div>
-              {notifications.length === 0 && <div className="notif-empty">No notifications yet</div>}
-              {notifications.slice(0, 30).map((n) => (
-                <div key={n.id} className={`notif-item ${n.read ? "" : "unread"}`}>
+              {unreadCount === 0 && (
+                <div className="notif-allread"><CheckCheck size={13} /> You&apos;re all caught up</div>
+              )}
+              {notifications.filter((n) => !n.read).slice(0, 30).map((n) => (
+                <div key={n.id} className="notif-item unread">
                   <span className="notif-new-dot" />
                   <div><strong>{n.message}</strong><small>{new Date(n.createdAt).toLocaleString()}</small></div>
                 </div>
               ))}
+              <button className="notif-footer" onClick={() => { setNotifOpen(false); router.push("/notifications"); }}>
+                View all notifications
+              </button>
             </div>
           </div>
           <div className="user-dropdown">
@@ -101,8 +116,8 @@ export default function AppHeader({
               <ChevronDown size={14} className="chevron" />
             </button>
             <div id="app-user-menu" className="dropdown-menu">
+              {user.role && <div className="menu-role"><span className={`role-badge ${user.role.toLowerCase()}`}>{user.role}</span></div>}
               <button onClick={() => go("settings")}><Settings size={14} />Settings</button>
-              <button onClick={() => go("marketing")}><Layers size={14} />Marketing</button>
               <button className="dropdown-danger" onClick={logout}><LogOut size={14} />Sign out</button>
             </div>
           </div>
@@ -119,7 +134,7 @@ export default function AppHeader({
             <button className="mobile-nav-close" onClick={() => setMobileMenuOpen(false)}><XIcon size={18} /></button>
           </div>
           <div className="mobile-nav-links">
-            {NAV.map((item) => (
+            {visibleNav.map((item) => (
               <button key={item.key} className={active === item.key ? "active" : ""} onClick={() => go(item.key)}>
                 {item.icon}{item.label}
               </button>

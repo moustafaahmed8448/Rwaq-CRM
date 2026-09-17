@@ -5,6 +5,8 @@ export type ActivityAction =
   | "NOTE_EDIT"
   | "CREATED"
   | "DELETED"
+  | "ARCHIVED"
+  | "RESTORED"
   | "STATUS_CUSTOM_ADDED";
 
 export interface ActivityEntry {
@@ -34,6 +36,8 @@ export interface ClientData {
   lastUpdateDate: string;
   activityLog: ActivityEntry[];
   customStatuses?: string[];
+  archived?: boolean;
+  archivedAt?: string;
 }
 
 export function makeActivityEntry(
@@ -56,5 +60,7 @@ export function summarizeAction(action: ActivityAction, field?: string, oldValue
   if (action === "CREATED") return "Client created";
   if (action === "NOTE_ADD" || action === "NOTE_EDIT") return "Notes updated";
   if (action === "DELETED") return "Client deleted";
+  if (action === "ARCHIVED") return "Client archived";
+  if (action === "RESTORED") return "Client restored from archive";
   return action;
 }

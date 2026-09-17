@@ -29,3 +29,24 @@ export async function POST(request: NextRequest) {
   writeNotifications(items);
   return NextResponse.json({ ok: true });
 }
+
+export async function DELETE(request: NextRequest) {
+  if (!isAuthenticated(request)) return unauthorized();
+  const name = getSessionUser(request)?.name ?? "";
+  const body = await request.json().catch(() => ({}));
+  const items = readNotifications();
+  const mine = (n: (typeof items)[number]) => matches(n.recipient, name);
+
+  let remaining = items;
+  if (body.clearRead) {
+    // Delete every read notification belonging to this user ("clear history")
+    remaining = items.filter((n) => !(mine(n) && n.read));
+  } else {
+    const id = String(body.id ?? "");
+    if (!id) return NextResponse.json({ error: "Notification id required" }, { status: 400 });
+    remaining = items.filter((n) => !(mine(n) && n.id === id));
+  }
+
+  writeNotifications(remaining);
+  return NextResponse.json({ ok: true });
+}

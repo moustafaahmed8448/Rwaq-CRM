@@ -5,7 +5,7 @@ import { ResponsiveContainer } from "recharts";
 import {
   ArrowUpRight, ChevronDown, Download, Grid2X2,
   LayoutDashboard, Pencil, Plus, Search, Trash2, UsersRound, X as XIcon,
-  Check, AlertCircle, MessageSquare, Filter, Hash, UserCircle,
+  Check, AlertCircle, MessageSquare, Filter, Archive,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
@@ -19,7 +19,7 @@ type Client = {
 };
 type Metric = { channel: string; platform: string; spend: number; reach: number; totalClients: number; won: number; lost: number; waiting: number; cpa: number };
 type User = { name: string; initials: string; role: string };
-type Filters = { query: string; status: string; channel: string; location: string; salesperson: string; startDate: string; endDate: string };
+type Filters = { query: string; status: string[]; channel: string[]; location: string[]; salesperson: string[]; startDate: string; endDate: string };
 type EditDraft = Partial<Client> & { id: string };
 type ConfirmDelete = { ids: string[]; names: string[] };
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
@@ -41,14 +41,14 @@ const DATE_PRESETS: DatePreset[] = [
   { label: "This month", startDate: (() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); })() },
 ];
 
-const initialFilters: Filters = { query: "", status: "ALL", channel: "ALL", location: "ALL", salesperson: "ALL", startDate: "", endDate: "" };
+const initialFilters: Filters = { query: "", status: [], channel: [], location: [], salesperson: [], startDate: "", endDate: "" };
 
 function matchesFilters(client: Client, filters: Filters) {
   const date = (client.createdAt || "").slice(0, 10);
-  return (filters.status === "ALL" || String(client.status) === filters.status) &&
-    (filters.channel === "ALL" || client.acquisitionChannel === filters.channel) &&
-    (filters.location === "ALL" || client.location === filters.location) &&
-    (filters.salesperson === "ALL" || client.firstContactPerson === filters.salesperson || client.secondContactPerson === filters.salesperson) &&
+  return (filters.status.length === 0 || filters.status.includes(String(client.status))) &&
+    (filters.channel.length === 0 || filters.channel.includes(client.acquisitionChannel)) &&
+    (filters.location.length === 0 || filters.location.includes(client.location)) &&
+    (filters.salesperson.length === 0 || filters.salesperson.includes(client.firstContactPerson) || filters.salesperson.includes(client.secondContactPerson)) &&
     (!filters.startDate || date >= filters.startDate) && (!filters.endDate || date <= filters.endDate) &&
     `${client.name} ${client.phoneNumber} ${client.project} ${client.notes ?? ""}`.toLowerCase().includes(filters.query.toLowerCase());
 }
@@ -156,8 +156,17 @@ export default function Home() {
   const lost = clients.filter(c => c.status === "LOST").length;
   const waiting = clients.filter(c => c.status !== "WON" && c.status !== "LOST").length;
 
-  const updateFilter = (key: keyof Filters, value: string) => {
+  const updateFilter = (key: "query" | "startDate" | "endDate", value: string) => {
     setFilters(cur => ({ ...cur, [key]: value }));
+    if (key !== "query") setActiveDatePreset(null);
+  };
+
+  const setMultiFilter = (key: "status" | "channel" | "location" | "salesperson", values: string[]) => {
+    setFilters(cur => ({ ...cur, [key]: values }));
+  };
+
+  const clearAllFilters = () => {
+    setFilters(initialFilters);
     setActiveDatePreset(null);
   };
 
@@ -173,8 +182,9 @@ export default function Home() {
     setActiveDatePreset(null);
   };
 
-  const activeFilterCount = [filters.status, filters.channel, filters.location, filters.salesperson, filters.startDate, filters.endDate, filters.query]
-    .filter(v => v !== "ALL" && v !== "").length;
+  const activeFilterCount =
+    filters.status.length + filters.channel.length + filters.location.length + filters.salesperson.length +
+    (filters.startDate ? 1 : 0) + (filters.endDate ? 1 : 0) + (filters.query ? 1 : 0);
 
   const allStatuses = [...PREDEFINED_STATUSES, ...customStatuses.filter(s => !PREDEFINED_STATUSES.includes(s))];
   const allChannels = [...CHANNEL_VALUES, ...customChannels.filter(ch => !CHANNEL_VALUES.includes(ch as typeof CHANNEL_VALUES[number]))];
@@ -249,6 +259,7 @@ export default function Home() {
 
   const deleteSelected = async () => {
     if (!confirmDelete || confirmDelete.ids.length === 0) return;
+    if (user?.role !== "Admin") { addToast("error", "Only admins can permanently delete clients"); return; }
     for (const id of confirmDelete.ids) await fetch("/api/crm/clients", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
     setClients(prev => prev.filter(c => !confirmDelete.ids.includes(c.id)));
     setSelectedIds(new Set());
@@ -256,6 +267,22 @@ export default function Home() {
     addToast("success", `Deleted ${confirmDelete.ids.length} client(s)`);
   };
   const closeDelete = () => setConfirmDelete(null);
+
+  const archiveClient = async (id: string) => {
+    const r = await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, archived: true }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); addToast("error", (d as { error?: string }).error || "Could not archive client"); return; }
+    setClients(prev => prev.filter(c => c.id !== id));
+    addToast("info", "Client archived — find it on the Archived page");
+  };
+
+  const archiveSelected = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    for (const id of ids) await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, archived: true }) });
+    setClients(prev => prev.filter(c => !selectedIds.has(c.id)));
+    setSelectedIds(new Set());
+    addToast("info", `Archived ${ids.length} client(s)`);
+  };
 
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleSelectAll = () => setSelectedIds(prev => prev.size === filteredClients.length ? new Set() : new Set(filteredClients.map(c => c.id)));
@@ -336,7 +363,9 @@ export default function Home() {
         onNavigate={(tab) => {
           if (tab === "dashboard") setView("dashboard");
           else if (tab === "clients") setView("clients");
-          else router.push(tab === "marketing" ? "/marketing" : "/settings");
+          else if (tab === "archived") router.push("/archived");
+          else if (tab === "marketing") router.push("/marketing");
+          else router.push("/settings");
         }}
       />
 
@@ -357,6 +386,7 @@ export default function Home() {
           <ClientsView
             clients={filteredClients} allClients={clients} mode={mode} setMode={setMode}
             filters={filters} updateFilter={updateFilter}
+            setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters}
             salespeople={salespeople} updateStatus={updateStatus} updateClientField={updateClientField}
             onAssigned={refreshNotifications}
             selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
@@ -364,6 +394,9 @@ export default function Home() {
             onOpenDetail={openDetail}
             exportExcel={exportExcel} exportSelected={exportSelected}
             bulkCount={selectedIds.size}
+            isAdmin={user.role === "Admin"}
+            onArchive={archiveClient}
+            onArchiveSelected={archiveSelected}
             onBulkDelete={() => { if (selectedIds.size === 0) return; setConfirmDelete({ ids: [...selectedIds], names: filteredClients.filter(c => selectedIds.has(c.id)).map(c => c.name) }); }}
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             customLocationInput={customLocationInput} setCustomLocationInput={setCustomLocationInput}
@@ -460,7 +493,10 @@ export default function Home() {
               <div className="detail-actions">
                 <button className="btn-outline" onClick={() => { openEdit(detailClient); closeDetail(); }}><Pencil size={14} />Edit</button>
                 <button className="btn-outline" onClick={() => { closeDetail(); setTimeout(() => router.push(`/clients/${detailClient.id}`), 200); }}><ArrowUpRight size={14} />Full history</button>
-                <button className="btn-danger-outline" onClick={() => { closeDetail(); setTimeout(() => setConfirmDelete({ ids: [detailClient.id], names: [detailClient.name] }), 200); }}><Trash2 size={14} />Delete</button>
+                {user.role === "Admin" && (<>
+                  <button className="btn-danger-outline" onClick={() => { closeDetail(); setTimeout(() => setConfirmDelete({ ids: [detailClient.id], names: [detailClient.name] }), 200); }}><Trash2 size={14} />Delete</button>
+                  <button className="btn-outline" onClick={() => { closeDetail(); archiveClient(detailClient.id); }}><Archive size={14} />Archive</button>
+                </>)}
               </div>
             </div>
           </div>
@@ -476,9 +512,11 @@ export default function Home() {
 
 /* ── Sub-components ─────────────────────────────────────────── */
 
-function FilterBar({ filters, updateFilter, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations }: {
+function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations }: {
   filters: Filters;
-  updateFilter: (k: keyof Filters, v: string) => void;
+  updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void;
+  setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void;
+  clearAllFilters: () => void;
   salespeople: string[];
   datePresets?: DatePreset[];
   activeDatePreset?: string | null;
@@ -503,15 +541,72 @@ function FilterBar({ filters, updateFilter, salespeople, datePresets, activeDate
       )}
       <div className="filter-row">
         <div className="search-box"><Search size={15}/><input placeholder="Search name, phone, notes..." value={filters.query} onChange={e=>updateFilter("query",e.target.value)}/></div>
-        <select value={filters.status} onChange={e=>updateFilter("status",e.target.value)} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 8px",fontSize:12,color:"#6b7280",background:"#fff",cursor:"pointer"}}><option value="ALL">All statuses</option>{(allStatuses??[]).map(s=><option key={s} value={s}>{s}</option>)}</select>
-        <select value={filters.channel} onChange={e=>updateFilter("channel",e.target.value)} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 8px",fontSize:12,color:"#6b7280",background:"#fff",cursor:"pointer"}}><option value="ALL">All channels</option>{(allChannels??[]).map(ch=><option key={ch} value={ch}>{CH_LABELS[ch]??ch}</option>)}</select>
-        <select value={filters.location} onChange={e=>updateFilter("location",e.target.value)} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 8px",fontSize:12,color:"#6b7280",background:"#fff",cursor:"pointer"}}><option value="ALL">All locations</option>{(allLocations??[]).map(l=><option key={l} value={l}>{l}</option>)}</select>
-        <select value={filters.salesperson} onChange={e=>updateFilter("salesperson",e.target.value)} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 8px",fontSize:12,color:"#6b7280",cursor:"pointer",background:"#fff"}}>
-          <option value="ALL">All salespeople</option>{salespeople.map(p=><option key={p}>{p}</option>)}</select>
+        <MultiSelect label="All statuses" options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} />
+        <MultiSelect label="All channels" options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => CH_LABELS[v] ?? v} />
+        <MultiSelect label="All locations" options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} />
+        <MultiSelect label="All salespeople" options={salespeople} selected={filters.salesperson} onChange={v => setMultiFilter("salesperson", v)} />
       </div>
       <div className="date-bar"><Filter size={13}/><span>Date</span><input type="date" value={filters.startDate} onChange={e=>updateFilter("startDate",e.target.value)}/><span>–</span><input type="date" value={filters.endDate} onChange={e=>updateFilter("endDate",e.target.value)}/></div>
-      {(filterCount ?? 0) > 0 && <div className="filter-chips"><span className="filter-chip"><Hash size={10}/> {filterCount ?? 0} active filter{filterCount??0>1?'s':''} <button onClick={()=>{clearDatePreset&&clearDatePreset();}}>×</button></span></div>}
+      {(filterCount ?? 0) > 0 && (
+        <div className="filter-chips">
+          {filters.query && <span className="filter-chip">&ldquo;{filters.query.slice(0, 24)}&rdquo;<button title="Clear search" onClick={() => updateFilter("query", "")}>×</button></span>}
+          {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{STATUS_LABELS[s] ?? s}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
+          {filters.channel.map(c => <span key={`ch-${c}`} className="filter-chip">{CH_LABELS[c] ?? c}<button onClick={() => setMultiFilter("channel", filters.channel.filter(x => x !== c))}>×</button></span>)}
+          {filters.location.map(l => <span key={`lo-${l}`} className="filter-chip">{l}<button onClick={() => setMultiFilter("location", filters.location.filter(x => x !== l))}>×</button></span>)}
+          {filters.salesperson.map(p => <span key={`sp-${p}`} className="filter-chip">{p}<button onClick={() => setMultiFilter("salesperson", filters.salesperson.filter(x => x !== p))}>×</button></span>)}
+          {filters.startDate && <span className="filter-chip">From {filters.startDate}<button onClick={() => updateFilter("startDate", "")}>×</button></span>}
+          {filters.endDate && <span className="filter-chip">To {filters.endDate}<button onClick={() => updateFilter("endDate", "")}>×</button></span>}
+          <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>Clear all ×</button>
+        </div>
+      )}
     </>
+  );
+}
+
+function MultiSelect({ label, options, selected, onChange, render }: {
+  label: string; options: string[]; selected: string[];
+  onChange: (values: string[]) => void; render?: (v: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const lab = (v: string) => (render ? render(v) : v);
+  const toggleValue = (v: string) => {
+    onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
+  };
+
+  return (
+    <div className="ms-wrap" ref={wrapRef}>
+      <button type="button" className={`ms-trigger ${selected.length > 0 ? "ms-active" : ""}`} onClick={() => setOpen(o => !o)}>
+        <span className="ms-value">
+          {selected.length === 0 ? label
+            : selected.length === 1 ? lab(selected[0])
+            : `${lab(selected[0])} +${selected.length - 1}`}
+        </span>
+        <ChevronDown size={12} />
+      </button>
+      {open && (
+        <div className="ms-menu">
+          {options.length === 0 && <div className="ms-empty">No options yet</div>}
+          {options.map(o => (
+            <button type="button" key={o} className={`ms-opt ${selected.includes(o) ? "ms-opt-on" : ""}`} onClick={() => toggleValue(o)}>
+              <span className="ms-check">{selected.includes(o) && <Check size={11} />}</span>
+              {lab(o)}
+            </button>
+          ))}
+          {selected.length > 0 && <button type="button" className="ms-clear" onClick={() => { onChange([]); setOpen(false); }}>Clear selection</button>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -520,7 +615,20 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
 
   return (
-    <div className="page">
+    <div className="page dashboard-page">
+      <header className="dashboard-hero">
+        <div>
+          <span className="dashboard-eyebrow">RWAQ / WORKSPACE OVERVIEW</span>
+          <h1>Your pipeline. A clearer picture.</h1>
+          <p>Clients, channels and team performance — all in one place.</p>
+        </div>
+        <div className="dashboard-hero-summary">
+          <span>Client overview</span>
+          <strong>{MONEY.format(clients.length)}</strong>
+          <small>clients in this view</small>
+          <button type="button" onClick={onExport} disabled={exporting}><Download size={14} />{exporting ? "Exporting…" : "Export report"}</button>
+        </div>
+      </header>
       {/* KPI strip */}
       <section className="kpi-row kpi-row-6">
         <KpiCard label="Total spend" value={`$${MONEY.format(totalSpend)}`} sub="Weekly investment" accent="#4f46e5"/>
@@ -620,17 +728,20 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
 function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub: string; accent: string }) {
   return (<div className="kpi-card" style={{borderTopColor:accent}}><div className="kpi-label"><span>{label}</span><span className="kpi-dot" style={{background:accent}}/></div><div className="kpi-value">{value}</div><div className="kpi-sub">{sub}</div></div>);}
 
-function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, salespeople, updateStatus, updateClientField, onAssigned,
+function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, updateStatus, updateClientField, onAssigned, isAdmin, onArchive, onArchiveSelected,
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: keyof Filters, v: string) => void; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
   return (
     <div className="page">
       <div className="page-header">
         <div><div className="breadcrumb"><UsersRound size={14}/>CRM</div><h1>Clients</h1><p>Manage your pipeline. Click a client to view details.</p></div>
         <div className="header-actions">
-          {bulkCount>0&&<span className="selection-info">{bulkCount} selected<button className="btn-danger-sm" onClick={onBulkDelete}>Delete selected</button></span>}
+          {bulkCount>0&&<span className="selection-info">{bulkCount} selected
+            {isAdmin && <><button className="btn-danger-sm" onClick={onBulkDelete}>Delete selected</button>
+              <button className="btn-archive-sm" onClick={onArchiveSelected}>Archive selected</button></>}
+          </span>}
           <div className="segmented">
             <button className={mode==="table"?"seg-active":""} onClick={()=>setMode("table")}><LayoutDashboard size={14}/>Table</button>
             <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>Kanban</button>
@@ -639,9 +750,9 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>Export all</button>
         </div>
       </div>
-      <FilterBar filters={filters} updateFilter={updateFilter} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} />
+      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} />
       <div className="result-note">Showing {clients.length} of {allClients.length} clients</div>
-      {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation}/>}
+      {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation}/>}
     </div>
   );
 }
@@ -691,7 +802,7 @@ function Picker({ label, value, options, onChange, onAddNew }: {
   );
 }
 
-function ClientTable({ clients, updateStatus, updateClientField, onAssigned, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, tableRef, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; tableRef?: React.RefObject<HTMLDivElement> | null; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
+function ClientTable({ clients, updateStatus, updateClientField, onAssigned, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, tableRef, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; tableRef?: React.RefObject<HTMLDivElement> | null; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
   const allSelected = clients.length>0&&clients.every(c=>selectedIds.has(c.id));
   return (
     <div className="table-scroll-wrapper">
@@ -714,7 +825,8 @@ function ClientTable({ clients, updateStatus, updateClientField, onAssigned, sel
             <span className="muted">{c.lastUpdateDate?new Date(c.lastUpdateDate).toLocaleDateString():"—"}</span>
             <span className="actions-cell no-detail">
               <button className="icon-btn" title="Edit" onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={14}/></button>
-              <button className="icon-btn danger" title="Delete" onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={14}/></button>
+              {isAdmin && <><button className="icon-btn danger" title="Delete" onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={14}/></button>
+                <button className="icon-btn" title="Archive" onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={14}/></button></>}
             </span>
           </div>
         ))}
@@ -724,7 +836,7 @@ function ClientTable({ clients, updateStatus, updateClientField, onAssigned, sel
   );
 }
 
-function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
+function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
   const [draggedId, setDraggedId] = useState<string|null>(null);
   const [dropTarget, setDropTarget] = useState<string|null>(null);
   const columns: string[] = [...new Set([...(allStatuses ?? ["WAITING","WON","LOST"]), ...clients.map(c => c.status)])];
@@ -741,7 +853,8 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
             <article className={`client-card ${draggedId===c.id?"dragging":""} ${selectedIds.has(c.id)?"card-selected":""}`} key={c.id} draggable onDragStart={()=>setDraggedId(c.id)} onDragEnd={()=>{setDraggedId(null);setDropTarget(null);}} onDoubleClick={()=>onOpenDetail(c)}>  
               <div className="card-top"><b className="card-name">{c.name}</b><span className="card-actions no-detail">
                 <button className="icon-btn-sm" title="Edit" onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={12}/></button>
-                <button className="icon-btn-sm danger" title="Delete" onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={12}/></button>
+                {isAdmin && <><button className="icon-btn-sm danger" title="Delete" onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={12}/></button>
+                  <button className="icon-btn-sm" title="Archive" onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={12}/></button></>}
               </span></div>
               <div className="card-ch">
                 <i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>

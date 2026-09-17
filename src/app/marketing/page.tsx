@@ -7,11 +7,12 @@ import {
 } from "recharts";
 import {
   Plus, Download, Trash2, Edit3, X, Save, TrendingUp, TrendingDown, DollarSign,
-  Eye as EyeIcon, MousePointer, ArrowLeft, Bell, Settings, LogOut, Sun, Moon,
-  ChevronDown, Layers, LayoutDashboard, UsersRound, Search,
+  Eye as EyeIcon, MousePointer, Layers, ArrowUpRight, ArrowDownRight, Calendar,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import AppHeader from "@/components/AppHeader";
 import type { MarketingMetric } from "@/lib/marketing";
+import "./marketing.css";
 
 type User = { name: string; initials: string; role: string; email?: string };
 
@@ -53,11 +54,11 @@ export default function MarketingPage() {
       if (!r.ok) { router.replace("/login"); return; }
       const d = await r.json();
       if (!d.authenticated) { router.replace("/login"); return; }
+      if (d.user?.role !== "Admin") { router.replace("/"); return; }
       setUser(d.user);
+      await loadMetrics();
+      fetch("/api/channels").then(r => r.json()).then(d => setCustomChannels(d.channels ?? DEFAULT_CHANNELS)).catch(() => {});
     }).catch(() => {});
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadMetrics();
-    fetch("/api/channels").then(r => r.json()).then(d => setCustomChannels(d.channels ?? DEFAULT_CHANNELS)).catch(() => {});
     // eslint-disable-next-line react-hooks/set-state-in-effect
     const stored = localStorage.getItem("rwaq-dark");
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -101,7 +102,7 @@ export default function MarketingPage() {
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setFormErrors({});
 
-    const body = { channel, spend: Number(form.spend), reach: Number(form.reach ?? 0), impressions: Number(form.impressions ?? 0), clicks: Number(form.clicks ?? 0), notes: form.notes };
+    const body = { channel, startDate: form.startDate, endDate: form.endDate, spend: Number(form.spend), reach: Number(form.reach ?? 0), impressions: Number(form.impressions ?? 0), clicks: Number(form.clicks ?? 0), notes: form.notes };
 
     const res = editingId
       ? await fetch("/api/marketing/metrics", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingId, ...body }) })
@@ -151,57 +152,48 @@ export default function MarketingPage() {
     }));
   }, [metrics]);
 
-  const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); };
+  const rankedChannels = useMemo(
+    () => channelBreakdown.filter(c => Number(c.cpm) > 0).sort((a, b) => Number(a.cpm) - Number(b.cpm)),
+    [channelBreakdown],
+  );
+  const bestChannel = rankedChannels[0];
+  const worstChannel = rankedChannels[rankedChannels.length - 1];
+  const bestMonth = useMemo(() => [...monthlyData].sort((a, b) => b.spend - a.spend)[0], [monthlyData]);
 
   if (!user) return <div className="shell-loading"><div className="spinner"/><p>Loading...</p></div>;
 
   return (
-    <div className="shell">
-      {/* ── Topbar ── */}
-      <header className="topbar">
-        <div className="topbar-left">
-          <button className="mobile-menu-btn" onClick={() => router.push("/")} aria-label="Back"><ArrowLeft size={18} /></button>
-          <span className="brand-letter">R</span>
-          <span className="brand-name">rwaq</span>
-          <span className="topbar-tab active">Marketing</span>
-        </div>
-        <div className="topbar-right">
-          <button className="theme-toggle" onClick={() => setDarkMode(d => !d)}>{darkMode ? <Sun size={16} /> : <Moon size={16} />}</button>
-          <button className="icon-btn" onClick={() => router.push("/settings")}><Bell size={16} /></button>
-          <div className="user-dropdown">
-            <button className="user-pill" onClick={() => document.getElementById("mkt-user-menu")?.classList.toggle("open")}>
-              <span className="user-avatar">{user.initials}</span>
-              <span>{user.name}</span>
-              <ChevronDown size={14} className="chevron" />
-            </button>
-            <div id="mkt-user-menu" className="dropdown-menu">
-              <button onClick={() => router.push("/settings")}><Settings size={14} />Settings</button>
-              <button onClick={() => router.push("/")}><LayoutDashboard size={14} />Dashboard</button>
-              <button className="dropdown-danger" onClick={logout}><LogOut size={14} />Sign out</button>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="shell marketing-shell">
+      <AppHeader user={user} active="marketing" darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />
 
       <div className="content">
-        {/* ── Page header ── */}
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb"><Layers size={14} />Marketing</div>
-            <h1>Spend &amp; performance</h1>
-            <p>Track ad spend, reach, and results by channel.</p>
+        {/* ── Page hero ── */}
+        <div className="mkt-hero">
+          <div className="mkt-hero-top">
+            <div>
+              <div className="breadcrumb mkt-crumb"><Layers size={14} />MARKETING WORKSPACE</div>
+              <h1>Make every campaign count.</h1>
+              <p>Your investment, audience, and channel performance in one place.</p>
+              <span className="mkt-period"><Calendar size={13} /> All-time overview</span>
+            </div>
+            <div className="header-actions">
+              <button className="btn-outline mkt-hero-btn" onClick={async () => {
+                const csv = [
+                  ["Channel","Period","Spend","Reach","Impressions","Clicks","CPM"],
+                  ...metrics.map(m => [CH_LABELS[m.channel] ?? m.channel, `${m.startDate} – ${m.endDate}`, m.spend, m.reach, m.impressions, m.clicks, m.reach > 0 ? (m.spend / m.reach * 1000).toFixed(2) : "0"])
+                ].map(r => r.map(v => `"${String(v)}"`).join(",")).join("\r\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
+                link.download = `marketing-${new Date().toISOString().slice(0,10)}.csv`; link.click();
+              }}><Download size={15} />Export</button>
+              <button className="btn-primary mkt-hero-primary" onClick={openAdd}><Plus size={15} />Add metric</button>
+            </div>
           </div>
-          <div className="header-actions">
-            <button className="btn-outline" onClick={async () => {
-              const csv = [
-                ["Channel","Period","Spend","Reach","Impressions","Clicks","CPM"],
-                ...metrics.map(m => [CH_LABELS[m.channel] ?? m.channel, `${m.startDate} – ${m.endDate}`, m.spend, m.reach, m.impressions, m.clicks, m.reach > 0 ? (m.spend / m.reach * 1000).toFixed(2) : "0"])
-              ].map(r => r.map(v => `"${String(v)}"`).join(",")).join("\r\n");
-              const link = document.createElement("a");
-              link.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
-              link.download = `marketing-${new Date().toISOString().slice(0,10)}.csv`; link.click();
-            }}><Download size={15} />Export</button>
-            <button className="btn-primary" onClick={openAdd}><Plus size={15} />Add metric</button>
+          <div className="mkt-hero-stats">
+            <div className="mkt-stat"><span>${totalSpend.toLocaleString()}</span><small>Tracked spend</small></div>
+            <div className="mkt-stat"><span>{channelBreakdown.length}</span><small>Active channels</small></div>
+            <div className="mkt-stat"><span>{totalClicks.toLocaleString()}</span><small>Total clicks</small></div>
+            <div className="mkt-stat"><span>{metrics.length}</span><small>Records logged</small></div>
           </div>
         </div>
 
@@ -216,12 +208,47 @@ export default function MarketingPage() {
               <KpiCard label="Avg CPC" value={`$${avgCPC}`} sub="Cost per click" accent="#16a34a" icon={<MousePointer size={14}/>} />
             </section>
 
-            {/* ── Charts row ── */}
+            {/* ── Insight highlights ── */}
+            <section className="mkt-highlights">
+              <div className="mkt-highlight mkt-hl-good">
+                <span className="mkt-hl-icon"><ArrowDownRight size={16} /></span>
+                <div>
+                  <small>Most efficient channel</small>
+                  <strong>{bestChannel ? bestChannel.name : "—"}</strong>
+                  <span>{bestChannel ? `$${bestChannel.cpm} CPM · $${bestChannel.spend.toLocaleString()} spend` : "No data yet"}</span>
+                </div>
+              </div>
+              <div className="mkt-highlight mkt-hl-bad">
+                <span className="mkt-hl-icon"><ArrowUpRight size={16} /></span>
+                <div>
+                  <small>Highest cost channel</small>
+                  <strong>{worstChannel && worstChannel !== bestChannel ? worstChannel.name : "—"}</strong>
+                  <span>{worstChannel && worstChannel !== bestChannel ? `$${worstChannel.cpm} CPM · $${worstChannel.spend.toLocaleString()} spend` : "Not enough data"}</span>
+                </div>
+              </div>
+              <div className="mkt-highlight">
+                <span className="mkt-hl-icon"><Calendar size={16} /></span>
+                <div>
+                  <small>Peak period</small>
+                  <strong>{bestMonth?.label ?? "—"}</strong>
+                  <span>{bestMonth ? `$${bestMonth.spend.toLocaleString()} spend` : "No data yet"}</span>
+                </div>
+              </div>
+              <div className="mkt-highlight">
+                <span className="mkt-hl-icon"><TrendingUp size={16} /></span>
+                <div>
+                  <small>Avg cost per 1K reach</small>
+                  <strong>${avgCPM}</strong>
+                  <span>{`${totalReach.toLocaleString()} reach`}</span>
+                </div>
+              </div>
+            </section>
+
             <div className="chart-row-2">
               <div className="panel">
-                <h3>Spend over time</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={monthlyData.slice(-6)}>
+                <div className="mkt-chart-heading"><div><span className="mkt-eyebrow">INVESTMENT TREND</span><h3>Spend over time</h3></div><span className="mkt-chart-note">Latest 6 months with records</span></div>
+                <ResponsiveContainer width="100%" height={260}>
+                  <AreaChart data={monthlyData.slice(0, 6).reverse()}>
                     <CartesianGrid stroke="#e5e7eb" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} />
                     <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} />
@@ -232,8 +259,8 @@ export default function MarketingPage() {
                 </ResponsiveContainer>
               </div>
               <div className="panel">
-                <h3>Spend by channel</h3>
-                <ResponsiveContainer width="100%" height={220}>
+                <div className="mkt-chart-heading"><div><span className="mkt-eyebrow">BUDGET DISTRIBUTION</span><h3>Spend by channel</h3></div><span className="mkt-chart-note">{channelBreakdown.length} channels</span></div>
+                <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
                     <Pie data={channelBreakdown.map(c => ({ name: c.name, value: c.spend }))} cx="50%" cy="50%" outerRadius={85} innerRadius={55} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} dataKey="value">
                       {channelBreakdown.map((c, i) => <Cell key={c.channel} fill={CH_COLORS[c.channel] || "#9ca3af"} />)}
@@ -263,7 +290,13 @@ export default function MarketingPage() {
 
             {/* ── Recent entries ── */}
             <section className="panel">
-              <h3>Recent entries</h3>
+              <div className="panel-heading">
+                <h3>Recent entries</h3>
+                <span className="muted" style={{ fontSize: 11 }}>{metrics.length} total</span>
+              </div>
+              <div className="recent-row recent-head">
+                <span /><span>Channel</span><span>Period</span><span>Spend</span><span>Reach</span><span>Notes</span><span />
+              </div>
               {metrics.length === 0 && <div className="empty-state">No metrics recorded yet.</div>}
               {metrics.slice(-10).reverse().map(m => (
                 <div className="recent-row" key={m.id}>

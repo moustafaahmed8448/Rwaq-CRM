@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ArrowLeft, UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plus, Users, Check } from "lucide-react";
+import { UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plus, Users, Check, Settings, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
+import AppHeader from "@/components/AppHeader";
 
 type User = { name: string; initials: string; role: string; email?: string; avatar?: string };
 type ManagedUser = { username: string; name: string; email?: string; role: string };
@@ -20,8 +21,12 @@ export default function SettingsPage() {
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [newUser, setNewUser] = useState({ name: "", username: "", email: "", password: "", role: "Member" as string });
+  const [newUser, setNewUser] = useState({ name: "", username: "", email: "", password: "", role: "Sales" as string });
   const [userErr, setUserErr] = useState("");
+  const [editingUsername, setEditingUsername] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", username: "", email: "", role: "Sales" });
+  const [savingUser, setSavingUser] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
 
   const loadUsers = async () => {
     const r = await fetch("/api/users");
@@ -42,6 +47,16 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadUsers();
   }, [router]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (localStorage.getItem("rwaq-dark") === "1") setDarkMode(true);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
+    localStorage.setItem("rwaq-dark", darkMode ? "1" : "0");
+  }, [darkMode]);
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -105,7 +120,7 @@ export default function SettingsPage() {
       });
       const d = await res.json() as { error?: string };
       if (!res.ok) throw new Error(d.error || "Failed");
-      setNewUser({ name: "", username: "", email: "", password: "", role: "Member" });
+      setNewUser({ name: "", username: "", email: "", password: "", role: "Sales" });
       setShowAddUser(false);
       await loadUsers();
     } catch (e: unknown) { setUserErr((e as Error).message); }
@@ -117,27 +132,56 @@ export default function SettingsPage() {
     await loadUsers();
   };
 
+  const startEditUser = (u: ManagedUser) => {
+    setEditingUsername(u.username);
+    setEditForm({ name: u.name, username: u.username, email: u.email ?? "", role: u.role });
+    setUserErr("");
+  };
+
+  const saveUserEdit = async () => {
+    if (!editingUsername) return;
+    setSavingUser(true);
+    try {
+      const res = await fetch("/api/users", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: editingUsername,
+          name: editForm.name,
+          newUsername: editForm.username,
+          email: editForm.email,
+          role: editForm.role,
+        }),
+      });
+      const d = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(d.error || "Failed to update user");
+      setEditingUsername(null);
+      setSaveMsg("User updated");
+      await loadUsers();
+    } catch (e: unknown) { setUserErr((e as Error).message); }
+    finally { setSavingUser(false); }
+  };
+
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); };
 
   if (!user) return <div className="shell-loading"><div className="spinner"/><p>Loading...</p></div>;
 
   return (
-    <main className="settings-page">
-      {/* ── Header ── */}
-      <div className="settings-hero">
-        <div className="settings-hero-inner">
-          <button className="btn-ghost nav-back" onClick={() => router.back()}><ArrowLeft size={16}/>Back</button>
+    <main className="shell">
+      <AppHeader user={user} active="settings" darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />
+
+      <div className="content">
+        <div className="page-header">
           <div>
+            <div className="breadcrumb"><Settings size={14} />Settings</div>
             <h1>Settings</h1>
             <p>Manage your account and preferences.</p>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="header-actions">
             <span className={`role-badge ${user.role.toLowerCase()}`}>{user.role}</span>
           </div>
         </div>
-      </div>
 
-      <div className="settings-container">
+        <div className="settings-container">
         {/* ── Profile ── */}
         <section className="settings-section">
           <div className="section-header">
@@ -193,7 +237,7 @@ export default function SettingsPage() {
         </section>
 
         {/* ── Team Members (admin only) ── */}
-        {true && (
+        {user.role === "Admin" && (
           <section className="settings-section">
             <div className="section-header">
               <h2><Users size={14} style={{display:"inline",verticalAlign:"middle",marginRight:6}}/>Team Members</h2>
@@ -211,8 +255,9 @@ export default function SettingsPage() {
                   <Field label="Password"><input type="password" value={newUser.password} onChange={e=>setNewUser(u=>({...u,password:e.target.value}))} placeholder="Min 6 characters"/></Field>
                   <Field label="Role">
                     <select value={newUser.role} onChange={e=>setNewUser(u=>({...u,role:e.target.value}))} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 10px",fontSize:12,outline:"none"}}>
-                      <option value="Member">Member</option>
                       <option value="Admin">Admin</option>
+                      <option value="Sales">Sales</option>
+                      <option value="CRM">CRM</option>
                     </select>
                   </Field>
                 </div>
@@ -224,15 +269,38 @@ export default function SettingsPage() {
             <div className="users-list">
               {managedUsers.length === 0 && <p className="muted" style={{fontSize:12,padding:"8px 0"}}>No team members yet.</p>}
               {managedUsers.map(u => (
-                <div className="user-row" key={u.username}>
-                  <div className="user-row-avatar">{u.name.slice(0,2).toUpperCase()}</div>
-                  <div className="user-row-info">
-                    <strong>{u.name}</strong>
-                    <small>@{u.username} · {u.email || "No email"}</small>
+                editingUsername === u.username ? (
+                  <div className="edit-user-row" key={u.username}>
+                    <div className="form-grid-2">
+                      <Field label="Full name"><input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))}/></Field>
+                      <Field label="Username"><input value={editForm.username} onChange={e=>setEditForm(f=>({...f,username:e.target.value.toLowerCase()}))}/></Field>
+                      <Field label="Email"><input type="email" value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} placeholder="email@example.com"/></Field>
+                      <Field label="Role">
+                        <select value={editForm.role} onChange={e=>setEditForm(f=>({...f,role:e.target.value}))} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 10px",fontSize:12,outline:"none"}}>
+                          <option value="Admin">Admin</option>
+                          <option value="Sales">Sales</option>
+                          <option value="CRM">CRM</option>
+                        </select>
+                      </Field>
+                    </div>
+                    {userErr && <div className="settings-error" style={{marginTop:8}}>{userErr}</div>}
+                    <div style={{display:"flex",gap:8,marginTop:10}}>
+                      <button className="btn-primary" onClick={saveUserEdit} disabled={savingUser}><Save size={13}/>{savingUser ? "Saving…" : "Save changes"}</button>
+                      <button className="btn-ghost" onClick={()=>{setEditingUsername(null);setUserErr("");}}>Cancel</button>
+                    </div>
                   </div>
-                  <span className={`role-badge ${u.role.toLowerCase()}`}>{u.role}</span>
-                  <button className="icon-btn-sm danger" onClick={()=>deleteUser(u.username)} title="Delete user"><Trash2 size={13}/></button>
-                </div>
+                ) : (
+                  <div className="user-row" key={u.username}>
+                    <div className="user-row-avatar">{u.name.slice(0,2).toUpperCase()}</div>
+                    <div className="user-row-info">
+                      <strong>{u.name}</strong>
+                      <small>@{u.username} · {u.email || "No email"}</small>
+                    </div>
+                    <span className={`role-badge ${u.role.toLowerCase()}`}>{u.role}</span>
+                    <button className="icon-btn-sm" onClick={()=>startEditUser(u)} title="Edit user"><Pencil size={13}/></button>
+                    <button className="icon-btn-sm danger" onClick={()=>deleteUser(u.username)} title="Delete user"><Trash2 size={13}/></button>
+                  </div>
+                )
               ))}
             </div>
           </section>
@@ -253,6 +321,7 @@ export default function SettingsPage() {
 
         {error&&<div className="settings-error">{error}</div>}
         {saveMsg&&<div className="settings-success">{saveMsg}</div>}
+      </div>
       </div>
     </main>
   );

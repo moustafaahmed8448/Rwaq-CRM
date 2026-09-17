@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated, unauthorized } from "@/lib/auth";
+import { isAuthenticated, unauthorized, getSessionUser } from "@/lib/auth";
 import { readMetrics, writeMetrics, type MarketingMetric } from "@/lib/marketing";
 import { channelLabels } from "@/lib/reporting";
 
 export async function GET(request: NextRequest) {
   if (!isAuthenticated(request)) return unauthorized();
+  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
   const { searchParams } = new URL(request.url);
   const period = searchParams.get("period"); // "week" or "month"
   const year = parseInt(searchParams.get("year") ?? "");
@@ -34,6 +35,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   if (!isAuthenticated(request)) return unauthorized();
+  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
   const body = await request.json().catch(() => ({}));
   const channel = String(body.channel ?? "").toUpperCase();
   const spend = Number(body.spend ?? 0);
@@ -72,6 +74,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   if (!isAuthenticated(request)) return unauthorized();
+  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
   const body = await request.json().catch(() => ({}));
   const id = String(body.id ?? "");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
@@ -98,6 +101,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   if (!isAuthenticated(request)) return unauthorized();
+  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
   const body = await request.json().catch(() => ({}));
   const id = String(body.id ?? "");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });

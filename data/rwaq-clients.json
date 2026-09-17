@@ -2,7 +2,7 @@
   {
     "id": "c1",
     "createdAt": "2026-09-13T08:00:00Z",
-    "lastUpdateDate": "2026-09-15T17:13:23.478Z",
+    "lastUpdateDate": "2026-09-17T22:37:39.741Z",
     "name": "Nour El-Din",
     "phoneNumber": "+20 101 824 0912",
     "status": "NEW",
@@ -190,13 +190,22 @@
         "oldValue": "FORSA",
         "newValue": "INSTAGRAM",
         "summary": "Channel updated"
+      },
+      {
+        "id": "act-1789684659741-iszcm",
+        "timestamp": "2026-09-17T22:37:39.741Z",
+        "actor": "Moustafa",
+        "action": "ARCHIVED",
+        "summary": "Client “Nour El-Din” archived"
       }
-    ]
+    ],
+    "archived": true,
+    "archivedAt": "2026-09-17T22:37:39.741Z"
   },
   {
     "id": "c2",
     "createdAt": "2026-09-13T07:20:00Z",
-    "lastUpdateDate": "2026-09-15T16:46:23.525Z",
+    "lastUpdateDate": "2026-09-17T22:37:46.915Z",
     "name": "Omar Khalil",
     "phoneNumber": "+20 115 442 8801",
     "status": "WAITING",
@@ -314,13 +323,22 @@
         "oldValue": "SSSS",
         "newValue": "WAITING",
         "summary": "Status changed: SSSS → WAITING"
+      },
+      {
+        "id": "act-1789684666915-6idxf",
+        "timestamp": "2026-09-17T22:37:46.915Z",
+        "actor": "Moustafa",
+        "action": "ARCHIVED",
+        "summary": "Client “Omar Khalil” archived"
       }
-    ]
+    ],
+    "archived": true,
+    "archivedAt": "2026-09-17T22:37:46.915Z"
   },
   {
     "id": "c3",
     "createdAt": "2026-09-13T06:00:00Z",
-    "lastUpdateDate": "2026-09-15T16:28:03.006Z",
+    "lastUpdateDate": "2026-09-17T22:37:47.722Z",
     "name": "Mariam Adel",
     "phoneNumber": "+20 102 763 4490",
     "status": "WON",
@@ -408,19 +426,28 @@
         "oldValue": "LOST",
         "newValue": "WON",
         "summary": "Status changed: LOST → WON"
+      },
+      {
+        "id": "act-1789684667722-0sew9",
+        "timestamp": "2026-09-17T22:37:47.722Z",
+        "actor": "Moustafa",
+        "action": "ARCHIVED",
+        "summary": "Client “Mariam Adel” archived"
       }
-    ]
+    ],
+    "archived": true,
+    "archivedAt": "2026-09-17T22:37:47.722Z"
   },
   {
     "id": "c4",
     "createdAt": "2026-09-12T17:00:00Z",
-    "lastUpdateDate": "2026-09-15T16:28:03.782Z",
+    "lastUpdateDate": "2026-09-17T22:40:15.489Z",
     "name": "Karim Youssef",
     "phoneNumber": "+20 111 904 2218",
-    "status": "WON",
+    "status": "NEW",
     "project": "Villette",
     "location": "New Cairo",
-    "acquisitionChannel": "TIKTOK",
+    "acquisitionChannel": "FACEBOOK",
     "operationToTake": "First contact",
     "firstContactPerson": "Moustafa",
     "secondContactPerson": "Moustafa",
@@ -502,19 +529,39 @@
         "oldValue": "LOST",
         "newValue": "WON",
         "summary": "Status changed: LOST → WON"
+      },
+      {
+        "id": "act-1789684815489-cvh8e",
+        "timestamp": "2026-09-17T22:40:15.489Z",
+        "actor": "Moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WON",
+        "newValue": "NEW",
+        "summary": "Status changed: WON → NEW"
+      },
+      {
+        "id": "act-1789684815489-77qkb",
+        "timestamp": "2026-09-17T22:40:15.489Z",
+        "actor": "Moustafa",
+        "action": "FIELD_EDIT",
+        "field": "Channel",
+        "oldValue": "TIKTOK",
+        "newValue": "FACEBOOK",
+        "summary": "Channel updated"
       }
     ]
   },
   {
     "id": "c5",
     "createdAt": "2026-09-12T15:00:00Z",
-    "lastUpdateDate": "2026-09-15T16:47:27.935Z",
+    "lastUpdateDate": "2026-09-17T22:40:05.461Z",
     "name": "Salma Farid",
     "phoneNumber": "+20 100 218 6673",
-    "status": "SSSS",
+    "status": "NEW",
     "project": "Sodic East",
     "location": "New Cairo",
-    "acquisitionChannel": "CALLS",
+    "acquisitionChannel": "FORSA",
     "operationToTake": "Archive reason",
     "firstContactPerson": "Moustafa",
     "secondContactPerson": "Moustafa",
@@ -606,6 +653,36 @@
         "oldValue": "WON",
         "newValue": "SSSS",
         "summary": "Status changed: WON → SSSS"
+      },
+      {
+        "id": "act-1789684774798-ipzpb",
+        "timestamp": "2026-09-17T22:39:34.798Z",
+        "actor": "Moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "SSSS",
+        "newValue": "WAITING",
+        "summary": "Status changed: SSSS → WAITING"
+      },
+      {
+        "id": "act-1789684793490-sfbc2",
+        "timestamp": "2026-09-17T22:39:53.490Z",
+        "actor": "Moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "NEW",
+        "summary": "Status changed: WAITING → NEW"
+      },
+      {
+        "id": "act-1789684805461-87q27",
+        "timestamp": "2026-09-17T22:40:05.461Z",
+        "actor": "Moustafa",
+        "action": "FIELD_EDIT",
+        "field": "Channel",
+        "oldValue": "CALLS",
+        "newValue": "FORSA",
+        "summary": "Channel updated"
       }
     ]
   }

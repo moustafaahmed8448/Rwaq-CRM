@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { normalizeRole } from "@/lib/auth";
 
 const USERS_FILE = path.join(process.cwd(), "data", "rwaq-users.json");
 
@@ -9,7 +10,7 @@ function getCustomUser(sessionValue: string) {
   const username = sessionValue.replace("rwaq-session-", "");
   try {
     const raw = fs.readFileSync(USERS_FILE, "utf-8");
-    const users: Array<{ username: string; name: string; email?: string }> = JSON.parse(raw);
+    const users: Array<{ username: string; name: string; email?: string; role?: string }> = JSON.parse(raw);
     return users.find((u) => u.username === username) ?? null;
   } catch {
     return null;
@@ -29,7 +30,7 @@ export function GET(request: NextRequest) {
   // Custom user
   const custom = getCustomUser(session);
   if (custom) {
-    return NextResponse.json({ authenticated: true, user: { name: custom.name, initials: custom.name.slice(0, 2).toUpperCase(), role: (custom as any).role || "Member", email: (custom as any).email ?? "" } });
+    return NextResponse.json({ authenticated: true, user: { name: custom.name, initials: custom.name.slice(0, 2).toUpperCase(), role: normalizeRole(custom.role, custom.username), email: custom.email ?? "" } });
   }
 
   return NextResponse.json({ authenticated: false }, { status: 401 });

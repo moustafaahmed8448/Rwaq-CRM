@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Clock, Edit3, Plus, Tag, Trash2, UserRound, AlertCircle, Check, MessageSquare, TrendingUp } from "lucide-react";
 import { useRouter } from "next/navigation";
+import AppHeader from "@/components/AppHeader";
 import type { ActivityEntry, ClientData } from "@/lib/types";
 
 const PREDEFINED_STATUSES = ["WAITING", "WON", "LOST"];
@@ -42,6 +43,8 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
   const [locations, setLocations] = useState<string[]>([]);
   const [channels, setChannels] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [user, setUser] = useState<{ name: string; initials: string; role?: string } | null>(null);
+  const [darkMode, setDarkMode] = useState(false);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -51,15 +54,27 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
       fetch("/api/crm/clients").then((r) => r.json()).then((d) => d.statuses ?? []),
       fetch("/api/locations").then((r) => r.json()).then((d) => d.locations ?? []).catch(() => []),
       fetch("/api/channels").then((r) => r.json()).then((d) => d.channels ?? []).catch(() => []),
-    ]).then(([data, statuses, locs, chans]) => {
+      fetch("/api/auth/me").then((r) => r.json()).then((d) => d.user ?? null).catch(() => null),
+    ]).then(([data, statuses, locs, chans, me]) => {
       setClient(data.client);
       setCustomStatuses(statuses);
       setLocations(locs);
       setChannels(chans);
+      setUser(me);
       setDraft(data.client);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [clientId]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (localStorage.getItem("rwaq-dark") === "1") setDarkMode(true);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
+    localStorage.setItem("rwaq-dark", darkMode ? "1" : "0");
+  }, [darkMode]);
 
   const saveEdit = async () => {
     if (!draft.id) return;
@@ -117,6 +132,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
 
   return (
     <div className="detail-page">
+      {user && <AppHeader user={user} active="clients" darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />}
       {/* Top bar */}
       <div className="detail-topbar">
         <button className="btn-ghost" onClick={() => router.back()}><ArrowLeft size={16} /> Back</button>
@@ -126,7 +142,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
         </div>
         <div className="detail-actions">
           <button className="btn-outline" onClick={() => setEditMode(!editMode)}>{editMode ? <Check size={15} /> : <Edit3 size={15} />}{editMode ? "Cancel" : "Edit"}</button>
-          <button className="btn-danger" onClick={deleteClient}><Trash2 size={15} />Delete</button>
+          {user?.role === "Admin" && <button className="btn-danger" onClick={deleteClient}><Trash2 size={15} />Delete</button>}
         </div>
       </div>
 

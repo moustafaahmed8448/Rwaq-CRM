@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { hasDatabase, prisma } from "@/lib/prisma";
+import { normalizeRole } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
 
   // Check custom users stored in localStorage (server-rendered — read from DB or environment)
   // Since localStorage is client-side only, we store a server-side sessions file as fallback
-  let customUser: { username: string; name: string; hash: string } | null = null;
+  let customUser: { username: string; name: string; hash: string; role?: string } | null = null;
 
   if (hasDatabase()) {
     try {
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
   const usersPath = path.join(process.cwd(), "data", "rwaq-users.json");
   try {
     const raw = fs.readFileSync(usersPath, "utf-8");
-    const users: Array<{ username: string; name: string; hash: string }> = JSON.parse(raw);
+    const users: Array<{ username: string; name: string; hash: string; role?: string }> = JSON.parse(raw);
     customUser = users.find((u) => u.username === username) ?? null;
   } catch {
     // No file yet
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
     if (!match)
       return NextResponse.json({ error: "Incorrect username or password" }, { status: 401 });
     const response = NextResponse.json({
-      user: { name: customUser.name, initials: customUser.name.slice(0, 2).toUpperCase(), role: "Member" },
+      user: { name: customUser.name, initials: customUser.name.slice(0, 2).toUpperCase(), role: normalizeRole(customUser.role, customUser.username) },
     });
     response.cookies.set("rwaq_session", `rwaq-session-${customUser.username}`, {
       httpOnly: true, sameSite: "lax",

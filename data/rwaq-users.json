@@ -2,6 +2,8 @@
   {
     "username": "moustafa",
     "name": "Moustafa",
+    "role": "Admin",
+    "email": "",
     "hash": "$2b$10$h1yHzif5iDOLOWYRjVrnXuMzdGnFVOomflXhbyZBSoZTjihnXp7Lq"
   }
 ]
