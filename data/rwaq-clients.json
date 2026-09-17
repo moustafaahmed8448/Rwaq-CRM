@@ -2,10 +2,10 @@
   {
     "id": "c1",
     "createdAt": "2026-09-13T08:00:00Z",
-    "lastUpdateDate": "2026-09-17T22:37:39.741Z",
+    "lastUpdateDate": "2026-09-17T23:46:06.053Z",
     "name": "Nour El-Din",
     "phoneNumber": "+20 101 824 0912",
-    "status": "NEW",
+    "status": "WON",
     "project": "Palm Hills",
     "location": "hello",
     "acquisitionChannel": "INSTAGRAM",
@@ -197,18 +197,34 @@
         "actor": "Moustafa",
         "action": "ARCHIVED",
         "summary": "Client “Nour El-Din” archived"
+      },
+      {
+        "id": "act-1789687800693-dfes9",
+        "timestamp": "2026-09-17T23:30:00.693Z",
+        "actor": "Moustafa",
+        "action": "RESTORED",
+        "summary": "Client “Nour El-Din” restored from archive"
+      },
+      {
+        "id": "act-1789688766053-tn3co",
+        "timestamp": "2026-09-17T23:46:06.053Z",
+        "actor": "Moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "NEW",
+        "newValue": "WON",
+        "summary": "Status changed: NEW → WON"
       }
     ],
-    "archived": true,
-    "archivedAt": "2026-09-17T22:37:39.741Z"
+    "archived": false
   },
   {
     "id": "c2",
     "createdAt": "2026-09-13T07:20:00Z",
-    "lastUpdateDate": "2026-09-17T22:37:46.915Z",
+    "lastUpdateDate": "2026-09-17T23:46:04.561Z",
     "name": "Omar Khalil",
     "phoneNumber": "+20 115 442 8801",
-    "status": "WAITING",
+    "status": "WON",
     "project": "ZED West",
     "location": "6th of October",
     "acquisitionChannel": "GOOGLE_ADS",
@@ -330,15 +346,31 @@
         "actor": "Moustafa",
         "action": "ARCHIVED",
         "summary": "Client “Omar Khalil” archived"
+      },
+      {
+        "id": "act-1789688364718-7hjhn",
+        "timestamp": "2026-09-17T23:39:24.718Z",
+        "actor": "Moustafa",
+        "action": "RESTORED",
+        "summary": "Client “Omar Khalil” restored from archive"
+      },
+      {
+        "id": "act-1789688764562-l6rcu",
+        "timestamp": "2026-09-17T23:46:04.562Z",
+        "actor": "Moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "WAITING",
+        "newValue": "WON",
+        "summary": "Status changed: WAITING → WON"
       }
     ],
-    "archived": true,
-    "archivedAt": "2026-09-17T22:37:46.915Z"
+    "archived": false
   },
   {
     "id": "c3",
     "createdAt": "2026-09-13T06:00:00Z",
-    "lastUpdateDate": "2026-09-17T22:37:47.722Z",
+    "lastUpdateDate": "2026-09-17T23:39:25.419Z",
     "name": "Mariam Adel",
     "phoneNumber": "+20 102 763 4490",
     "status": "WON",
@@ -433,18 +465,24 @@
         "actor": "Moustafa",
         "action": "ARCHIVED",
         "summary": "Client “Mariam Adel” archived"
+      },
+      {
+        "id": "act-1789688365419-6qa6e",
+        "timestamp": "2026-09-17T23:39:25.419Z",
+        "actor": "Moustafa",
+        "action": "RESTORED",
+        "summary": "Client “Mariam Adel” restored from archive"
       }
     ],
-    "archived": true,
-    "archivedAt": "2026-09-17T22:37:47.722Z"
+    "archived": false
   },
   {
     "id": "c4",
     "createdAt": "2026-09-12T17:00:00Z",
-    "lastUpdateDate": "2026-09-17T22:40:15.489Z",
+    "lastUpdateDate": "2026-09-17T23:46:07.273Z",
     "name": "Karim Youssef",
     "phoneNumber": "+20 111 904 2218",
-    "status": "NEW",
+    "status": "WON",
     "project": "Villette",
     "location": "New Cairo",
     "acquisitionChannel": "FACEBOOK",
@@ -549,16 +587,26 @@
         "oldValue": "TIKTOK",
         "newValue": "FACEBOOK",
         "summary": "Channel updated"
+      },
+      {
+        "id": "act-1789688767273-qn1rv",
+        "timestamp": "2026-09-17T23:46:07.273Z",
+        "actor": "Moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "NEW",
+        "newValue": "WON",
+        "summary": "Status changed: NEW → WON"
       }
     ]
   },
   {
     "id": "c5",
     "createdAt": "2026-09-12T15:00:00Z",
-    "lastUpdateDate": "2026-09-17T22:40:05.461Z",
+    "lastUpdateDate": "2026-09-17T23:46:33.074Z",
     "name": "Salma Farid",
     "phoneNumber": "+20 100 218 6673",
-    "status": "NEW",
+    "status": "WON",
     "project": "Sodic East",
     "location": "New Cairo",
     "acquisitionChannel": "FORSA",
@@ -683,6 +731,16 @@
         "oldValue": "CALLS",
         "newValue": "FORSA",
         "summary": "Channel updated"
+      },
+      {
+        "id": "act-1789688793074-kkq7c",
+        "timestamp": "2026-09-17T23:46:33.074Z",
+        "actor": "Moustafa",
+        "action": "STATUS_CHANGE",
+        "field": "Status",
+        "oldValue": "NEW",
+        "newValue": "WON",
+        "summary": "Status changed: NEW → WON"
       }
     ]
   }

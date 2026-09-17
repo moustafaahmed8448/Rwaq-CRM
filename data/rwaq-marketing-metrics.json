@@ -1,29 +1,16 @@
 [
   {
-    "id": "m1",
-    "startDate": "2026-09-13",
-    "endDate": "2026-09-19",
-    "channel": "FACEBOOK",
-    "spend": 111,
-    "reach": 84200,
-    "impressions": 120000,
-    "clicks": 3200,
-    "notes": "Q3 campaign",
-    "createdAt": "2026-09-14T20:00:40.278Z",
-    "updatedAt": "2026-09-17T22:52:43.494Z"
-  },
-  {
     "id": "m2",
     "startDate": "2026-09-13",
     "endDate": "2026-09-19",
     "channel": "GOOGLE_ADS",
     "spend": 111,
-    "reach": 52100,
+    "reach": 100,
     "impressions": 80000,
     "clicks": 2100,
     "notes": "",
     "createdAt": "2026-09-14T20:00:40.278Z",
-    "updatedAt": "2026-09-17T22:52:35.122Z"
+    "updatedAt": "2026-09-17T23:41:20.652Z"
   },
   {
     "id": "m3",
@@ -39,16 +26,16 @@
     "updatedAt": "2026-09-15T16:06:44.255Z"
   },
   {
-    "id": "m4",
-    "startDate": "2026-09-13",
-    "endDate": "2026-09-19",
-    "channel": "INSTAGRAM",
-    "spend": 222,
-    "reach": 41000,
-    "impressions": 60000,
-    "clicks": 1800,
-    "notes": "asssssssssssssss",
-    "createdAt": "2026-09-14T20:00:40.278Z",
-    "updatedAt": "2026-09-17T22:52:22.156Z"
+    "id": "m-1789688514891",
+    "channel": "FACEBOOK",
+    "spend": 500,
+    "reach": 500,
+    "impressions": 500,
+    "clicks": 500,
+    "notes": "",
+    "startDate": "2026-09-17",
+    "endDate": "2026-09-24",
+    "createdAt": "2026-09-17T23:41:54.891Z",
+    "updatedAt": "2026-09-17T23:41:54.891Z"
   }
 ]
