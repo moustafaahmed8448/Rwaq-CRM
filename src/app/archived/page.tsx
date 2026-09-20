@@ -58,9 +58,12 @@ export default function ArchivedPage() {
   }, [darkMode]);
 
   const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    // Ignore spaces/dashes/parentheses so phone numbers match with or without
+    // formatting, e.g. "1018240912" finds "+20 101 824 0912".
+    const norm = (s: string) => s.replace(/[\s\-().]/g, "").toLowerCase();
+    const q = norm(query);
     if (!q) return clients;
-    return clients.filter((c) => `${c.name} ${c.phoneNumber} ${c.project} ${c.location}`.toLowerCase().includes(q));
+    return clients.filter((c) => norm(`${c.name} ${c.phoneNumber} ${c.project} ${c.location}`).includes(q));
   }, [clients, query]);
 
   const restore = async (c: Client) => {

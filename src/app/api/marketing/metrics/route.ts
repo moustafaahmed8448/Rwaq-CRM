@@ -1,112 +1,145 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated, unauthorized, getSessionUser } from "@/lib/auth";
-import { readMetrics, writeMetrics, type MarketingMetric } from "@/lib/marketing";
-import { channelLabels } from "@/lib/reporting";
+import { getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
+import { createMetric, databaseErrorMessage, deleteMetric, listMetrics, updateMetric } from "@/lib/db";
+import { parseChannel } from "@/lib/reporting";
+
+/** Every method here is admin-only. */
+async function guard(request: NextRequest) {
+  if (!(await isAuthenticated(request))) return { error: unauthorized() as NextResponse };
+  const user = await getSessionUser(request);
+  if (user?.role !== "Admin") {
+    return { error: NextResponse.json({ error: "Admin only" }, { status: 403 }) };
+  }
+  return { user };
+}
+
+const isUniqueViolation = (message: string) =>
+  message.includes("Unique constraint") || message.includes("unique constraint");
 
 export async function GET(request: NextRequest) {
-  if (!isAuthenticated(request)) return unauthorized();
-  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  const g = await guard(request);
+  if (g.error) return g.error;
+
   const { searchParams } = new URL(request.url);
-  const period = searchParams.get("period"); // "week" or "month"
-  const year = parseInt(searchParams.get("year") ?? "");
-  const month = parseInt(searchParams.get("month") ?? "");
+  const rawChannels = searchParams.get("channels") ?? searchParams.get("channel") ?? "";
+  const channels = rawChannels
+    .split(",")
+    .map((c) => parseChannel(c.trim()))
+    .filter((c): c is string => Boolean(c));
+  const from = searchParams.get("from")?.trim() || undefined;
+  const to = searchParams.get("to")?.trim() || undefined;
 
-  const all = readMetrics().sort((a, b) => b.startDate.localeCompare(a.startDate));
-
-  if (period === "week") {
-    const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-    const filtered = all.filter(m => new Date(m.startDate) >= weekStart);
-    return NextResponse.json({ metrics: filtered, totalSpend: filtered.reduce((s, m) => s + Number(m.spend ?? 0), 0), totalReach: filtered.reduce((s, m) => s + Number(m.reach ?? 0), 0) });
-  }
-
-  if (period === "month" && year && month) {
-    const filtered = all.filter(m => {
-      const d = new Date(m.startDate);
-      return d.getFullYear() === year && d.getMonth() + 1 === month;
+  try {
+    const metrics = await listMetrics({ channels, from, to });
+    return NextResponse.json({
+      metrics,
+      totalSpend: metrics.reduce((s, m) => s + m.spend, 0),
+      totalReach: metrics.reduce((s, m) => s + m.reach, 0),
     });
-    return NextResponse.json({ metrics: filtered, totalSpend: filtered.reduce((s, m) => s + Number(m.spend ?? 0), 0), totalReach: filtered.reduce((s, m) => s + Number(m.reach ?? 0), 0) });
+  } catch (error) {
+    return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }
-
-  return NextResponse.json({ metrics: all, totalSpend: all.reduce((s, m) => s + Number(m.spend ?? 0), 0), totalReach: all.reduce((s, m) => s + Number(m.reach ?? 0), 0) });
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthenticated(request)) return unauthorized();
-  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  const g = await guard(request);
+  if (g.error) return g.error;
+
   const body = await request.json().catch(() => ({}));
-  const channel = String(body.channel ?? "").toUpperCase();
+  const channel = parseChannel(String(body.channel ?? ""));
+  const startDate = String(body.startDate ?? "").trim();
+  const endDate = String(body.endDate ?? "").trim();
   const spend = Number(body.spend ?? 0);
   const reach = Number(body.reach ?? 0);
   const impressions = Number(body.impressions ?? 0);
   const clicks = Number(body.clicks ?? 0);
-  const startDate = body.startDate;
-  const endDate = body.endDate;
   const notes = String(body.notes ?? "").trim();
 
   if (!channel || !startDate || !endDate)
-    return NextResponse.json({ error: "Channel, start date, and end date are required" }, { status: 400 });
-  if (spend < 0 || reach < 0)
-    return NextResponse.json({ error: "Spend and reach must be non-negative" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Channel, start date, and end date are required" },
+      { status: 400 },
+    );
+  if (startDate > endDate)
+    return NextResponse.json({ error: "End date must be on or after the start date" }, { status: 400 });
+  if (![spend, reach, impressions, clicks].every((n) => Number.isFinite(n) && n >= 0))
+    return NextResponse.json({ error: "Numbers must be non-negative" }, { status: 400 });
 
-  const now = new Date().toISOString();
-  const metric: MarketingMetric = {
-    id: `m-${Date.now()}`,
-    channel,
-    spend,
-    reach,
-    impressions,
-    clicks,
-    notes,
-    startDate,
-    endDate,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const metrics = readMetrics();
-  metrics.push(metric);
-  writeMetrics(metrics);
-  return NextResponse.json({ metric }, { status: 201 });
+  try {
+    const metric = await createMetric({
+      startDate,
+      endDate,
+      channel,
+      spend,
+      reach,
+      impressions,
+      clicks,
+      notes,
+    });
+    return NextResponse.json({ metric }, { status: 201 });
+  } catch (error) {
+    const message = databaseErrorMessage(error);
+    if (isUniqueViolation(message)) {
+      return NextResponse.json(
+        { error: "A metric already exists for this channel and date range" },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: NextRequest) {
-  if (!isAuthenticated(request)) return unauthorized();
-  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  const g = await guard(request);
+  if (g.error) return g.error;
+
   const body = await request.json().catch(() => ({}));
-  const id = String(body.id ?? "");
+  const id = String(body.id ?? "").trim();
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-  const metrics = readMetrics();
-  const idx = metrics.findIndex(m => m.id === id);
-  if (idx === -1) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const patch: Parameters<typeof updateMetric>[1] = {};
+  if (body.channel !== undefined) {
+    const channel = parseChannel(String(body.channel));
+    if (!channel) return NextResponse.json({ error: "Invalid channel" }, { status: 400 });
+    patch.channel = channel;
+  }
+  if (body.spend !== undefined) patch.spend = Number(body.spend);
+  if (body.reach !== undefined) patch.reach = Number(body.reach);
+  if (body.impressions !== undefined) patch.impressions = Number(body.impressions);
+  if (body.clicks !== undefined) patch.clicks = Number(body.clicks);
+  if (body.notes !== undefined) patch.notes = String(body.notes);
+  if (body.startDate !== undefined) patch.startDate = String(body.startDate).trim();
+  if (body.endDate !== undefined) patch.endDate = String(body.endDate).trim();
 
-  const updates: Partial<MarketingMetric> = {};
-  if (body.channel !== undefined) updates.channel = String(body.channel).toUpperCase();
-  if (body.spend !== undefined) updates.spend = Number(body.spend);
-  if (body.reach !== undefined) updates.reach = Number(body.reach);
-  if (body.impressions !== undefined) updates.impressions = Number(body.impressions);
-  if (body.clicks !== undefined) updates.clicks = Number(body.clicks);
-  if (body.startDate !== undefined) updates.startDate = String(body.startDate);
-  if (body.endDate !== undefined) updates.endDate = String(body.endDate);
-  if (body.notes !== undefined) updates.notes = String(body.notes);
-  updates.updatedAt = new Date().toISOString();
-
-  metrics[idx] = { ...metrics[idx], ...updates };
-  writeMetrics(metrics);
-  return NextResponse.json({ metric: metrics[idx] });
+  try {
+    const metric = await updateMetric(id, patch);
+    if (!metric) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ metric });
+  } catch (error) {
+    const message = databaseErrorMessage(error);
+    if (isUniqueViolation(message)) {
+      return NextResponse.json(
+        { error: "A metric already exists for this channel and date range" },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!isAuthenticated(request)) return unauthorized();
-  if (getSessionUser(request)?.role !== "Admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  const g = await guard(request);
+  if (g.error) return g.error;
+
   const body = await request.json().catch(() => ({}));
-  const id = String(body.id ?? "");
+  const id = String(body.id ?? "").trim();
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-  const metrics = readMetrics().filter(m => m.id !== id);
-  writeMetrics(metrics);
-  return NextResponse.json({ deleted: id });
+  try {
+    const deleted = await deleteMetric(id);
+    if (!deleted) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ deleted: id });
+  } catch (error) {
+    return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
+  }
 }

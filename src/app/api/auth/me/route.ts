@@ -1,36 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import { normalizeRole } from "@/lib/auth";
+import { DEMO_SESSION, SESSION_COOKIE, normalizeRole } from "@/lib/auth";
+import { findUser } from "@/lib/db";
+import { ensureUsersBootstrapped } from "@/lib/bootstrap";
 
-const USERS_FILE = path.join(process.cwd(), "data", "rwaq-users.json");
-
-function getCustomUser(sessionValue: string) {
-  if (!sessionValue.startsWith("rwaq-session-")) return null;
-  const username = sessionValue.replace("rwaq-session-", "");
-  try {
-    const raw = fs.readFileSync(USERS_FILE, "utf-8");
-    const users: Array<{ username: string; name: string; email?: string; role?: string }> = JSON.parse(raw);
-    return users.find((u) => u.username === username) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export function GET(request: NextRequest) {
-  const session = request.cookies.get("rwaq_session")?.value;
+export async function GET(request: NextRequest) {
+  const session = request.cookies.get(SESSION_COOKIE)?.value;
 
   if (!session) return NextResponse.json({ authenticated: false }, { status: 401 });
 
   // Built-in demo user
-  if (session === "rwaq-demo-session") {
-    return NextResponse.json({ authenticated: true, user: { name: "Amira Mansour", initials: "AM", role: "Admin", email: "demo@rwaq.app" } });
+  if (session === DEMO_SESSION) {
+    return NextResponse.json({
+      authenticated: true,
+      user: { name: "Amira Mansour", initials: "AM", role: "Admin", email: "demo@rwaq.app" },
+    });
   }
 
-  // Custom user
-  const custom = getCustomUser(session);
-  if (custom) {
-    return NextResponse.json({ authenticated: true, user: { name: custom.name, initials: custom.name.slice(0, 2).toUpperCase(), role: normalizeRole(custom.role, custom.username), email: custom.email ?? "" } });
+  if (session.startsWith("rwaq-session-")) {
+    const username = session.slice("rwaq-session-".length);
+    try {
+      await ensureUsersBootstrapped();
+      const user = await findUser(username);
+      if (user) {
+        return NextResponse.json({
+          authenticated: true,
+          user: {
+            name: user.name,
+            initials: user.name.slice(0, 2).toUpperCase(),
+            role: normalizeRole(user.role, user.username),
+            email: user.email ?? "",
+          },
+        });
+      }
+    } catch {
+      // Fall through to unauthenticated.
+    }
   }
 
   return NextResponse.json({ authenticated: false }, { status: 401 });

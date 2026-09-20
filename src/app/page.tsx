@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import { downloadFile, exportQuery } from "@/lib/download";
+import { sar } from "@/lib/format";
 
 type Client = {
   id: string; name: string; phoneNumber: string;
@@ -45,12 +47,16 @@ const initialFilters: Filters = { query: "", status: [], channel: [], location: 
 
 function matchesFilters(client: Client, filters: Filters) {
   const date = (client.createdAt || "").slice(0, 10);
+  // Ignore spaces/dashes/parentheses so phone numbers match with or without
+  // formatting, e.g. "1018240912" finds "+20 101 824 0912".
+  const norm = (s: string) => s.replace(/[\s\-().]/g, "").toLowerCase();
+  const haystack = norm(`${client.name} ${client.phoneNumber} ${client.project} ${client.notes ?? ""}`);
   return (filters.status.length === 0 || filters.status.includes(String(client.status))) &&
     (filters.channel.length === 0 || filters.channel.includes(client.acquisitionChannel)) &&
     (filters.location.length === 0 || filters.location.includes(client.location)) &&
     (filters.salesperson.length === 0 || filters.salesperson.includes(client.firstContactPerson) || filters.salesperson.includes(client.secondContactPerson)) &&
     (!filters.startDate || date >= filters.startDate) && (!filters.endDate || date <= filters.endDate) &&
-    `${client.name} ${client.phoneNumber} ${client.project} ${client.notes ?? ""}`.toLowerCase().includes(filters.query.toLowerCase());
+    haystack.includes(norm(filters.query));
 }
 
 let toastId = 0;
@@ -99,14 +105,12 @@ export default function Home() {
 
   useEffect(() => {
     const v = new URLSearchParams(window.location.search).get("view");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (v === "clients") setView("clients");
   }, []);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     const stored = localStorage.getItem("rwaq-dark");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stored === "1") setDarkMode(true);
   }, []);
@@ -244,17 +248,49 @@ export default function Home() {
   }), [metrics, filteredClients]);
 
   const openEdit = (client: Client) => setEditDraft({ ...client });
+  const openCreate = () => setEditDraft({
+    id: "", createdAt: "", lastUpdateDate: "", name: "", phoneNumber: "",
+    status: allStatuses[0] ?? "WAITING", project: "", location: "",
+    acquisitionChannel: allChannels[0] ?? "FACEBOOK", operationToTake: "",
+    firstContactPerson: users[0]?.name ?? "", secondContactPerson: "",
+    notes: "",
+  });
   const closeEdit = () => setEditDraft(null);
   const openDetail = (client: Client) => setDetailClient(client);
   const closeDetail = () => setDetailClient(null);
 
   const saveEdit = async () => {
     if (!editDraft) return;
-    await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editDraft) });
-    setClients(prev => prev.map(c => c.id === editDraft.id ? { ...c, ...editDraft, lastUpdateDate: new Date().toISOString() } : c));
-    if (detailClient?.id === editDraft.id) setDetailClient(prev => prev ? { ...prev, ...editDraft } : null);
+    if (!editDraft.name || editDraft.name.trim().length < 2) { addToast("error", "Name must be at least 2 characters"); return; }
+    if (!editDraft.phoneNumber || editDraft.phoneNumber.trim().length < 5) { addToast("error", "Phone number must be at least 5 characters"); return; }
+
+    if (editDraft.id) {
+      await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editDraft) });
+      setClients(prev => prev.map(c => c.id === editDraft.id ? { ...c, ...editDraft, lastUpdateDate: new Date().toISOString() } : c));
+      if (detailClient?.id === editDraft.id) setDetailClient(prev => prev ? { ...prev, ...editDraft } : null);
+      closeEdit();
+      addToast("success", `Saved changes for ${editDraft.name}`);
+      return;
+    }
+
+    const res = await fetch("/api/crm/clients", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: editDraft.name, phoneNumber: editDraft.phoneNumber, status: editDraft.status,
+        project: editDraft.project, location: editDraft.location, acquisitionChannel: editDraft.acquisitionChannel,
+        operationToTake: editDraft.operationToTake, firstContactPerson: editDraft.firstContactPerson,
+        secondContactPerson: editDraft.secondContactPerson, notes: editDraft.notes,
+      }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({})) as { error?: unknown };
+      addToast("error", typeof d.error === "string" ? d.error : "Please fill in all required fields");
+      return;
+    }
+    const d = await res.json() as { client?: Client };
+    if (d.client) setClients(prev => [d.client as Client, ...prev]);
     closeEdit();
-    addToast("success", `Saved changes for ${editDraft.name ?? editDraft.id}`);
+    addToast("success", `Client “${editDraft.name}” created`);
   };
 
   const deleteSelected = async () => {
@@ -314,37 +350,51 @@ export default function Home() {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const exportSelected = () => {
-    const sel = filteredClients.filter(c => selectedIds.has(c.id));
-    if (sel.length === 0) { addToast("info", "No clients selected"); return; }
-    const headers = ["Client ID", "Created Date", "Name", "Phone", "Status", "Project", "Location", "Channel", "Operation", "1st Contact", "2nd Contact", "Notes", "Last Updated"];
-    const rows = sel.map(c => [c.id, c.createdAt || "", c.name, c.phoneNumber, c.status, c.project, c.location, CH_LABELS[c.acquisitionChannel] ?? c.acquisitionChannel, c.operationToTake, c.firstContactPerson, c.secondContactPerson, c.notes ?? "", c.lastUpdateDate ? new Date(c.lastUpdateDate).toLocaleDateString() : ""]);
-    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
-    link.download = `rwaq-clients-selected-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click(); URL.revokeObjectURL(link.href);
-  };
-
-  const exportExcel = () => {
-    const headers = ["Client ID", "Created Date", "Name", "Phone", "Status", "Project", "Location", "Channel", "Operation", "1st Contact", "2nd Contact", "Notes", "Last Updated"];
-    const rows = filteredClients.map(c => [c.id, c.createdAt || "", c.name, c.phoneNumber, c.status, c.project, c.location, CH_LABELS[c.acquisitionChannel] ?? c.acquisitionChannel, c.operationToTake, c.firstContactPerson, c.secondContactPerson, c.notes ?? "", c.lastUpdateDate ? new Date(c.lastUpdateDate).toLocaleDateString() : ""]);
-    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
-    link.download = `rwaq-clients-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click(); URL.revokeObjectURL(link.href);
-  };
-
-  const exportReport = async () => {
+  const exportClientsFile = async (
+    params: Record<string, string | number | undefined | null>,
+    fallbackName: string,
+    successMessage: string,
+  ) => {
     setExporting(true);
     try {
-      const response = await fetch("/api/sync/sheets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "report", ...filters }) });
-      if (!response.ok) { const d = await response.json(); throw new Error(d.error || "Export failed"); }
-      exportExcel(); addToast("success", "Report exported");
-    } catch (e) { addToast("error", e instanceof Error ? e.message : "Export failed"); }
-    finally { setExporting(false); }
+      await downloadFile(`/api/export/clients${exportQuery(params)}`, fallbackName);
+      addToast("success", successMessage);
+    } catch (e) {
+      addToast("error", e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
+
+  // "Export all" downloads the currently filtered view as a real .xlsx file,
+  // filtered server-side with the exact same semantics as matchesFilters().
+  const exportExcel = () => {
+    void exportClientsFile(
+      {
+        statuses: filters.status.join(","),
+        channels: filters.channel.join(","),
+        locations: filters.location.join(","),
+        salespeople: filters.salesperson.join(","),
+        q: filters.query,
+        from: filters.startDate,
+        to: filters.endDate,
+      },
+      `rwaq-clients-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `Exported ${filteredClients.length} client${filteredClients.length === 1 ? "" : "s"} to Excel`,
+    );
+  };
+
+  const exportSelected = () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) { addToast("info", "No clients selected"); return; }
+    void exportClientsFile(
+      { ids: ids.join(",") },
+      `rwaq-clients-selected-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `Exported ${ids.length} client${ids.length === 1 ? "" : "s"} to Excel`,
+    );
+  };
+
+  const exportReport = () => exportExcel();
 
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); };
 
@@ -390,7 +440,7 @@ export default function Home() {
             salespeople={salespeople} updateStatus={updateStatus} updateClientField={updateClientField}
             onAssigned={refreshNotifications}
             selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
-            onOpenEdit={openEdit} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
+            onOpenEdit={openEdit} onOpenCreate={openCreate} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
             onOpenDetail={openDetail}
             exportExcel={exportExcel} exportSelected={exportSelected}
             bulkCount={selectedIds.size}
@@ -415,7 +465,7 @@ export default function Home() {
       {editDraft && (
         <div className="modal-overlay" onClick={closeEdit}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>Edit client</h2><button className="modal-close" onClick={closeEdit}><XIcon size={18} /></button></div>
+            <div className="modal-header"><h2>{editDraft.id ? "Edit client" : "New client"}</h2><button className="modal-close" onClick={closeEdit}><XIcon size={18} /></button></div>
             <div className="modal-body">
               <div className="form-grid">
                 <Field label="Name"><input value={editDraft.name ?? ""} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} /></Field>
@@ -446,7 +496,7 @@ export default function Home() {
                 <Field label="Notes" wide><textarea value={editDraft.notes ?? ""} onChange={e => setEditDraft({ ...editDraft, notes: e.target.value })} rows={3} placeholder="Internal notes about this client..." /></Field>
               </div>
             </div>
-            <div className="modal-footer"><button className="btn-ghost" onClick={closeEdit}>Cancel</button><button className="btn-primary" onClick={saveEdit}><Check size={15} />Save changes</button></div>
+            <div className="modal-footer"><button className="btn-ghost" onClick={closeEdit}>Cancel</button><button className="btn-primary" onClick={saveEdit}><Check size={15} />{editDraft.id ? "Save changes" : "Create client"}</button></div>
           </div>
         </div>
       )}
@@ -631,26 +681,37 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
       </header>
       {/* KPI strip */}
       <section className="kpi-row kpi-row-6">
-        <KpiCard label="Total spend" value={`$${MONEY.format(totalSpend)}`} sub="Weekly investment" accent="#4f46e5"/>
+        <KpiCard label="Total spend" value={sar(totalSpend)} sub="Weekly investment" accent="#4f46e5"/>
         <KpiCard label="Total reach" value={MONEY.format(totalReach)} sub="Across all channels" accent="#0891b2"/>
         <KpiCard label="Won" value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% win rate`} accent="#22c55e"/>
         <KpiCard label="Lost" value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% of total`} accent="#ef4444"/>
         <KpiCard label="In pipeline" value={String(waiting)} sub="Awaiting action" accent="#f59e0b"/>
-        <KpiCard label="Avg CPA" value={metrics.length?`$${Math.round(totalSpend/(won||1))}`:"—"} sub={won>0?`${won} customers won`:"No wins yet"} accent="#7c3aed"/>
+        <KpiCard label="Avg CPA" value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"} sub={won>0?`${won} customers won`:"No wins yet"} accent="#7c3aed"/>
       </section>
 
       {/* Funnel + ROI */}
       <section className="funnel-row">
-        <div className="panel funnel-panel">
-          <h3>Conversion funnel</h3>
-          <div className="funnel-stages">
-            <div className="funnel-stage stage-total"><span className="funnel-num">{clients.length}</span><span className="funnel-label">Total</span></div>
-            <div className="funnel-arrow">↓</div>
-            <div className="funnel-stage stage-waiting"><span className="funnel-num">{waiting}</span><span className="funnel-label">Waiting</span></div>
-            <div className="funnel-arrow">↓</div>
-            <div className="funnel-stage stage-won"><span className="funnel-num">{won}</span><span className="funnel-label">Won</span></div>
-            <div className="funnel-stage stage-lost"><span className="funnel-num">{lost}</span><span className="funnel-label">Lost</span></div>
+        <div className="panel sp-perf-panel">
+          <h3>Sales Performance</h3>
+          <div className="sp-perf-legend">
+            <span className="sp-won">Won</span>
+            <span className="sp-lost">Lost</span>
+            <span className="sp-wait">Waiting</span>
           </div>
+          {spStats.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>No data yet</div>}
+          {spStats.map(sp => (
+            <div className="sp-perf-row" key={sp.name}>
+              <div className="sp-perf-avatar">{sp.name.slice(0,2).toUpperCase()}</div>
+              <div className="sp-perf-name">{sp.name}</div>
+              <div className="sp-perf-stats">
+                <span className="sp-won">{sp.won}</span>
+                <span className="sp-lost">{sp.lost}</span>
+                <span className="sp-wait">{sp.waiting}</span>
+              </div>
+              <div className="sp-perf-bar"><div className="sp-perf-fill" style={{width: String(Math.round(sp.total>0?sp.won/sp.total*100:0)) + "%"}}/></div>
+              <span className="sp-winrate">{sp.winRate}</span>
+            </div>
+          ))}
         </div>
         <div className="panel channel-roi-panel">
           <h3>Channel ROI</h3>
@@ -659,8 +720,8 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
             {metrics.filter((m: Metric)=>m.totalClients>0).map((m: Metric)=>(
               <div className="roi-row" key={m.channel}>
                 <span className="chan-cell"><i className="dot" style={{background:CH_COLORS[m.channel]}}/>{m.platform}</span>
-                <span>${MONEY.format(m.spend)}</span><span>{m.won}</span>
-                <span className={m.cpa<100?"good":m.cpa<500?"":"bad"}>{m.cpa>0?`$${m.cpa.toFixed(0)}`:"—"}</span>
+                <span>{sar(m.spend)}</span><span>{m.won}</span>
+                <span className={m.cpa<100?"good":m.cpa<500?"":"bad"}>{m.cpa > 0 ? sar(m.cpa) : "—"}</span>
               </div>
             ))}
           </div>
@@ -675,12 +736,19 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
           {recentClients.map(c => (
             <div className="recent-client-row" key={c.id}>
               <span className="rc-avatar">{c.name.slice(0,2).toUpperCase()}</span>
-              <div className="rc-info"><strong>{c.name}</strong><small>{c.project}{c.location ? ` · ${c.location}` : ""}</small></div>
+              <div className="rc-info">
+                <strong>{c.name}</strong>
+                <small>
+                  <span className="rc-kv"><span className="rc-k">Project</span>{c.project || "—"}</span>
+                  {c.location ? <span className="rc-kv"><span className="rc-k">Location</span>{c.location}</span> : null}
+                </small>
+              </div>
               <span className="chan-tag-inline" style={{ flexShrink: 0 }}><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{CH_LABELS[c.acquisitionChannel]??c.acquisitionChannel}</span>
               <span className={`status-pill status-${String(c.status).toLowerCase()}`} style={{ flexShrink: 0 }}>{STATUS_LABELS[c.status] ?? c.status}</span>
             </div>
           ))}
         </section>
+        <div className="dash-stack">
         <section className="panel">
           <div className="panel-heading"><h3>Top locations</h3><span className="muted" style={{fontSize:11}}>{clients.length} clients</span></div>
           {topLocations.length === 0 && <div className="empty-state">No location data.</div>}
@@ -692,24 +760,19 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
               <span className="loc-count">{count}</span>
             </div>
           ))}
-          <div style={{marginTop:20,borderTop:"1px solid var(--line)",paddingTop:14}}>
-            <h3 style={{margin:"0 0 10px",fontSize:13}}>Sales Performance</h3>
-            {spStats.length === 0 && <div className="empty-state" style={{fontSize:11,padding:"8px 0"}}>No data yet</div>}
-            {spStats.map(sp => (
-              <div className="sp-perf-row" key={sp.name}>
-                <div className="sp-perf-avatar">{sp.name.slice(0,2).toUpperCase()}</div>
-                <div className="sp-perf-name">{sp.name}</div>
-                <div className="sp-perf-stats">
-                  <span className="sp-won">{sp.won}</span>
-                  <span className="sp-lost">{sp.lost}</span>
-                  <span className="sp-wait">{sp.waiting}</span>
-                </div>
-                <div className="sp-perf-bar"><div className="sp-perf-fill" style={{width: String(Math.round(sp.total>0?sp.won/sp.total*100:0)) + "%"}}/></div>
-                <span className="sp-winrate">{sp.winRate}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          </section>
+          <section className="panel funnel-panel">
+            <h3>Conversion funnel</h3>
+            <div className="funnel-stages">
+              <div className="funnel-stage stage-total"><span className="funnel-num">{clients.length}</span><span className="funnel-label">Total</span></div>
+              <div className="funnel-arrow">↓</div>
+              <div className="funnel-stage stage-waiting"><span className="funnel-num">{waiting}</span><span className="funnel-label">Waiting</span></div>
+              <div className="funnel-arrow">↓</div>
+              <div className="funnel-stage stage-won"><span className="funnel-num">{won}</span><span className="funnel-label">Won</span></div>
+              <div className="funnel-stage stage-lost"><span className="funnel-num">{lost}</span><span className="funnel-label">Lost</span></div>
+            </div>
+          </section>
+        </div>
       </div>
 
       {/* Channel breakdown */}
@@ -718,7 +781,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
         <div className="table-head-row"><span>Platform</span><span>Spend</span><span>Reach</span><span>Clients</span><span>CPA</span></div>
         {metrics.map((item: Metric)=><div className="table-row" key={item.channel}>
           <span className="chan-cell"><i className="dot" style={{background:CH_COLORS[item.channel]}}/>{item.platform}</span>
-          <span>${MONEY.format(item.spend)}</span><span>{MONEY.format(item.reach)}</span><span>{item.totalClients}</span><span>{item.cpa.toFixed(2)}</span>
+          <span>{sar(item.spend)}</span><span>{MONEY.format(item.reach)}</span><span>{item.totalClients}</span><span>{item.cpa.toFixed(2)}</span>
         </div>)}
       </section>
     </div>
@@ -729,10 +792,10 @@ function KpiCard({ label, value, sub, accent }: { label: string; value: string; 
   return (<div className="kpi-card" style={{borderTopColor:accent}}><div className="kpi-label"><span>{label}</span><span className="kpi-dot" style={{background:accent}}/></div><div className="kpi-value">{value}</div><div className="kpi-sub">{sub}</div></div>);}
 
 function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, updateStatus, updateClientField, onAssigned, isAdmin, onArchive, onArchiveSelected,
-  selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail,
+  selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
   return (
     <div className="page">
       <div className="page-header">
@@ -746,6 +809,7 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
             <button className={mode==="table"?"seg-active":""} onClick={()=>setMode("table")}><LayoutDashboard size={14}/>Table</button>
             <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>Kanban</button>
           </div>
+          <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>New client</button>
           <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>Export selected ({bulkCount})</button>
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>Export all</button>
         </div>

@@ -1,61 +1,93 @@
+// Postgres is the single source of truth for both local dev and production.
+// The JSON files under /data are legacy: they are read once by prisma/seed.ts
+// and are no longer written to at runtime.
+//
+// Note: enum-typed columns were widened to String so the app can store
+// user-defined channels (e.g. FORSA) and custom statuses (e.g. NEW).
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-enum AcquisitionChannel {
-  FACEBOOK
-  INSTAGRAM
-  X
-  TIKTOK
-  GOOGLE_ADS
-  WHATSAPP
-  CALLS
-  SALES
-}
-
-enum ClientStatus {
-  WAITING
-  WON
-  LOST
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model MarketingMetric {
-  id         String             @id @default(uuid()) @db.Uuid
-  startDate  DateTime           @db.Date
-  endDate    DateTime           @db.Date
-  channel    AcquisitionChannel
-  spend      Decimal            @db.Decimal(12, 2)
-  reach      Int                @default(0)
-  impressions Int               @default(0)
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
+  id          String   @id
+  startDate   DateTime @db.Date
+  endDate     DateTime @db.Date
+  channel     String
+  spend       Decimal  @db.Decimal(12, 2)
+  reach       Int      @default(0)
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
   @@unique([startDate, endDate, channel])
   @@index([startDate, endDate])
   @@index([channel])
 }
 
 model Client {
-  id                  String             @id @default(uuid()) @db.Uuid
-  createdAt            DateTime           @default(now())
-  lastUpdateDate      DateTime           @updatedAt
+  id                  String    @id @default(uuid())
+  createdAt           DateTime  @default(now())
+  lastUpdateDate      DateTime  @updatedAt
   name                String
   phoneNumber         String
-  status              ClientStatus       @default(WAITING)
+  status              String    @default("WAITING")
   project             String
   location            String
-  acquisitionChannel  AcquisitionChannel
-  operationToTake     String             @db.Text
+  acquisitionChannel  String
+  operationToTake     String    @db.Text
   firstContactPerson  String
   secondContactPerson String
+  notes               String?
+  archived            Boolean   @default(false)
+  archivedAt          DateTime?
+  activityLog         Json?
+
   @@index([acquisitionChannel, createdAt])
   @@index([status])
   @@index([location])
   @@index([createdAt])
+  @@index([archived])
+}
+
+model AppUser {
+  id        String   @id @default(uuid()) @db.Uuid
+  username  String   @unique
+  name      String
+  email     String?
+  role      String   @default("Sales")
+  hash      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  recipient  String
+  type       String
+  message    String
+  clientId   String?
+  clientName String?
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([recipient, read])
+  @@index([createdAt])
+}
+
+/// Key/value store for user-defined reference data: "channels", "statuses", "locations".
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
 
 model SyncRun {
@@ -70,3 +102,4 @@ model SyncRun {
   finishedAt     DateTime?
   @@index([provider, startedAt])
 }
+

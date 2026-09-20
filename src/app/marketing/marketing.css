@@ -35,6 +35,15 @@
 .marketing-shell .recent-row { min-width: 780px; padding: 15px 12px; }
 .marketing-shell .r-actions { display: flex; gap: 8px; }
 .marketing-shell .r-spend { color: #237867; }
+.marketing-shell .mkt-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 20px; border-radius: 14px; padding: 14px 16px; background: #fff; border: 1px solid #e0e8ee; box-shadow: 0 5px 22px #233b5708; }
+.marketing-shell .mkt-filter-field { display: flex; flex-direction: column; gap: 5px; }
+.marketing-shell .mkt-filter-field label { font-size: 9px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #63847f; }
+.marketing-shell .mkt-filter-field input, .marketing-shell .mkt-filter-field select { border: 1px solid #dfe7ee; border-radius: 9px; padding: 8px 10px; font-size: 12px; background: #fbfdfe; color: #16323c; font-family: inherit; }
+.marketing-shell .mkt-filter-clear { min-height: 36px; padding: 0 14px; border-radius: 9px; font-size: 12px; }
+[data-theme="dark"] .marketing-shell .mkt-filters { background: #1b2632; border-color: #344353; box-shadow: none; }
+[data-theme="dark"] .marketing-shell .mkt-filter-field label { color: #94cdbf; }
+[data-theme="dark"] .marketing-shell .mkt-filter-field input,
+[data-theme="dark"] .marketing-shell .mkt-filter-field select { background: #101820; border-color: #344353; color: #e8eef5; }
 
 .marketing-shell .mkt-hero-top > div { min-width: 0; }
 .marketing-shell .mkt-hero .header-actions { flex-wrap: wrap; }

@@ -285,7 +285,7 @@ button { cursor: pointer; }
 
 /* ── Enhanced dashboard ─────────────────────────────────── */
 .kpi-row-6 { grid-template-columns: repeat(6, 1fr); }
-.funnel-row { display: grid; grid-template-columns: 1fr 1.2fr; gap: 12px; margin-bottom: 16px; }
+.funnel-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; margin-bottom: 16px; }
 .funnel-panel { padding: 18px 20px; }
 .funnel-stages { display: flex; align-items: center; justify-content: center; gap: 0; padding: 10px 0; }
 .funnel-stage { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 18px; border-radius: 10px; min-width: 90px; }
@@ -653,11 +653,15 @@ button { cursor: pointer; }
 
 /* ── Dashboard extras ───────────────────────────── */
 .dashboard-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.dash-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
 .recent-client-row { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid #f3f4f6; font-size: 12px; transition: background .1s; }
 .recent-client-row:hover { background: #f9fafb; }
 [data-theme="dark"] .recent-client-row { border-color: #27272a; }
 [data-theme="dark"] .recent-client-row:hover { background: #1e1e22; }
+.rc-kv { display: inline-flex; align-items: baseline; gap: 4px; margin-right: 10px; }
+.rc-k { color: #7c3aed; font-weight: 800; font-size: 9px; text-transform: uppercase; letter-spacing: .5px; }
+[data-theme="dark"] .rc-k { color: #b7a8ff; }
 .rc-avatar { width: 30px; height: 30px; background: #ede9fe; color: #7c3aed; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; flex-shrink: 0; }
 .rc-info { flex: 1; min-width: 0; }
 .rc-info strong { display: block; font-size: 12px; color: var(--ink); }
@@ -889,7 +893,7 @@ button { cursor: pointer; }
 .dashboard-page .kpi-value { font-size: clamp(23px, 2.3vw, 32px); letter-spacing: -1px; }
 .dashboard-page .panel { min-width: 0; padding: 24px; border: 1px solid #e3e7f0; border-radius: 18px; background: #fffffff2; box-shadow: 0 6px 22px #25356206; }
 .dashboard-page .panel h3 { letter-spacing: -.25px; }
-.dashboard-page .funnel-row, .dashboard-page .dashboard-grid-2 { gap: 20px; margin-bottom: 24px; }
+.dashboard-page .funnel-row, .dashboard-page .dashboard-grid-2, .dashboard-page .dash-stack { gap: 20px; margin-bottom: 24px; }
 .dashboard-page .recent-client-row { padding-top: 15px; padding-bottom: 15px; gap: 10px; }
 .dashboard-page .rc-avatar { border-radius: 12px; background: #edeaff; color: #5a50ad; }
 .dashboard-page .rc-info { min-width: 0; }
@@ -917,3 +921,67 @@ button { cursor: pointer; }
   .dashboard-page .channel-breakdown-panel, .dashboard-page .channel-roi-panel { overflow-x: auto; }
   .dashboard-page .table-head-row, .dashboard-page .table-row { min-width: 460px; }
 }
+/* ── Sales Performance panel (sits beside Conversion funnel) ── */
+.sp-perf-legend { display: flex; gap: 6px; margin: 0 0 10px; }
+.sp-perf-legend span { padding: 2px 7px; border-radius: 6px; font-size: 10px; font-weight: 700; }
+.sp-perf-panel { min-width: 0; }
+.sp-perf-panel .sp-perf-name { font-size: 12px; }
+
+/* Conversion funnel now lives under Top locations in the right column of
+   dashboard-grid-2, so the funnel row keeps only its two panels. */
+
+/* ── Dark theme: app shell header ─────────────────────────── */
+[data-theme="dark"] .topbar { background: #18181b; border-bottom-color: #27272a; }
+[data-theme="dark"] .topbar-nav button { color: #a1a1aa; }
+[data-theme="dark"] .brand-letter { background: #d3f36b; color: #18181b; }
+[data-theme="dark"] .nav-active { background: #d3f36b !important; color: #18181b !important; }
+[data-theme="dark"] .theme-toggle { color: #a1a1aa; }
+[data-theme="dark"] .theme-toggle:hover { color: #e4e4e7; }
+[data-theme="dark"] .user-avatar { background: #37305d; color: #d2c9ff; }
+[data-theme="dark"] .page-header p { color: #a1a1aa; }
+[data-theme="dark"] .tab-active { background: #d3f36b; color: #18181b; }
+[data-theme="dark"] .seg-active { background: #d3f36b !important; color: #18181b !important; }
+[data-theme="dark"] .segmented button { color: #a1a1aa; }
+
+/* ── Dark theme: conversion funnel + dashboard tables ─────── */
+[data-theme="dark"] .stage-total { background: #27272a; }
+[data-theme="dark"] .stage-waiting { background: #3f2f12; }
+[data-theme="dark"] .stage-won { background: #12361f; }
+[data-theme="dark"] .stage-lost { background: #3f1a1a; }
+[data-theme="dark"] .stage-total .funnel-num { color: #e4e4e7; }
+[data-theme="dark"] .stage-waiting .funnel-num { color: #fcd34d; }
+[data-theme="dark"] .stage-won .funnel-num { color: #86efac; }
+[data-theme="dark"] .stage-lost .funnel-num { color: #fca5a5; }
+[data-theme="dark"] .funnel-label { color: #a1a1aa; }
+[data-theme="dark"] .funnel-arrow { color: #52525b; }
+[data-theme="dark"] .roi-head { border-bottom-color: #27272a; }
+[data-theme="dark"] .roi-row { border-bottom-color: #27272a; color: #d4d4d8; }
+[data-theme="dark"] .table-head-row { border-bottom-color: #27272a; }
+[data-theme="dark"] .table-row { border-bottom-color: #27272a; color: #d4d4d8; }
+
+/* ── Dark theme: dashboard extras ─────────────────────────── */
+[data-theme="dark"] .loc-bar-track { background: #27272a; }
+[data-theme="dark"] .sp-mini-row { border-top-color: #27272a; }
+[data-theme="dark"] .sp-won,
+[data-theme="dark"] .status-won { background: #12361f; color: #86efac; }
+[data-theme="dark"] .sp-lost,
+[data-theme="dark"] .status-lost { background: #3f1a1a; color: #fca5a5; }
+[data-theme="dark"] .sp-wait,
+[data-theme="dark"] .status-waiting { background: #3f2f12; color: #fcd34d; }
+[data-theme="dark"] .chan-tag,
+[data-theme="dark"] .chan-tag-inline,
+[data-theme="dark"] .op-text { color: #a1a1aa; }
+
+/* ── Dark theme: client detail page + misc surfaces ───────── */
+[data-theme="dark"] .detail-section { background: #18181b; border-color: #27272a; }
+[data-theme="dark"] .info-icon { background: #1e1e22; color: #a1a1aa; }
+[data-theme="dark"] .notes-display { background: #1e1e22; color: #a1a1aa; }
+[data-theme="dark"] .timeline-item { border-bottom-color: #27272a; }
+[data-theme="dark"] .field-name { background: #1e1b2e; color: #c4b5fd; }
+[data-theme="dark"] .selection-info { background: #1e3a5f; border-color: #1e40af; color: #bfdbfe; }
+[data-theme="dark"] .btn-danger { background: #450a0a; color: #fca5a5; border-color: #7f1d1d; }
+[data-theme="dark"] .btn-danger:hover { background: #5c1010; }
+[data-theme="dark"] .btn-danger-outline { color: #fca5a5; border-color: #7f1d1d; }
+[data-theme="dark"] .btn-danger-outline:hover { background: #450a0a; }
+[data-theme="dark"] .detail-page { background: transparent; }
+

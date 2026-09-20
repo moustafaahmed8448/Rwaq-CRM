@@ -11,7 +11,9 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
-import type { MarketingMetric } from "@/lib/marketing";
+import type { MarketingMetric } from "@/lib/types";
+import { sar } from "@/lib/format";
+import { downloadFile, exportQuery } from "@/lib/download";
 import "./marketing.css";
 
 type User = { name: string; initials: string; role: string; email?: string };
@@ -41,6 +43,11 @@ export default function MarketingPage() {
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+
+  /* ── Filters: date range + channel ── */
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [channelFilter, setChannelFilter] = useState<string>("ALL");
 
   const loadMetrics = async () => {
     setLoading(true);
@@ -121,15 +128,25 @@ export default function MarketingPage() {
     await loadMetrics();
   };
 
-  const totalSpend = useMemo(() => metrics.reduce((s, m) => s + Number(m.spend ?? 0), 0), [metrics]);
-  const totalReach = useMemo(() => metrics.reduce((s, m) => s + Number(m.reach ?? 0), 0), [metrics]);
-  const totalClicks = useMemo(() => metrics.reduce((s, m) => s + Number(m.clicks ?? 0), 0), [metrics]);
+  // Everything below (KPIs, charts, tables, export) is derived from the
+  // filtered view. A metric is included when its period overlaps the
+  // selected range and it matches the selected channel.
+  const filteredMetrics = useMemo(() => metrics.filter(m => {
+    if (channelFilter !== "ALL" && m.channel !== channelFilter) return false;
+    if (fromDate && m.endDate < fromDate) return false;
+    if (toDate && m.startDate > toDate) return false;
+    return true;
+  }), [metrics, channelFilter, fromDate, toDate]);
+
+  const totalSpend = useMemo(() => filteredMetrics.reduce((s, m) => s + Number(m.spend ?? 0), 0), [filteredMetrics]);
+  const totalReach = useMemo(() => filteredMetrics.reduce((s, m) => s + Number(m.reach ?? 0), 0), [filteredMetrics]);
+  const totalClicks = useMemo(() => filteredMetrics.reduce((s, m) => s + Number(m.clicks ?? 0), 0), [filteredMetrics]);
   const avgCPM = totalReach > 0 ? (totalSpend / totalReach * 1000).toFixed(2) : "0";
   const avgCPC = totalClicks > 0 ? (totalSpend / totalClicks).toFixed(2) : "0";
 
   const monthlyData = useMemo(() => {
     const months = new Map<string, { spend: number; reach: number; clicks: number }>();
-    for (const m of metrics) {
+    for (const m of filteredMetrics) {
       const d = new Date(m.startDate);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const mo = months.get(key) ?? { spend: 0, reach: 0, clicks: 0 };
@@ -137,11 +154,11 @@ export default function MarketingPage() {
       months.set(key, mo);
     }
     return [...months.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([period, d]) => ({ period, ...d, label: new Date(period + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" }) }));
-  }, [metrics]);
+  }, [filteredMetrics]);
 
   const channelBreakdown = useMemo(() => {
     const map = new Map<string, { spend: number; reach: number; clicks: number }>();
-    for (const m of metrics) {
+    for (const m of filteredMetrics) {
       const ch = map.get(m.channel) ?? { spend: 0, reach: 0, clicks: 0 };
       ch.spend += Number(m.spend ?? 0); ch.reach += Number(m.reach ?? 0); ch.clicks += Number(m.clicks ?? 0);
       map.set(m.channel, ch);
@@ -150,7 +167,7 @@ export default function MarketingPage() {
       channel, name: CH_LABELS[channel] ?? channel, spend: d.spend, reach: d.reach, clicks: d.clicks,
       cpm: d.reach > 0 ? (d.spend / d.reach * 1000).toFixed(2) : "0", cpc: d.clicks > 0 ? (d.spend / d.clicks).toFixed(2) : "0",
     }));
-  }, [metrics]);
+  }, [filteredMetrics]);
 
   const rankedChannels = useMemo(
     () => channelBreakdown.filter(c => Number(c.cpm) > 0).sort((a, b) => Number(a.cpm) - Number(b.cpm)),
@@ -177,23 +194,24 @@ export default function MarketingPage() {
               <span className="mkt-period"><Calendar size={13} /> All-time overview</span>
             </div>
             <div className="header-actions">
-              <button className="btn-outline mkt-hero-btn" onClick={async () => {
-                const csv = [
-                  ["Channel","Period","Spend","Reach","Impressions","Clicks","CPM"],
-                  ...metrics.map(m => [CH_LABELS[m.channel] ?? m.channel, `${m.startDate} – ${m.endDate}`, m.spend, m.reach, m.impressions, m.clicks, m.reach > 0 ? (m.spend / m.reach * 1000).toFixed(2) : "0"])
-                ].map(r => r.map(v => `"${String(v)}"`).join(",")).join("\r\n");
-                const link = document.createElement("a");
-                link.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
-                link.download = `marketing-${new Date().toISOString().slice(0,10)}.csv`; link.click();
-              }}><Download size={15} />Export</button>
+              <button className="btn-outline mkt-hero-btn" onClick={() => {
+                // Exports the filtered view as a real .xlsx, filtered server-side
+                // with the same period-overlap + channel semantics as the UI.
+                downloadFile(`/api/export/marketing${exportQuery({
+                  channel: channelFilter !== "ALL" ? channelFilter : undefined,
+                  from: fromDate || undefined,
+                  to: toDate || undefined,
+                })}`, `marketing-${new Date().toISOString().slice(0, 10)}.xlsx`)
+                  .catch(() => alert("Export failed. Please try again."));
+              }}><Download size={15} />Export Excel</button>
               <button className="btn-primary mkt-hero-primary" onClick={openAdd}><Plus size={15} />Add metric</button>
             </div>
           </div>
           <div className="mkt-hero-stats">
-            <div className="mkt-stat"><span>${totalSpend.toLocaleString()}</span><small>Tracked spend</small></div>
+            <div className="mkt-stat"><span>{sar(totalSpend)}</span><small>Tracked spend</small></div>
             <div className="mkt-stat"><span>{channelBreakdown.length}</span><small>Active channels</small></div>
             <div className="mkt-stat"><span>{totalClicks.toLocaleString()}</span><small>Total clicks</small></div>
-            <div className="mkt-stat"><span>{metrics.length}</span><small>Records logged</small></div>
+            <div className="mkt-stat"><span>{filteredMetrics.length}</span><small>Records logged</small></div>
           </div>
         </div>
 
@@ -202,10 +220,32 @@ export default function MarketingPage() {
           ? <div className="shell-loading" style={{ minHeight: 60, gridTemplateColumns: "repeat(4,1fr)" }}><div className="spinner" /><p>Loading metrics…</p></div>
           : <>
             <section className="kpi-row">
-              <KpiCard label="Total spend" value={`$${totalSpend.toLocaleString()}`} sub={`${metrics.length} records`} accent="#4f46e5" icon={<DollarSign size={14}/>} />
+              <KpiCard label="Total spend" value={sar(totalSpend)} sub={`${filteredMetrics.length} records`} accent="#4f46e5" icon={<DollarSign size={14}/>} />
               <KpiCard label="Total reach" value={totalReach.toLocaleString()} sub="Impressions reached" accent="#0891b2" icon={<EyeIcon size={14}/>} />
-              <KpiCard label="Avg CPM" value={`$${avgCPM}`} sub="Cost per 1K reach" accent="#f59e0b" icon={<TrendingUp size={14}/>} />
-              <KpiCard label="Avg CPC" value={`$${avgCPC}`} sub="Cost per click" accent="#16a34a" icon={<MousePointer size={14}/>} />
+              <KpiCard label="Avg CPM" value={sar(avgCPM)} sub="Cost per 1K reach" accent="#f59e0b" icon={<TrendingUp size={14}/>} />
+              <KpiCard label="Avg CPC" value={sar(avgCPC)} sub="Cost per click" accent="#16a34a" icon={<MousePointer size={14}/>} />
+            </section>
+
+            {/* ── Filters: date range + channel ── */}
+            <section className="mkt-filters">
+              <div className="mkt-filter-field">
+                <label>From</label>
+                <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+              </div>
+              <div className="mkt-filter-field">
+                <label>To</label>
+                <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
+              </div>
+              <div className="mkt-filter-field">
+                <label>Channel</label>
+                <select value={channelFilter} onChange={e => setChannelFilter(e.target.value)}>
+                  <option value="ALL">All channels</option>
+                  {allChannels.map(ch => <option key={ch} value={ch}>{CH_LABELS[ch] ?? ch}</option>)}
+                </select>
+              </div>
+              {(fromDate || toDate || channelFilter !== "ALL") && (
+                <button className="btn-ghost mkt-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setChannelFilter("ALL"); }}>Clear filters</button>
+              )}
             </section>
 
             {/* ── Insight highlights ── */}
@@ -215,7 +255,7 @@ export default function MarketingPage() {
                 <div>
                   <small>Most efficient channel</small>
                   <strong>{bestChannel ? bestChannel.name : "—"}</strong>
-                  <span>{bestChannel ? `$${bestChannel.cpm} CPM · $${bestChannel.spend.toLocaleString()} spend` : "No data yet"}</span>
+                  <span>{bestChannel ? `${sar(bestChannel.cpm)} CPM · ${sar(bestChannel.spend)} spend` : "No data yet"}</span>
                 </div>
               </div>
               <div className="mkt-highlight mkt-hl-bad">
@@ -223,7 +263,7 @@ export default function MarketingPage() {
                 <div>
                   <small>Highest cost channel</small>
                   <strong>{worstChannel && worstChannel !== bestChannel ? worstChannel.name : "—"}</strong>
-                  <span>{worstChannel && worstChannel !== bestChannel ? `$${worstChannel.cpm} CPM · $${worstChannel.spend.toLocaleString()} spend` : "Not enough data"}</span>
+                  <span>{worstChannel && worstChannel !== bestChannel ? `${sar(worstChannel.cpm)} CPM · ${sar(worstChannel.spend)} spend` : "Not enough data"}</span>
                 </div>
               </div>
               <div className="mkt-highlight">
@@ -231,14 +271,14 @@ export default function MarketingPage() {
                 <div>
                   <small>Peak period</small>
                   <strong>{bestMonth?.label ?? "—"}</strong>
-                  <span>{bestMonth ? `$${bestMonth.spend.toLocaleString()} spend` : "No data yet"}</span>
+                  <span>{bestMonth ? `${sar(bestMonth.spend)} spend` : "No data yet"}</span>
                 </div>
               </div>
               <div className="mkt-highlight">
                 <span className="mkt-hl-icon"><TrendingUp size={16} /></span>
                 <div>
                   <small>Avg cost per 1K reach</small>
-                  <strong>${avgCPM}</strong>
+                  <strong>{sar(avgCPM)}</strong>
                   <span>{`${totalReach.toLocaleString()} reach`}</span>
                 </div>
               </div>
@@ -252,7 +292,7 @@ export default function MarketingPage() {
                     <CartesianGrid stroke="#e5e7eb" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} />
                     <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} />
-                    <Tooltip formatter={(v) => `$${(v as number).toLocaleString()}`} />
+                    <Tooltip formatter={(v) => sar(v as number)} />
                     <Area type="monotone" dataKey="spend" stroke="#4f46e5" fill="url(#gradSpend)" strokeWidth={2} />
                     <defs><linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#4f46e5" stopOpacity={.2} /><stop offset="95%" stopColor="#4f46e5" stopOpacity={0} /></linearGradient></defs>
                   </AreaChart>
@@ -265,7 +305,7 @@ export default function MarketingPage() {
                     <Pie data={channelBreakdown.map(c => ({ name: c.name, value: c.spend }))} cx="50%" cy="50%" outerRadius={85} innerRadius={55} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} dataKey="value">
                       {channelBreakdown.map((c, i) => <Cell key={c.channel} fill={CH_COLORS[c.channel] || "#9ca3af"} />)}
                     </Pie>
-                    <Tooltip formatter={(v) => `$${(v as number).toLocaleString()}`} />
+                    <Tooltip formatter={(v) => sar(v as number)} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -280,9 +320,9 @@ export default function MarketingPage() {
               {channelBreakdown.map(c => (
                 <div className="table-row" key={c.channel}>
                   <span className="chan-cell"><i className="dot" style={{ background: CH_COLORS[c.channel] }} />{c.name}</span>
-                  <span>${c.spend.toLocaleString()}</span><span>{c.reach.toLocaleString()}</span><span>{c.clicks.toLocaleString()}</span>
-                  <span className={Number(c.cpm) < 1 ? "good" : Number(c.cpm) < 3 ? "" : "bad"}>${c.cpm}</span>
-                  <span>${c.cpc}</span>
+                  <span>{sar(c.spend)}</span><span>{c.reach.toLocaleString()}</span><span>{c.clicks.toLocaleString()}</span>
+                  <span className={Number(c.cpm) < 1 ? "good" : Number(c.cpm) < 3 ? "" : "bad"}>{sar(c.cpm)}</span>
+                  <span>{sar(c.cpc)}</span>
                 </div>
               ))}
               {channelBreakdown.length === 0 && <div className="empty-state">No channel data yet. Click &quot;Add metric&quot; to record your first entry.</div>}
@@ -292,18 +332,18 @@ export default function MarketingPage() {
             <section className="panel">
               <div className="panel-heading">
                 <h3>Recent entries</h3>
-                <span className="muted" style={{ fontSize: 11 }}>{metrics.length} total</span>
+                <span className="muted" style={{ fontSize: 11 }}>{filteredMetrics.length} total</span>
               </div>
               <div className="recent-row recent-head">
                 <span /><span>Channel</span><span>Period</span><span>Spend</span><span>Reach</span><span>Notes</span><span />
               </div>
-              {metrics.length === 0 && <div className="empty-state">No metrics recorded yet.</div>}
-              {metrics.slice(-10).reverse().map(m => (
+              {filteredMetrics.length === 0 && <div className="empty-state">No metrics recorded yet.</div>}
+              {filteredMetrics.slice(-10).reverse().map(m => (
                 <div className="recent-row" key={m.id}>
                   <span className="dot" style={{ background: CH_COLORS[m.channel] }} />
                   <span className="r-channel">{CH_LABELS[m.channel] ?? m.channel}</span>
                   <span className="r-period">{new Date(m.startDate).toLocaleDateString()} — {new Date(m.endDate).toLocaleDateString()}</span>
-                  <span className="r-spend">${Number(m.spend).toLocaleString()}</span>
+                  <span className="r-spend">{sar(Number(m.spend))}</span>
                   <span className="r-reach">{Number(m.reach).toLocaleString()}</span>
                   <span className="muted" style={{ flex: 1 }}>{m.notes ? m.notes.slice(0, 40) : "—"}</span>
                   <div className="r-actions no-detail">

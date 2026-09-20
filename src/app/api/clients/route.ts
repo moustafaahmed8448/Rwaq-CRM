@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated, unauthorized } from "@/lib/auth";
-import { readClients } from "@/lib/storage";
+import { databaseErrorMessage, listClients } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
-  if (!isAuthenticated(request)) return unauthorized();
-  const clients = readClients();
-  return NextResponse.json({ clients });
+  if (!(await isAuthenticated(request))) return unauthorized();
+  try {
+    const clients = await listClients({ includeArchived: true });
+    return NextResponse.json({ clients });
+  } catch (error) {
+    return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
+  }
 }

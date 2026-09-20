@@ -20,6 +20,22 @@ export interface ActivityEntry {
   summary?: string;
 }
 
+export interface MarketingMetric {
+  id: string;
+  /** YYYY-MM-DD */
+  startDate: string;
+  /** YYYY-MM-DD */
+  endDate: string;
+  channel: string;
+  spend: number;
+  reach: number;
+  impressions: number;
+  clicks: number;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ClientData {
   id: string;
   name: string;
