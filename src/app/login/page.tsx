@@ -4,10 +4,13 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, Eye, EyeOff, LockKeyhole, UserRound, ShieldCheck, Sun, Moon, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
+import { useLogo } from "@/lib/logo";
+import BrandMark from "@/components/BrandMark";
 
 export default function LoginPage() {
   const router = useRouter();
   const { t, lang, setLang } = useLang();
+  const { logo } = useLogo();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -61,7 +64,7 @@ export default function LoginPage() {
 
       <header className="login-v2-topbar">
         <div className="login-v2-brand-badge">
-          <span className="brand-letter">R</span>
+          <BrandMark logo={logo} alt={t("brand.logoAlt")} />
           <span className="brand-name">rwaq</span>
           <span className="login-v2-pill">{t("auth.secureBadge")}</span>
         </div>
@@ -100,7 +103,7 @@ export default function LoginPage() {
         <section className="login-v2-card">
           <div className="login-v2-card-header">
             <div className="login-v2-icon-wrap">
-              <span className="login-v2-logo">R</span>
+              <BrandMark logo={logo} alt={t("brand.logoAlt")} variant="login" />
             </div>
             <h1>{t("auth.welcomeBack")}</h1>
             <p>{t("auth.signinSub")}</p>
@@ -175,8 +178,8 @@ export default function LoginPage() {
               <span>{t("auth.contactAdmin")}</span>
             </div>
             <div className="login-v2-copyright">
-              <span>{t("auth.brand")}</span>
-              <span>© {new Date().getFullYear()}</span>
+              <span>© {new Date().getFullYear()} {t("auth.brand")}</span>
+              <span>{t("auth.developedBy")} Moustafa Ahmed</span>
             </div>
           </footer>
         </section>

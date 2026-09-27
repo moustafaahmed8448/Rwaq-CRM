@@ -1286,3 +1286,21 @@ button { cursor: pointer; }
 /* Form controls additionally need the text pinned to the left edge. */
 input.ltr-num { text-align: left; }
 
+/* ── Uploaded dashboard logo ────────────────────────────────────────
+   When an admin uploads a logo it replaces the "R" letter badge in the
+   header, the mobile drawer and the login card. Sizes mirror the badges it
+   stands in for, so nothing shifts when a logo is added or removed.
+
+   Light theme: no plate. Most logos are drawn for a light background, and the
+   header/card are already white there.
+   Dark theme: a light plate. A light-on-transparent logo would otherwise be
+   invisible against the dark chrome. box-sizing is border-box globally, so the
+   padding becomes the plate's margin and the artwork keeps its inset. */
+.brand-logo,
+.login-v2-logo-img { object-fit: contain; flex-shrink: 0; }
+.brand-logo { width: 28px; height: 28px; border-radius: 7px; }
+.login-v2-logo-img { width: 30px; height: 30px; border-radius: 8px; }
+[data-theme="dark"] .brand-logo,
+[data-theme="dark"] .login-v2-logo-img { background: #f4f4f5; padding: 3px; }
+
+

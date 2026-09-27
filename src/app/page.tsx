@@ -14,6 +14,7 @@ import { apiErrorMessage, readApiError } from "@/lib/api-errors";
 import { channelLabel, statusLabel } from "@/lib/reporting";
 import { downloadFile, exportQuery, EXPORT_FAILED } from "@/lib/download";
 import { dateLocale, sar } from "@/lib/format";
+import { useLogo } from "@/lib/logo";
 
 type Client = {
   id: string; name: string; phoneNumber: string;
@@ -690,17 +691,13 @@ function MultiSelect({ label, options, selected, onChange, render, t }: {
 function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, clients, salespeople, spStats, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; clients: Client[]; salespeople: string[]; spStats: SpStat[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
-  const [heroLogo, setHeroLogo] = useState("");
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHeroLogo(localStorage.getItem("rwaq-logo") ?? "");
-  }, []);
+  const { logo: heroLogo } = useLogo();
 
   return (
     <div className="page dashboard-page">
       <header className="dashboard-hero">
         <div>
-          {heroLogo && <img src={heroLogo} alt={t("settings.logoAlt")} className="hero-logo" />}
+          {heroLogo && <img src={heroLogo} alt={t("brand.logoAlt")} className="hero-logo" />}
           <span className="dashboard-eyebrow">{t("dash.heroEyebrow")}</span>
           <h1>{t("dash.heroTitle")}</h1>
           <p>{t("dash.heroSubtitle")}</p>

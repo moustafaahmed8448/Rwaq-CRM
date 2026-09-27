@@ -4,6 +4,7 @@ import { UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plu
 import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 import { apiErrorMessage } from "@/lib/api-errors";
+import { readLogoFile, useLogo } from "@/lib/logo";
 import { roleLabel } from "@/lib/reporting";
 import AppHeader from "@/components/AppHeader";
 
@@ -31,8 +32,11 @@ export default function SettingsPage() {
   const [editForm, setEditForm] = useState({ name: "", username: "", email: "", role: "Sales" });
   const [savingUser, setSavingUser] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
-  const [logoUrl, setLogoUrl] = useState("");
+  // `logo` is the shared source of truth; the header and login read the same
+  // Setting row, and setLogo() keeps their local caches in step.
+  const { logo: logoUrl, setLogo } = useLogo();
   const [logoErr, setLogoErr] = useState("");
+  const [savingLogo, setSavingLogo] = useState(false);
 
   const loadUsers = async () => {
     const r = await fetch("/api/users");
@@ -49,8 +53,6 @@ export default function SettingsPage() {
       setEditEmail(d.user?.email ?? "");
       const stored = localStorage.getItem("rwaq-avatar");
       if (stored) setAvatarUrl(stored);
-      const storedLogo = localStorage.getItem("rwaq-logo");
-      if (storedLogo) setLogoUrl(storedLogo);
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadUsers();
@@ -88,23 +90,51 @@ export default function SettingsPage() {
     setUser(u => u ? { ...u, avatar: undefined } : null);
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset the input so picking the same file twice still fires onChange.
+    e.target.value = "";
     if (!file) return;
     setLogoErr("");
-    if (file.size > 2 * 1024 * 1024) { setLogoErr(t("settings.logoTooBig")); return; }
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const url = ev.target?.result as string;
-      setLogoUrl(url);
-      localStorage.setItem("rwaq-logo", url);
-    };
-    reader.readAsDataURL(file);
+    setSavingLogo(true);
+    try {
+      // Downscale in the browser so the stored row stays small — every user
+      // downloads it on every page load.
+      const dataUrl = await readLogoFile(file);
+      const res = await fetch("/api/settings/logo", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logo: dataUrl }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: unknown };
+        setLogoErr(apiErrorMessage(t, body.error));
+        return;
+      }
+      setLogo(dataUrl);
+    } catch (err) {
+      setLogoErr(err instanceof Error && err.message === "TOO_LARGE"
+        ? t("settings.logoTooBig")
+        : t("errors.logoInvalid"));
+    } finally {
+      setSavingLogo(false);
+    }
   };
 
-  const removeLogo = () => {
-    setLogoUrl("");
-    localStorage.removeItem("rwaq-logo");
+  const removeLogo = async () => {
+    setLogoErr("");
+    setSavingLogo(true);
+    try {
+      const res = await fetch("/api/settings/logo", { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: unknown };
+        setLogoErr(apiErrorMessage(t, body.error));
+        return;
+      }
+      setLogo("");
+    } finally {
+      setSavingLogo(false);
+    }
   };
 
   const saveProfile = async () => {
@@ -374,10 +404,10 @@ export default function SettingsPage() {
               </div>
               <div className="logo-actions">
                 <label className="btn-outline logo-upload-btn">
-                  <Camera size={14}/>{t("settings.logoUpload")}
+                  <Camera size={14}/>{savingLogo ? t("settings.saving") : t("settings.logoUpload")}
                   <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
                 </label>
-                {logoUrl && <button className="btn-text-danger" onClick={removeLogo}><Trash2 size={13}/>{t("settings.logoRemove")}</button>}
+                {logoUrl && <button className="btn-text-danger" onClick={removeLogo} disabled={savingLogo}><Trash2 size={13}/>{t("settings.logoRemove")}</button>}
                 <p className="muted" style={{ fontSize: 11, margin: 0 }}>{t("settings.logoHint")}</p>
                 {logoErr && <div className="settings-error">{logoErr}</div>}
               </div>

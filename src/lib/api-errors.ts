@@ -49,6 +49,9 @@ const MESSAGES: Record<string, string> = {
   "End date must be on or after the start date": "errors.dateOrder",
   "Numbers must be non-negative": "errors.nonNegative",
   "A metric already exists for this channel and date range": "errors.metricExists",
+  "Logo required": "errors.logoRequired",
+  "Invalid image data": "errors.logoInvalid",
+  "Image is too large (max 2MB).": "errors.logoTooLarge",
 };
 
 /** Raw database / configuration noise that must never be shown to a user. */

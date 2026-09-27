@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useLang } from "@/lib/i18n";
+import { useLogo } from "@/lib/logo";
 import { dateLocale } from "@/lib/format";
 import { notificationMessage } from "@/lib/reporting";
+import BrandMark from "@/components/BrandMark";
 import {
   Bell, ChevronDown, LayoutDashboard, UsersRound, Layers, Settings, LogOut,
   Sun, Moon, Menu, X as XIcon, Archive, CheckCheck, Globe, Palette,
@@ -35,6 +37,7 @@ export default function AppHeader({
 }) {
   const router = useRouter();
   const { t, lang, setLang } = useLang();
+  const { logo } = useLogo();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notif[]>([]);
@@ -97,7 +100,7 @@ export default function AppHeader({
           >
             <Menu size={20} />
           </button>
-          <span className="brand-letter">R</span>
+          <BrandMark logo={logo} alt={t("brand.logoAlt")} />
           <span className="brand-name">rwaq</span>
           {badge}
         </div>
@@ -201,7 +204,7 @@ export default function AppHeader({
         <div className="mobile-nav-panel" onClick={(e) => e.stopPropagation()}>
           <div className="mobile-nav-header">
             <div className="mobile-brand-wrap">
-              <span className="brand-letter">R</span>
+              <BrandMark logo={logo} alt={t("brand.logoAlt")} />
               <span className="brand-name">rwaq</span>
               {badge}
             </div>

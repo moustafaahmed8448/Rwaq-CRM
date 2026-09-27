@@ -32,7 +32,7 @@ export function databaseErrorMessage(error: unknown): string {
 
 /* ── Reference data (channels / statuses / locations) ─────────────────────── */
 
-export type SettingKey = "channels" | "statuses" | "locations";
+export type SettingKey = "channels" | "statuses" | "locations" | "logo";
 
 export async function readSetting(key: SettingKey): Promise<string[]> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -58,6 +58,28 @@ export async function removeSettingValue(key: SettingKey, value: string): Promis
     update: { value: next },
     create: { key, value: next },
   });
+}
+
+/* ── Scalar settings (single value, e.g. the dashboard logo) ───────────────────
+   The array helpers above are for reference data. The logo is a single string,
+   so it gets its own scalar pair rather than being shoehorned into a one-item
+   array. */
+
+export async function readSettingValue(key: SettingKey): Promise<string | null> {
+  const row = await prisma.setting.findUnique({ where: { key } });
+  return typeof row?.value === "string" && row.value.length > 0 ? row.value : null;
+}
+
+export async function writeSettingValue(key: SettingKey, value: string): Promise<void> {
+  await prisma.setting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value },
+  });
+}
+
+export async function clearSettingValue(key: SettingKey): Promise<void> {
+  await prisma.setting.deleteMany({ where: { key } });
 }
 
 /* ── Clients ─────────────────────────────────────────────────────────────── */

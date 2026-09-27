@@ -173,6 +173,8 @@ const ar: Record<string, string> = {
   "settings.logoTooBig": "حجم الصورة كبير جداً (بحد أقصى 2 ميجابايت).",
   "settings.logoEmpty": "لا يوجد شعار",
   "settings.logoAlt": "شعار لوحة التحكم",
+  "brand.logoAlt": "شعار رواق",
+
   "act.created": "تم إنشاء العميل",
   "act.deleted": "تم حذف العميل",
   "act.archived": "تمت أرشفة العميل “{name}”",
@@ -225,6 +227,8 @@ const ar: Record<string, string> = {
   "auth.signIn": "تسجيل الدخول",
   "auth.badCredentials": "اسم المستخدم أو كلمة المرور غير صحيحة.",
   "auth.brand": "رواق للتسويق",
+  "auth.developedBy": "تطوير",
+
   "auth.createAccount": "إنشاء حساب",
   "auth.contactAdmin": "حسابك مدار من قبل المشرف. تواصل مع الإدارة إذا احتجت مساعدة.",
   "auth.secureBadge": "بوابة دخول موظفي رواق",
@@ -476,6 +480,10 @@ const ar: Record<string, string> = {
   "role.crm": "علاقات العملاء",
 
   "errors.generic": "تعذّر إتمام العملية. حاول مرة أخرى.",
+  "errors.logoRequired": "الشعار مطلوب.",
+  "errors.logoInvalid": "بيانات الصورة غير صالحة.",
+  "errors.logoTooLarge": "حجم الصورة كبير جداً (بحد أقصى 2 ميجابايت).",
+
   "errors.adminOnly": "هذه العملية متاحة للمديرين فقط.",
   "errors.usernamePasswordRequired": "اسم المستخدم وكلمة المرور مطلوبان.",
   "errors.badCredentials": "اسم المستخدم أو كلمة المرور غير صحيحة.",
@@ -672,6 +680,8 @@ const en: Record<string, string> = {
   "settings.logoTooBig": "Image is too large (max 2MB).",
   "settings.logoEmpty": "No logo",
   "settings.logoAlt": "Dashboard logo",
+  "brand.logoAlt": "Rwaq logo",
+
   "act.created": "Client created",
   "act.deleted": "Client deleted",
   "act.archived": "Client “{name}” archived",
@@ -723,6 +733,8 @@ const en: Record<string, string> = {
   "auth.signIn": "Sign in",
   "auth.badCredentials": "Incorrect username or password.",
   "auth.brand": "Rwaq Marketing",
+  "auth.developedBy": "Developed by",
+
   "auth.createAccount": "Create account",
   "auth.contactAdmin": "Accounts are provisioned by the admin. Contact management if you need access.",
   "auth.secureBadge": "Rwaq Staff Portal",
@@ -974,6 +986,10 @@ const en: Record<string, string> = {
 
   "auth.togglePassword": "Toggle password visibility",
   "errors.generic": "Something went wrong. Please try again.",
+  "errors.logoRequired": "Logo required.",
+  "errors.logoInvalid": "Invalid image data.",
+  "errors.logoTooLarge": "Image is too large (max 2MB).",
+
   "errors.adminOnly": "Only admins can do this.",
   "errors.usernamePasswordRequired": "Username and password are required.",
   "errors.badCredentials": "Incorrect username or password.",
