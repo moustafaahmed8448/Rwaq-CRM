@@ -5,12 +5,14 @@ import { Bell, CheckCheck, Trash2, Inbox } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import { useLang } from "@/lib/i18n";
+import { dateLocale } from "@/lib/format";
+import { notificationMessage } from "@/lib/reporting";
 
 type Notif = { id: string; message: string; read: boolean; recipient?: string; createdAt: string; type?: string; clientName?: string };
 
 export default function NotificationsPage() {
   const router = useRouter();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [user, setUser] = useState<{ name: string; initials: string; role: string } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [items, setItems] = useState<Notif[]>([]);
@@ -117,6 +119,8 @@ export default function NotificationsPage() {
           </button>
         </div>
 
+        {error && <div className="settings-error">{error}</div>}
+
         <section className="panel">
           {loading && <div className="empty-state">{t("notif.loading")}</div>}
           {!loading && shown.length === 0 && (
@@ -130,8 +134,8 @@ export default function NotificationsPage() {
             <div className={`notif-row ${n.read ? "is-read" : "is-unread"}`} key={n.id}>
               <span className="notif-new-dot" />
               <div className="notif-row-body">
-                <strong>{n.message}</strong>
-                <small>{new Date(n.createdAt).toLocaleString()}</small>
+                <strong>{notificationMessage(t, n)}</strong>
+                <small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small>
               </div>
               {!n.read && <button className="btn-ghost btn-sm" disabled={busyId === n.id} onClick={() => markRead(n.id)}>{t("notif.markRead")}</button>}
               <button className="icon-btn-sm danger" title={t("notif.deleteTitle")} disabled={busyId === n.id} onClick={() => removeOne(n)}><Trash2 size={13} /></button>

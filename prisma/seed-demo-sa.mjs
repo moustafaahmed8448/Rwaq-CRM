@@ -79,6 +79,17 @@ async function main() {
   const already = new Set(
     (await prisma.client.findMany({ where: { name: { in: names } }, select: { name: true } })).map((c) => c.name),
   );
+  // Sequential numeric ids (schema has no uuid default); continue from the
+  // current max so the seed coexists with already-created clients.
+  const existingIds = await prisma.client.findMany({ select: { id: true } });
+  let nextId = 1;
+  for (const row of existingIds) {
+    if (/^\d+$/.test(row.id)) {
+      const n = Number(row.id);
+      if (Number.isSafeInteger(n) && n >= nextId) nextId = n + 1;
+    }
+  }
+
   const rows = demo.filter((d) => !already.has(d.name)).map((d) => {
     const createdAt = daysAgo(d.days);
     const log = [act(`act-${slug(d.name)}-c`, createdAt, "CREATED", "Client created")];
@@ -86,6 +97,7 @@ async function main() {
     if (d.lost) log.push(act(`act-${slug(d.name)}-l`, daysAgo(d.lost), "STATUS_CHANGE", "Status changed: WAITING → LOST", { field: "Status", oldValue: "WAITING", newValue: "LOST" }));
     log.push(act(`act-${slug(d.name)}-n`, daysAgo(Math.max(d.days - 3, 0)), "NOTE_EDIT", "Notes updated", { field: "Notes" }));
     return {
+      id: String(nextId++),
       name: d.name,
       phoneNumber: d.phone,
       status: d.status,

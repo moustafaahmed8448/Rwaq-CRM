@@ -164,22 +164,69 @@ export type NewClientInput = {
   notes?: string;
 };
 
-export async function createClient(input: NewClientInput, actor: string): Promise<ClientRow> {
-  const log: ActivityEntry[] = [makeActivityEntry("CREATED", actor, { summary: "Client created" })];
-  const row = await prisma.client.create({
-    data: {
-      ...input,
-      notes: input.notes ?? null,
-      activityLog: log as unknown as Prisma.InputJsonValue,
-    },
-  });
+/**
+ * Next sequential client id ("1", "2", …). Clients are numbered from 1 in
+ * creation order; ids are never reused after a delete (max + 1). Rows still
+ * holding pre-migration uuids are ignored so numbering stays safe even
+ * before prisma/sql/002_client_numeric_ids.sql has been run.
+ */
+async function nextClientId(): Promise<string> {
+  const rows = await prisma.client.findMany({ select: { id: true } });
+  let max = 0;
+  for (const row of rows) {
+    if (/^\d+$/.test(row.id)) {
+      const n = Number(row.id);
+      if (Number.isSafeInteger(n) && n > max) max = n;
+    }
+  }
+  return String(max + 1);
+}
 
-  // Notify anyone newly assigned as a contact person.
-  for (const person of [input.firstContactPerson, input.secondContactPerson]) {
+/**
+ * Inserts the row, retrying a few times when two concurrent inserts race for
+ * the same sequential id (unique-key violation). Any other error is rethrown.
+ */
+async function insertClient(input: NewClientInput, log: ActivityEntry[]) {
+  const MAX_ATTEMPTS = 5;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await prisma.client.create({
+        data: {
+          ...input,
+          id: await nextClientId(),
+          notes: input.notes ?? null,
+          activityLog: log as unknown as Prisma.InputJsonValue,
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const collided = /unique|duplicate key/i.test(msg);
+      if (!collided || attempt >= MAX_ATTEMPTS) throw err;
+    }
+  }
+}
+
+export async function createClient(input: NewClientInput, actor: string): Promise<ClientRow> {
+  // The activity entry stores no prose: the UI builds the localized sentence
+  // from `action` (see describeActivity in src/lib/reporting.ts).
+  const log: ActivityEntry[] = [makeActivityEntry("CREATED", actor)];
+  // Two admins creating at the same instant can compute the same next id, so
+  // retry on a unique-key violation until a free number is found.
+  const row = await insertClient(input, log);
+
+  // Notify anyone newly assigned as a contact person. The contact role rides
+  // along in the type so the message can be localized at render time (see
+  // notificationMessage in src/lib/reporting.ts).
+  const contacts: Array<{ person?: string; contact: "1st" | "2nd" }> = [
+    { person: input.firstContactPerson, contact: "1st" },
+    { person: input.secondContactPerson, contact: "2nd" },
+  ];
+  for (const { person, contact } of contacts) {
     if (person) {
       await createNotification({
         recipient: person,
-        type: "ASSIGNED",
+        type: `ASSIGNED:${contact}`,
+        // Legacy English fallback for clients that don't localize yet.
         message: `You were assigned \u201c${input.name}\u201d`,
         clientId: row.id,
         clientName: input.name,
@@ -189,19 +236,6 @@ export async function createClient(input: NewClientInput, actor: string): Promis
 
   return toClientRow(row);
 }
-
-const FIELD_LABELS: Record<string, string> = {
-  name: "Name",
-  phoneNumber: "Phone",
-  project: "Project",
-  location: "Location",
-  status: "Status",
-  acquisitionChannel: "Channel",
-  operationToTake: "Operation",
-  firstContactPerson: "1st Contact",
-  secondContactPerson: "2nd Contact",
-  notes: "Notes",
-};
 
 export type ClientPatch = Partial<NewClientInput> & { archived?: boolean };
 
@@ -221,17 +255,18 @@ export async function updateClient(
   const { archived, ...rest } = patch;
   const updates: Prisma.ClientUpdateInput = {};
   const changes: Array<{ field: string; oldVal: string; newVal: string }> = [];
-  const notify: Array<{ field: string; newVal: string }> = [];
+  const notify: Array<{ contact: "1st" | "2nd"; newVal: string }> = [];
 
   for (const [key, value] of Object.entries(rest)) {
     if (value === undefined) continue;
     const oldValue = (existing as unknown as Record<string, unknown>)[key];
     if (String(oldValue ?? "") === String(value ?? "")) continue;
     (updates as Record<string, unknown>)[key] = value;
-    const label = FIELD_LABELS[key] ?? key;
-    changes.push({ field: label, oldVal: String(oldValue ?? ""), newVal: String(value) });
+    // Store the raw column key (e.g. "acquisitionChannel") so the timeline can
+    // localize the field name; never the English label.
+    changes.push({ field: key, oldVal: String(oldValue ?? ""), newVal: String(value) });
     if (key === "firstContactPerson" || key === "secondContactPerson") {
-      notify.push({ field: label, newVal: String(value) });
+      notify.push({ contact: key === "firstContactPerson" ? "1st" : "2nd", newVal: String(value) });
     }
   }
 
@@ -243,11 +278,7 @@ export async function updateClient(
     updates.archived = archived;
     updates.archivedAt = archived ? new Date() : null;
     extraActivity.push(
-      makeActivityEntry(archived ? "ARCHIVED" : "RESTORED", actor, {
-        summary: archived
-          ? `Client \u201c${existing.name}\u201d archived`
-          : `Client \u201c${existing.name}\u201d restored from archive`,
-      }),
+      makeActivityEntry(archived ? "ARCHIVED" : "RESTORED", actor, { clientName: existing.name }),
     );
   }
 
@@ -259,14 +290,10 @@ export async function updateClient(
     ...previousLog,
     ...extraActivity,
     ...changes.map((c) =>
-      makeActivityEntry(c.field === "Status" ? "STATUS_CHANGE" : "FIELD_EDIT", actor, {
+      makeActivityEntry(c.field === "status" ? "STATUS_CHANGE" : "FIELD_EDIT", actor, {
         field: c.field,
         oldValue: c.oldVal,
         newValue: c.newVal,
-        summary:
-          c.field === "Status"
-            ? `Status changed: ${c.oldVal} \u2192 ${c.newVal}`
-            : `${c.field} updated`,
       }),
     ),
   ];
@@ -280,8 +307,11 @@ export async function updateClient(
     if (!item.newVal) continue;
     await createNotification({
       recipient: item.newVal,
-      type: "ASSIGNED",
-      message: `You were assigned \u201c${existing.name}\u201d as ${item.field.toLowerCase()}`,
+      // The contact role rides along in the type so the message can be
+      // localized at render time (see notificationMessage in reporting.ts).
+      type: `ASSIGNED:${item.contact}`,
+      // Legacy English fallback for clients that don't localize yet.
+      message: `You were assigned \u201c${existing.name}\u201d`,
       clientId: id,
       clientName: existing.name,
     });

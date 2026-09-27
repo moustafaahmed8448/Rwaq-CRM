@@ -12,7 +12,7 @@ const CH_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = { WAITING: "Waiting", WON: "Won", LOST: "Lost" };
 
 const COLUMNS: ExcelColumn[] = [
-  { header: "Client ID", key: "clientId", width: 38 },
+  { header: "Client ID", key: "clientId", width: 12 },
   { header: "Created", key: "created", width: 13 },
   { header: "Name", key: "name", width: 24 },
   { header: "Phone", key: "phone", width: 18 },

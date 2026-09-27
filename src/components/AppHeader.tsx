@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useLang } from "@/lib/i18n";
+import { dateLocale } from "@/lib/format";
+import { notificationMessage } from "@/lib/reporting";
 import {
   Bell, ChevronDown, LayoutDashboard, UsersRound, Layers, Settings, LogOut,
   Sun, Moon, Menu, X as XIcon, Archive, CheckCheck, Globe, Palette,
@@ -11,7 +13,7 @@ import { useRouter } from "next/navigation";
 export type HeaderUser = { name: string; initials: string; role?: string };
 export type NavTab = "dashboard" | "clients" | "archived" | "marketing" | "settings";
 
-type Notif = { id: string; message: string; read: boolean; createdAt: string };
+type Notif = { id: string; message: string; read: boolean; createdAt: string; type?: string; clientName?: string };
 
 const NAV: { key: NavTab; icon: React.ReactNode }[] = [
   { key: "dashboard", icon: <LayoutDashboard size={16} /> },
@@ -156,7 +158,7 @@ export default function AppHeader({
               {notifications.filter((n) => !n.read).slice(0, 30).map((n) => (
                 <div key={n.id} className="notif-item unread">
                   <span className="notif-new-dot" />
-                  <div><strong>{n.message}</strong><small>{new Date(n.createdAt).toLocaleString()}</small></div>
+                  <div><strong>{notificationMessage(t, n)}</strong><small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small></div>
                 </div>
               ))}
               <button

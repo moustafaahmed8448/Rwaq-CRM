@@ -492,7 +492,7 @@ export default function Home() {
             <div className="modal-body">
               <div className="form-grid">
                 <Field label={t("form.name")}><input value={editDraft.name ?? ""} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} /></Field>
-                <Field label={t("form.phone")}><input value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} /></Field>
+                <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} /></Field>
                 <Field label={t("form.project")} wide><textarea rows={3} value={editDraft.project ?? ""} onChange={e => setEditDraft({ ...editDraft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
                 <Field label={t("form.location")}>
                   <AddNewSelect value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} placeholder={t("form.locationPh")} t={t} />
@@ -547,7 +547,7 @@ export default function Home() {
             </div>
             <div className="detail-body">
               <div className="detail-meta">
-                <div className="meta-item"><span className="meta-label">{t("form.phone")}</span><span className="meta-value">{detailClient.phoneNumber}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.phone")}</span><span className="meta-value"><span className="ltr-num">{detailClient.phoneNumber}</span></span></div>
                 <div className="meta-item"><span className="meta-label">{t("form.status")}</span>
                   <select className={`status-select status-${String(detailClient.status).toLowerCase()}`} value={detailClient.status} onChange={e => updateStatus(detailClient.id, e.target.value)}>
                     {allStatuses.map(s => <option key={s} value={s}>{statusLabel(t, s)}</option>)}
@@ -863,11 +863,12 @@ function ClientTable({ clients, updateStatus, updateClientField, onAssigned, sel
       <div className="client-table" ref={tableRef}>
         <div className="client-row client-head">
           <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="cb"/>
-          <span>{t("th.client")}</span><span>{t("th.status")}</span><span>{t("th.source")}</span><span>{t("th.project")}</span><span>{t("th.location")}</span><span>{t("th.date")}</span><span>{t("form.operation")}</span><span>{t("th.first")}</span><span>{t("th.second")}</span><span>{t("detail.lastUpdate")}</span><span/></div>
+          <span className="id-cell">{t("th.id")}</span><span>{t("th.client")}</span><span>{t("th.status")}</span><span>{t("th.source")}</span><span>{t("th.project")}</span><span>{t("th.location")}</span><span>{t("th.date")}</span><span>{t("form.operation")}</span><span>{t("th.first")}</span><span>{t("th.second")}</span><span>{t("detail.lastUpdate")}</span><span/></div>
         {clients.map(c=>(
           <div className={`client-row client-row-clickable ${selectedIds.has(c.id)?"selected":""}`} key={c.id} onClick={e=>{(e.target as HTMLElement).tagName!=="INPUT"&&(e.target as HTMLElement).tagName!=="SELECT"&&! (e.target as HTMLElement).closest(".no-detail")&&onOpenDetail(c)}}>
             <input type="checkbox" checked={selectedIds.has(c.id)} onChange={()=>toggleSelect(c.id)} className="cb" onClick={e=>e.stopPropagation()}/>
-            <span className="person-cell" onClick={()=>onOpenDetail(c)}><b>{c.name}</b><small>{c.phoneNumber}</small>{c.notes&&<span className="notes-indicator"><MessageSquare size={10}/></span>}</span>
+            <span className="id-cell" title={t("th.id")}>#{c.id}</span>
+            <span className="person-cell" onClick={()=>onOpenDetail(c)}><b>{c.name}</b><small><span className="ltr-num">{c.phoneNumber}</span></small>{c.notes&&<span className="notes-indicator"><MessageSquare size={10}/></span>}</span>
             <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>
             <span className="chan-tag"><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
             <span>{c.project}</span><span>{c.location}</span><span className="muted">{c.createdAt?new Date(c.createdAt).toLocaleDateString(dateLocale(resolveLang())):"—"}</span>
@@ -903,7 +904,7 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
           </div>
           {clients.filter(c=>c.status===col).map(c=>(
             <article className={`client-card ${draggedId===c.id?"dragging":""} ${selectedIds.has(c.id)?"card-selected":""}`} key={c.id} draggable onDragStart={()=>setDraggedId(c.id)} onDragEnd={()=>{setDraggedId(null);setDropTarget(null);}} onDoubleClick={()=>onOpenDetail(c)}>
-              <div className="card-top"><b className="card-name">{c.name}</b><span className="card-actions no-detail">
+              <div className="card-top"><b className="card-name"><span className="id-cell" title={t("th.id")}>#{c.id}</span>{c.name}</b><span className="card-actions no-detail">
                 <button className="icon-btn-sm" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={12}/></button>
                 {isAdmin && <><button className="icon-btn-sm danger" title={t("common.delete")} onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={12}/></button>
                   <button className="icon-btn-sm" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={12}/></button></>}

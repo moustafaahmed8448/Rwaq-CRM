@@ -141,10 +141,11 @@ export default function ArchivedPage() {
 
           {shown.map((c) => (
             <div className="archive-row" key={c.id}>
+              <span className="id-cell" title={t("th.id")}>#{c.id}</span>
               <span className="rc-avatar">{c.name.slice(0, 2).toUpperCase()}</span>
               <div className="archive-info">
                 <strong>{c.name}</strong>
-                <small>{c.phoneNumber} · {c.project} · {c.location}</small>
+                <small><span className="ltr-num">{c.phoneNumber}</span> · {c.project} · {c.location}</small>
               </div>
               <span className="chan-tag"><i className="dot" />{channelLabel(t, c.acquisitionChannel)}</span>
               <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>

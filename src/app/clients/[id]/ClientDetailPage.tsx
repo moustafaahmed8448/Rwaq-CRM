@@ -5,6 +5,8 @@ import { ArrowLeft, Clock, Edit3, Plus, Tag, Trash2, UserRound, AlertCircle, Che
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import { useLang } from "@/lib/i18n";
+import { dateLocale } from "@/lib/format";
+import { activityFieldLabel, activityValueLabel, channelLabel, describeActivity, statusLabel as localizeStatus } from "@/lib/reporting";
 import type { ActivityEntry, ClientData } from "@/lib/types";
 
 const PREDEFINED_STATUSES = ["WAITING", "WON", "LOST"];
@@ -20,7 +22,7 @@ function getStatusStyle(status: string) {
   return { bg: "#ede9fe", fg: "#5b21b6", label: status };
 }
 
-function formatTimeAgo(iso: string, t: (key: string, vars?: Record<string, string | number>) => string) {
+function formatTimeAgo(iso: string, t: (key: string, vars?: Record<string, string | number>) => string, lang: string) {
   const d = new Date(iso);
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
@@ -31,12 +33,12 @@ function formatTimeAgo(iso: string, t: (key: string, vars?: Record<string, strin
   if (diffH < 24) return t("common.hourAgo", { n: diffH });
   const diffD = Math.floor(diffH / 24);
   if (diffD < 30) return t("common.dayAgo", { n: diffD });
-  return d.toLocaleDateString();
+  return d.toLocaleDateString(dateLocale(lang));
 }
 
 export default function ClientDetailPage({ clientId }: { clientId: string }) {
   const router = useRouter();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [client, setClient] = useState<ClientData | null>(null);
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
@@ -137,9 +139,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
   if (!client) return <div className="page-center"><AlertCircle size={48} color="#ef4444" /><p>{t("detail.notFound")}</p><button className="btn-primary" onClick={() => router.replace("/")}>{t("detail.back")}</button></div>;
 
   const statuses = [...PREDEFINED_STATUSES, ...customStatuses.filter((s) => !PREDEFINED_STATUSES.includes(s))];
-  const statusKey = client.status === "WAITING" ? "status.waitingLabel" : client.status === "WON" ? "status.wonLabel" : client.status === "LOST" ? "status.lostLabel" : null;
-  const statusLabel = statusKey ? t(statusKey) : client.status;
-  const statusStyle = { ...getStatusStyle(client.status), label: statusLabel };
+  const statusStyle = { ...getStatusStyle(client.status), label: localizeStatus(t, client.status) };
 
   return (
     <div className="detail-page">
@@ -149,6 +149,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
         <button className="btn-ghost" onClick={() => router.back()}><ArrowLeft size={16} /> {t("detail.back")}</button>
         <div className="detail-title">
           <span className={`status-badge status-${client.status.toLowerCase()}`}>{statusStyle.label}</span>
+          <span className="id-cell" title={t("th.id")}>#{client.id}</span>
           <h1>{client.name}</h1>
         </div>
         <div className="detail-actions">
@@ -166,7 +167,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
               <div className="empty-timeline">{t("client.noActivity")}</div>
             )}
             {[...(client.activityLog ?? [])].reverse().map((entry) => (
-              <ActivityItem key={entry.id} entry={entry} t={t} />
+              <ActivityItem key={entry.id} entry={entry} t={t} lang={lang} />
             ))}
           </div>
         </section>
@@ -178,16 +179,16 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
             <div className="edit-form">
               <div className="form-grid-2">
                 <Field label={t("form.name")}><input value={draft.name ?? ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
-                <Field label={t("form.phone")}><input value={draft.phoneNumber ?? ""} onChange={(e) => setDraft({ ...draft, phoneNumber: e.target.value })} /></Field>
+                <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={draft.phoneNumber ?? ""} onChange={(e) => setDraft({ ...draft, phoneNumber: e.target.value })} /></Field>
                 <Field label={t("form.project")} wide><textarea rows={3} value={draft.project ?? ""} onChange={(e) => setDraft({ ...draft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
                 <Field label={t("form.location")}>
                   <AddNewSelect value={draft.location ?? ""} options={locations} onAdd={addLocation} onChange={(v) => setDraft({ ...draft, location: v })} placeholder={t("form.locationPh")} t={t} />
                 </Field>
                 <Field label={t("form.channel")}>
-                  <AddNewSelect value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} placeholder={t("form.channelPh")} t={t} />
+                  <AddNewSelect value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} render={(v) => channelLabel(t, v)} placeholder={t("form.channelPh")} t={t} />
                 </Field>
                 <Field label={t("form.status")}>
-                  <AddNewSelect value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} placeholder={t("form.statusPh")} t={t} />
+                  <AddNewSelect value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} render={(v) => localizeStatus(t, v)} placeholder={t("form.statusPh")} t={t} />
                 </Field>
                 <Field label={t("form.firstContact")}><input value={draft.firstContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, firstContactPerson: e.target.value })} /></Field>
                 <Field label={t("form.secondContact")}><input value={draft.secondContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, secondContactPerson: e.target.value })} /></Field>
@@ -201,8 +202,9 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
           ) : (
             <dl className="info-list">
               <InfoItem icon={<Tag size={14} />} label={t("form.status")}><span className={`status-badge status-${client.status.toLowerCase()}`}>{statusStyle.label}</span></InfoItem>
-              <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}><span>{client.phoneNumber}</span></InfoItem>
+              <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}><span><span className="ltr-num">{client.phoneNumber}</span></span></InfoItem>
               <InfoItem icon={<Tag size={14} />} label={t("form.project")}><span>{client.project}</span></InfoItem>
+              <InfoItem icon={<Tag size={14} />} label={t("form.channel")}><span>{channelLabel(t, client.acquisitionChannel)}</span></InfoItem>
               <InfoItem icon={<TrendingUp size={14} />} label={t("form.location")}><span>{client.location}</span></InfoItem>
               <InfoItem icon={<Edit3 size={14} />} label={t("form.operation")}><span>{client.operationToTake}</span></InfoItem>
               <InfoItem icon={<UserRound size={14} />} label={t("form.firstContact")}><span>{client.firstContactPerson}</span></InfoItem>
@@ -218,7 +220,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
       <section className="detail-section stats-row">
         <StatCard label={t("detail.sinceCreation")} value={daysSinceCreated === 0 ? t("common.today") : t("detail.createdAgo", { n: daysSinceCreated })} />
         <StatCard label={t("detail.activities")} value={String((client.activityLog ?? []).length)} />
-        <StatCard label={t("detail.lastUpdate")} value={client.lastUpdateDate ? formatTimeAgo(client.lastUpdateDate, t) : "—"} />
+        <StatCard label={t("detail.lastUpdate")} value={client.lastUpdateDate ? formatTimeAgo(client.lastUpdateDate, t, lang) : "—"} />
       </section>
 
       {toast && <div className="toast-single">{toast}</div>}
@@ -228,7 +230,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
 
 /* ── Sub-components ─────────────────────────────────────────── */
 
-function ActivityItem({ entry, t }: { entry: ActivityEntry; t: (key: string, vars?: Record<string, string | number>) => string }) {
+function ActivityItem({ entry, t, lang }: { entry: ActivityEntry; t: (key: string, vars?: Record<string, string | number>) => string; lang: string }) {
   const icons: Record<string, { icon: React.ReactNode; color: string }> = {
     CREATED: { icon: <Plus size={13} />, color: "#22c55e" },
     DELETED: { icon: <Trash2 size={13} />, color: "#ef4444" },
@@ -244,18 +246,18 @@ function ActivityItem({ entry, t }: { entry: ActivityEntry; t: (key: string, var
       <div className="timeline-dot" style={{ background: color }}>{icon}</div>
       <div className="timeline-content">
         <div className="timeline-header">
-          <span className="timeline-action">{entry.summary ?? entry.action}</span>
+          <span className="timeline-action">{describeActivity(t, entry)}</span>
           <span className="timeline-meta">
             <span className="actor">{entry.actor}</span>
-            <span className="time">· {formatTimeAgo(entry.timestamp, t)}</span>
+            <span className="time">· {formatTimeAgo(entry.timestamp, t, lang)}</span>
           </span>
         </div>
         {entry.field && (
           <div className="timeline-field-change">
-            <span className="field-name">{entry.field}</span>
-            {entry.oldValue !== undefined && <span className="old-value">{entry.oldValue}</span>}
-            {entry.oldValue !== undefined && <span className="arrow">→</span>}
-            {entry.newValue !== undefined && <span className="new-value">{entry.newValue}</span>}
+            <span className="field-name">{activityFieldLabel(t, entry.field)}</span>
+            {entry.oldValue !== undefined && <span className="old-value">{activityValueLabel(t, entry.field, entry.oldValue)}</span>}
+            {entry.oldValue !== undefined && <span className="arrow">{t("common.arrow")}</span>}
+            {entry.newValue !== undefined && <span className="new-value">{activityValueLabel(t, entry.field, entry.newValue)}</span>}
           </div>
         )}
       </div>

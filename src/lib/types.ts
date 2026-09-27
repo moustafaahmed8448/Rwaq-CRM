@@ -14,9 +14,16 @@ export interface ActivityEntry {
   timestamp: string;
   actor: string;
   action: ActivityAction;
+  /** Raw Client column key (e.g. "acquisitionChannel") so the UI can localize it. */
   field?: string;
   oldValue?: string;
   newValue?: string;
+  /** Client name, for entries that refer to a specific client (archived/restored). */
+  clientName?: string;
+  /**
+   * Legacy English prose written before activity logs were localized.
+   * Only used as a last-resort fallback for rows created before localization.
+   */
   summary?: string;
 }
 
@@ -59,7 +66,10 @@ export interface ClientData {
 export function makeActivityEntry(
   action: ActivityAction,
   actor: string,
-  opts?: { field?: string; oldValue?: string; newValue?: string; summary?: string }
+  opts?: { field?: string; oldValue?: string; newValue?: string; clientName?: string },
+  // No English prose is stored: the UI localizes the entry from `action` +
+  // `field` at render time (see describeActivity in src/lib/reporting.ts), so
+  // the same log reads correctly in Arabic and English.
 ): ActivityEntry {
   return {
     id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -70,13 +80,3 @@ export function makeActivityEntry(
   };
 }
 
-export function summarizeAction(action: ActivityAction, field?: string, oldValue?: string, newValue?: string): string {
-  if (action === "STATUS_CHANGE") return `Status changed: ${oldValue} → ${newValue}`;
-  if (action === "FIELD_EDIT" && field) return `${field} updated`;
-  if (action === "CREATED") return "Client created";
-  if (action === "NOTE_ADD" || action === "NOTE_EDIT") return "Notes updated";
-  if (action === "DELETED") return "Client deleted";
-  if (action === "ARCHIVED") return "Client archived";
-  if (action === "RESTORED") return "Client restored from archive";
-  return action;
-}
