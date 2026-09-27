@@ -19,6 +19,21 @@ if (orphans.length) {
 
 let bad = opens !== closes || orphans.length > 0;
 
+// The "selected option" state is applied to .ms-opt-row (the wrapper) while
+// .ms-opt is its child button. Any rule written as `.ms-opt.ms-opt-on` needs
+// both classes on ONE element and never matches — the dropdown then shows no
+// tick even though the filter is applied. This regressed silently once, so it
+// is now a hard failure rather than something to spot in a screenshot.
+const staleSelected = src
+  .split(/\r?\n/)
+  .map((l, i) => [i + 1, l])
+  .filter(([, l]) => /(^|[\s,>+~])\.ms-opt\.ms-opt-on\b/.test(l) && !/ROW|nothing|no longer/i.test(l));
+if (staleSelected.length) {
+  console.log("STALE .ms-opt.ms-opt-on (class lives on the row, not the button):");
+  for (const [n, l] of staleSelected) console.log("  " + n + ": " + l.trim());
+  bad = true;
+}
+
 // Confirm the compiled bundle actually contains the rules we added.
 const bundle = fs
   .readdirSync(".next", { recursive: true })
@@ -29,7 +44,7 @@ const bundle = fs
   .join("\n");
 
 if (bundle) {
-  const required = ["ms-opt-del", "ms-opt-row", "stage-row-fill", "funnel2-fill", "ltr-num", "login-v2-logo-img"];
+  const required = ["ms-opt-del", "ms-opt-row", "stage-row-fill", "funnel2-fill", "ltr-num", "login-v2-logo-img", "ms-opt-row.ms-opt-on"];
   const missing = required.filter((k) => !bundle.includes(k));
   console.log("compiled rules:", missing.length === 0 ? "all present" : "MISSING " + missing.join(", "));
   if (missing.length) bad = true;

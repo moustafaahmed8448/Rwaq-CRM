@@ -474,9 +474,16 @@ button { cursor: pointer; }
 .ms-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 200px; max-height: 262px; overflow-y: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 10px 28px rgba(17,24,39,.13); z-index: 60; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
 .ms-opt { border: 0; background: transparent; text-align: left; padding: 7px 9px; border-radius: 6px; font-size: 12px; color: #374151; cursor: pointer; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .ms-opt:hover { background: #f3f4f6; }
-.ms-opt.ms-opt-on { background: #ede9fe; color: #5b21b6; font-weight: 600; }
+/* Selected option. The state class sits on the ROW, not the button: .ms-opt is
+   wrapped in a .ms-opt-row so a remove control can sit beside it. Writing these
+   as `.ms-opt.ms-opt-on` requires both classes on one element and silently
+   never matches — the option then renders unmarked while the filter chip and
+   the "showing N" count still prove the selection is live. */
+.ms-opt-row.ms-opt-on { background: #ede9fe; }
+.ms-opt-row.ms-opt-on .ms-opt { color: #5b21b6; font-weight: 600; background: transparent; }
 .ms-check { width: 14px; height: 14px; border: 1px solid #d1d5db; border-radius: 4px; display: grid; place-items: center; flex-shrink: 0; background: #fff; color: #fff; }
-.ms-opt.ms-opt-on .ms-check { background: #7c3aed; border-color: #7c3aed; }
+.ms-opt-row.ms-opt-on .ms-check { background: #7c3aed; border-color: #7c3aed; }
+.ms-opt-row.ms-opt-on .ms-opt-count { color: #7c3aed; }
 .ms-clear { border: 0; border-top: 1px solid #e5e7eb; background: transparent; color: #dc2626; font-size: 11px; font-weight: 600; padding: 7px; margin-top: 4px; cursor: pointer; }
 .ms-clear:hover { background: #fee2e2; }
 .ms-empty { font-size: 11px; color: #9ca3af; padding: 7px 9px; }
@@ -486,7 +493,9 @@ button { cursor: pointer; }
 [data-theme="dark"] .ms-menu { background: #18181b; border-color: #2c2c31; box-shadow: 0 10px 28px rgba(0,0,0,.5); }
 [data-theme="dark"] .ms-opt { color: #d4d4d8; }
 [data-theme="dark"] .ms-opt:hover { background: #27272a; }
-[data-theme="dark"] .ms-opt.ms-opt-on { background: #2e1065; color: #c4b5fd; }
+[data-theme="dark"] .ms-opt-row.ms-opt-on { background: #2e1065; }
+[data-theme="dark"] .ms-opt-row.ms-opt-on .ms-opt { color: #c4b5fd; font-weight: 600; }
+[data-theme="dark"] .ms-opt-row.ms-opt-on .ms-check { background: #7c3aed; border-color: #7c3aed; }
 [data-theme="dark"] .ms-check { background: #18181b; border-color: #3f3f46; }
 [data-theme="dark"] .ms-clear { border-color: #2c2c31; }
 [data-theme="dark"] .filter-chip { background: #2e1065; color: #c4b5fd; }
@@ -1414,6 +1423,9 @@ input.ltr-num { text-align: left; }
    (custom) values get the control; built-ins are code constants. */
 .ms-opt-row { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
 .ms-opt-row:hover { background: #f3f4f6; }
+/* Declared after :hover because a selected row must keep its tint on hover
+   rather than flashing grey — same specificity, so source order decides. */
+.ms-opt-row.ms-opt-on:hover { background: #e4d9fd; }
 .ms-opt-row .ms-opt { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .ms-opt-count {
   margin-inline-start: auto; font-size: 10px; color: #9ca3af;
@@ -1427,6 +1439,7 @@ input.ltr-num { text-align: left; }
 }
 .ms-opt-del:hover { background: #fee2e2; color: #dc2626; }
 [data-theme="dark"] .ms-opt-row:hover { background: #27272a; }
+[data-theme="dark"] .ms-opt-row.ms-opt-on:hover { background: #3b1a7a; }
 [data-theme="dark"] .ms-opt-del { color: #52525b; }
 [data-theme="dark"] .ms-opt-del:hover { background: #3f1a1a; color: #fca5a5; }
 
