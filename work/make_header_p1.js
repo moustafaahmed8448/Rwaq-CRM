@@ -1,0 +1,89 @@
+const fs = require("fs");
+
+let p1 = `"use client";
+
+import { useEffect, useState } from "react";
+import { useLang } from "@/lib/i18n";
+import {
+  Bell, ChevronDown, LayoutDashboard, UsersRound, Layers, Settings, LogOut,
+  Sun, Moon, Menu, X as XIcon, Archive, CheckCheck, Globe, Palette,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+
+export type HeaderUser = { name: string; initials: string; role?: string };
+export type NavTab = "dashboard" | "clients" | "archived" | "marketing" | "settings";
+
+type Notif = { id: string; message: string; read: boolean; createdAt: string };
+
+const NAV: { key: NavTab; icon: React.ReactNode }[] = [
+  { key: "dashboard", icon: <LayoutDashboard size={16} /> },
+  { key: "clients", icon: <UsersRound size={16} /> },
+  { key: "archived", icon: <Archive size={16} /> },
+  { key: "marketing", icon: <Layers size={16} /> },
+  { key: "settings", icon: <Settings size={16} /> },
+];
+
+export default function AppHeader({
+  user, active, onNavigate, badge, darkMode, onToggleDark,
+}: {
+  user: HeaderUser;
+  active?: NavTab;
+  onNavigate?: (tab: NavTab) => void;
+  badge?: React.ReactNode;
+  darkMode: boolean;
+  onToggleDark: () => void;
+}) {
+  const router = useRouter();
+  const { t, lang, setLang } = useLang();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Notif[]>([]);
+
+  useEffect(() => {
+    fetch("/api/auth/me").then((r) => r.json()).then((d) => {
+      const l = d?.user?.language;
+      if (l === "ar" || l === "en") setLang(l);
+    }).catch(() => {});
+  }, []);
+
+  const refreshNotifications = () => {
+    fetch("/api/notifications").then((r) => r.json()).then((d) => setNotifications(d.notifications ?? [])).catch(() => {});
+  };
+
+  useEffect(() => { refreshNotifications(); }, []);
+
+  useEffect(() => {
+    const onChange = () => refreshNotifications();
+    window.addEventListener("rwaq-notifications-changed", onChange);
+    return () => window.removeEventListener("rwaq-notifications-changed", onChange);
+  }, []);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const markAllRead = async () => {
+    if (unreadCount === 0) return;
+    await fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).catch(() => {});
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const visibleNav = NAV.filter(item => item.key !== "marketing" || user.role === "Admin");
+  const go = (tab: NavTab) => {
+    if (tab === "marketing" && user.role !== "Admin") return;
+    setMobileMenuOpen(false);
+    if (onNavigate) { onNavigate(tab); return; }
+    if (tab === "dashboard") router.push("/");
+    else if (tab === "clients") router.push("/?view=clients");
+    else if (tab === "archived") router.push("/archived");
+    else if (tab === "marketing") router.push("/marketing");
+    else router.push("/settings");
+  };
+
+  const logout = async () => {
+    setMobileMenuOpen(false);
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+  };
+`;
+
+fs.writeFileSync("work/header_p1.txt", p1, "utf8");
+console.log("Wrote header_p1.txt");

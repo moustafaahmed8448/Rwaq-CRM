@@ -53,6 +53,8 @@ ALTER TABLE "MarketingMetric" ADD COLUMN IF NOT EXISTS "notes"  text;
 -- 4. Application users (replaces data/rwaq-users.json).
 -- ─────────────────────────────────────────────────────────────────────────────
 
+ALTER TABLE "AppUser" ADD COLUMN IF NOT EXISTS "language" text NOT NULL DEFAULT 'ar';
+
 CREATE TABLE IF NOT EXISTS "AppUser" (
     "id"        uuid        NOT NULL,
     "username"  text        NOT NULL,
@@ -60,6 +62,7 @@ CREATE TABLE IF NOT EXISTS "AppUser" (
     "email"     text,
     "role"      text        NOT NULL DEFAULT 'Sales',
     "hash"      text        NOT NULL,
+    "language"  text        NOT NULL DEFAULT 'ar',
     "createdAt" timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" timestamp(3) NOT NULL,
     CONSTRAINT "AppUser_pkey" PRIMARY KEY ("id")

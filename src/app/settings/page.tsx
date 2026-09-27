@@ -2,6 +2,9 @@
 import { useEffect, useState } from "react";
 import { UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plus, Users, Check, Settings, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useLang } from "@/lib/i18n";
+import { apiErrorMessage } from "@/lib/api-errors";
+import { roleLabel } from "@/lib/reporting";
 import AppHeader from "@/components/AppHeader";
 
 type User = { name: string; initials: string; role: string; email?: string; avatar?: string };
@@ -9,6 +12,7 @@ type ManagedUser = { username: string; name: string; email?: string; role: strin
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { t, lang, setLang } = useLang();
   const [user, setUser] = useState<User | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
@@ -61,7 +65,7 @@ export default function SettingsPage() {
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { setError("Image must be under 2MB"); return; }
+    if (file.size > 2 * 1024 * 1024) { setError(t("settings.errAvatarTooBig")); return; }
     const reader = new FileReader();
     reader.onload = ev => {
       const url = ev.target?.result as string;
@@ -88,38 +92,38 @@ export default function SettingsPage() {
         body: JSON.stringify({ name: editName, email: editEmail }),
       });
       const d = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(d.error || "Failed to save");
+      if (!res.ok) throw new Error(apiErrorMessage(t, d.error));
       setUser(u => u ? { ...u, name: editName, email: editEmail } : null);
-      setSaveMsg("Profile saved successfully");
+      setSaveMsg(t("settings.profileSaved"));
     } catch (e: unknown) { setError((e as Error).message); }
   };
 
   const changePassword = async () => {
     setError(""); setSaveMsg("");
-    if (newPassword.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (newPassword.length < 6) { setError(t("settings.errPasswordMin")); return; }
     try {
       const res = await fetch("/api/settings/password", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       const d = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(d.error || "Failed");
+      if (!res.ok) throw new Error(apiErrorMessage(t, d.error));
       setCurrentPassword(""); setNewPassword("");
-      setSaveMsg("Password changed successfully");
+      setSaveMsg(t("settings.passwordChanged"));
     } catch (e: unknown) { setError((e as Error).message); }
   };
 
   const addUser = async () => {
     setUserErr("");
-    if (!newUser.name || !newUser.username || !newUser.password) { setUserErr("Name, username, and password required"); return; }
-    if (newUser.password.length < 6) { setUserErr("Password min 6 chars"); return; }
+    if (!newUser.name || !newUser.username || !newUser.password) { setUserErr(t("settings.errUserRequired")); return; }
+    if (newUser.password.length < 6) { setUserErr(t("settings.errPasswordMinShort")); return; }
     try {
       const res = await fetch("/api/users", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newUser),
       });
       const d = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(d.error || "Failed");
+      if (!res.ok) throw new Error(apiErrorMessage(t, d.error));
       setNewUser({ name: "", username: "", email: "", password: "", role: "Sales" });
       setShowAddUser(false);
       await loadUsers();
@@ -127,7 +131,7 @@ export default function SettingsPage() {
   };
 
   const deleteUser = async (username: string) => {
-    if (!confirm(`Delete user "${username}"?`)) return;
+    if (!confirm(t("settings.deleteUserConfirm", { name: username }))) return;
     await fetch("/api/users", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username }) });
     await loadUsers();
   };
@@ -153,9 +157,9 @@ export default function SettingsPage() {
         }),
       });
       const d = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(d.error || "Failed to update user");
+      if (!res.ok) throw new Error(apiErrorMessage(t, d.error));
       setEditingUsername(null);
-      setSaveMsg("User updated");
+      setSaveMsg(t("settings.userUpdated"));
       await loadUsers();
     } catch (e: unknown) { setUserErr((e as Error).message); }
     finally { setSavingUser(false); }
@@ -163,7 +167,7 @@ export default function SettingsPage() {
 
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); };
 
-  if (!user) return <div className="shell-loading"><div className="spinner"/><p>Loading...</p></div>;
+  if (!user) return <div className="shell-loading"><div className="spinner"/><p>{t("common.loading")}</p></div>;
 
   return (
     <main className="shell">
@@ -172,121 +176,146 @@ export default function SettingsPage() {
       <div className="content">
         <div className="page-header">
           <div>
-            <div className="breadcrumb"><Settings size={14} />Settings</div>
-            <h1>Settings</h1>
-            <p>Manage your account and preferences.</p>
+            <div className="breadcrumb"><Settings size={14} />{t("settings.title")}</div>
+            <h1>{t("settings.title")}</h1>
+            <p>{t("settings.subtitle")}</p>
           </div>
           <div className="header-actions">
-            <span className={`role-badge ${user.role.toLowerCase()}`}>{user.role}</span>
+            <span className={`role-badge ${user.role.toLowerCase()}`}>{roleLabel(t, user.role)}</span>
           </div>
         </div>
 
         <div className="settings-container">
+        {/* ── Preferences ── */}
+        <section className="settings-section">
+          <div className="section-header">
+            <h2>{t("settings.preferences")}</h2>
+            <span className="section-sub">{t("settings.language")}</span>
+          </div>
+          <div className="lang-switch" dir="ltr" role="group" aria-label={t("settings.language")}>
+            <button
+              type="button"
+              className={lang === "ar" ? "active" : ""}
+              aria-pressed={lang === "ar"}
+              onClick={() => setLang("ar")}
+            >
+              العربية
+            </button>
+            <button
+              type="button"
+              className={lang === "en" ? "active" : ""}
+              aria-pressed={lang === "en"}
+              onClick={() => setLang("en")}
+            >
+              English
+            </button>
+          </div>
+        </section>
         {/* ── Profile ── */}
         <section className="settings-section">
           <div className="section-header">
-            <h2>Profile</h2>
-            <span className="section-sub">Your public information</span>
+            <h2>{t("settings.profile")}</h2>
+            <span className="section-sub">{t("settings.profileSubtitle")}</span>
           </div>
           <div className="avatar-row">
             <div className="avatar-wrapper">
               {avatarUrl
-                ? <img src={avatarUrl} alt="Avatar" className="avatar-img" />
+                ? <img src={avatarUrl} alt={t("settings.avatarAlt")} className="avatar-img" />
                 : <div className="avatar-default">{user.initials}</div>
               }
-              <label className="avatar-upload" title="Change photo">
+              <label className="avatar-upload" title={t("settings.changePhoto")}>
                 <Camera size={14} />
                 <input type="file" accept="image/*" onChange={handleAvatarUpload} hidden />
               </label>
             </div>
             <div className="avatar-info">
-              <p className="avatar-hint">Upload a photo (max 2MB). Shown on your profile.</p>
-              {avatarUrl && <button className="btn-text-danger" onClick={removeAvatar}><X size={13}/>Remove</button>}
-              {savingAvatar && <span className="saving-indicator">Saving…</span>}
+              <p className="avatar-hint">{t("settings.avatarHint")}</p>
+              {avatarUrl && <button className="btn-text-danger" onClick={removeAvatar}><X size={13}/>{t("settings.remove")}</button>}
+              {savingAvatar && <span className="saving-indicator">{t("settings.saving")}</span>}
             </div>
           </div>
           <div className="form-grid-2">
-            <Field label="Full name"><input value={editName} onChange={e=>setEditName(e.target.value)} /></Field>
-            <Field label="Email"><input type="email" value={editEmail} onChange={e=>setEditEmail(e.target.value)} placeholder={user.email || "No email set"} /></Field>
+            <Field label={t("settings.field.fullName")}><input value={editName} onChange={e=>setEditName(e.target.value)} /></Field>
+            <Field label={t("settings.field.email")}><input type="email" value={editEmail} onChange={e=>setEditEmail(e.target.value)} placeholder={user.email || t("settings.noEmail")} /></Field>
           </div>
-          <button className="btn-primary" onClick={saveProfile}><Save size={15}/>Save profile</button>
+          <button className="btn-primary" onClick={saveProfile}><Save size={15}/>{t("settings.saveProfile")}</button>
         </section>
 
         {/* ── Change Password ── */}
         <section className="settings-section">
           <div className="section-header">
-            <h2>Change password</h2>
-            <span className="section-sub">Update your login credentials</span>
+            <h2>{t("settings.changePassword")}</h2>
+            <span className="section-sub">{t("settings.passwordSubtitle")}</span>
           </div>
           <div className="form-group">
-            <label>Current password</label>
+            <label>{t("settings.field.currentPassword")}</label>
             <div className="password-input">
               <Key size={14}/>
-              <input type={showPassword?"text":"password"} value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} placeholder="Enter current password"/>
+              <input type={showPassword?"text":"password"} value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} placeholder={t("settings.currentPasswordPh")}/>
               <button type="button" onClick={()=>setShowPassword(!showPassword)}>{showPassword?<EyeOff size={14}/>:<Eye size={14}/>}</button>
             </div>
           </div>
           <div className="form-group">
-            <label>New password</label>
+            <label>{t("settings.field.newPassword")}</label>
             <div className="password-input">
               <Key size={14}/>
-              <input type={showPassword?"text":"password"} value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="At least 6 characters"/>
+              <input type={showPassword?"text":"password"} value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder={t("auth.min6")}/>
             </div>
           </div>
-          <button className="btn-outline" onClick={changePassword}>Update password</button>
+          <button className="btn-outline" onClick={changePassword}>{t("settings.updatePassword")}</button>
         </section>
 
         {/* ── Team Members (admin only) ── */}
         {user.role === "Admin" && (
           <section className="settings-section">
             <div className="section-header">
-              <h2><Users size={14} style={{display:"inline",verticalAlign:"middle",marginRight:6}}/>Team Members</h2>
+              <h2><Users size={14} style={{display:"inline",verticalAlign:"middle",marginRight:6}}/>{t("settings.teamMembers")}</h2>
               <button className="btn-primary" onClick={()=>setShowAddUser(!showAddUser)} style={{fontSize:11,padding:"6px 12px"}}>
-                <Plus size={13}/>{showAddUser ? "Cancel" : "Add user"}
+                <Plus size={13}/>{showAddUser ? t("common.cancel") : t("settings.addUser")}
               </button>
             </div>
 
             {showAddUser && (
               <div className="add-user-form">
                 <div className="form-grid-2">
-                  <Field label="Full name"><input value={newUser.name} onChange={e=>setNewUser(u=>({...u,name:e.target.value}))} placeholder="Full name"/></Field>
-                  <Field label="Username"><input value={newUser.username} onChange={e=>setNewUser(u=>({...u,username:e.target.value.toLowerCase()}))} placeholder="username"/></Field>
-                  <Field label="Email"><input type="email" value={newUser.email} onChange={e=>setNewUser(u=>({...u,email:e.target.value}))} placeholder="email@example.com"/></Field>
-                  <Field label="Password"><input type="password" value={newUser.password} onChange={e=>setNewUser(u=>({...u,password:e.target.value}))} placeholder="Min 6 characters"/></Field>
-                  <Field label="Role">
+                  <Field label={t("settings.field.fullName")}><input value={newUser.name} onChange={e=>setNewUser(u=>({...u,name:e.target.value}))} placeholder={t("settings.fullNamePh")}/></Field>
+                  <Field label={t("settings.field.username")}><input value={newUser.username} onChange={e=>setNewUser(u=>({...u,username:e.target.value.toLowerCase()}))} placeholder={t("settings.usernamePh")}/></Field>
+                  <Field label={t("settings.field.email")}><input type="email" value={newUser.email} onChange={e=>setNewUser(u=>({...u,email:e.target.value}))} placeholder={t("settings.emailPh")}/></Field>
+                  <Field label={t("settings.field.password")}><input type="password" value={newUser.password} onChange={e=>setNewUser(u=>({...u,password:e.target.value}))} placeholder={t("settings.passwordMinPh")}/></Field>
+                  <Field label={t("settings.field.role")}>
                     <select value={newUser.role} onChange={e=>setNewUser(u=>({...u,role:e.target.value}))} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 10px",fontSize:12,outline:"none"}}>
-                      <option value="Admin">Admin</option>
-                      <option value="Sales">Sales</option>
-                      <option value="CRM">CRM</option>
+                      <option value="Admin">{roleLabel(t, "Admin")}</option>
+                      <option value="Sales">{roleLabel(t, "Sales")}</option>
+                      <option value="CRM">{roleLabel(t, "CRM")}</option>
                     </select>
                   </Field>
                 </div>
                 {userErr && <div className="settings-error" style={{marginTop:8}}>{userErr}</div>}
-                <button className="btn-primary" onClick={addUser} style={{marginTop:10}}><Check size={14}/>Create user</button>
+                <button className="btn-primary" onClick={addUser} style={{marginTop:10}}><Check size={14}/>{t("settings.addUser")}</button>
               </div>
             )}
 
             <div className="users-list">
-              {managedUsers.length === 0 && <p className="muted" style={{fontSize:12,padding:"8px 0"}}>No team members yet.</p>}
+              {managedUsers.length === 0 && <p className="muted" style={{fontSize:12,padding:"8px 0"}}>{t("settings.noTeam")}</p>}
               {managedUsers.map(u => (
                 editingUsername === u.username ? (
                   <div className="edit-user-row" key={u.username}>
                     <div className="form-grid-2">
-                      <Field label="Full name"><input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))}/></Field>
-                      <Field label="Username"><input value={editForm.username} onChange={e=>setEditForm(f=>({...f,username:e.target.value.toLowerCase()}))}/></Field>
-                      <Field label="Email"><input type="email" value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} placeholder="email@example.com"/></Field>
-                      <Field label="Role">
+                      <Field label={t("settings.field.fullName")}><input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))}/></Field>
+                      <Field label={t("settings.field.username")}><input value={editForm.username} onChange={e=>setEditForm(f=>({...f,username:e.target.value.toLowerCase()}))}/></Field>
+                      <Field label={t("settings.field.email")}><input type="email" value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} placeholder={t("settings.emailPh")}/></Field>
+                      <Field label={t("settings.field.role")}>
                         <select value={editForm.role} onChange={e=>setEditForm(f=>({...f,role:e.target.value}))} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 10px",fontSize:12,outline:"none"}}>
-                          <option value="Admin">Admin</option>
-                          <option value="Sales">Sales</option>
-                          <option value="CRM">CRM</option>
+                          <option value="Admin">{roleLabel(t, "Admin")}</option>
+                          <option value="Sales">{roleLabel(t, "Sales")}</option>
+                          <option value="CRM">{roleLabel(t, "CRM")}</option>
                         </select>
                       </Field>
                     </div>
                     {userErr && <div className="settings-error" style={{marginTop:8}}>{userErr}</div>}
                     <div style={{display:"flex",gap:8,marginTop:10}}>
-                      <button className="btn-primary" onClick={saveUserEdit} disabled={savingUser}><Save size={13}/>{savingUser ? "Saving…" : "Save changes"}</button>
-                      <button className="btn-ghost" onClick={()=>{setEditingUsername(null);setUserErr("");}}>Cancel</button>
+                      <button className="btn-primary" onClick={saveUserEdit} disabled={savingUser}><Save size={13}/>{savingUser ? t("settings.saving") : t("common.saveChanges")}</button>
+                      <button className="btn-ghost" onClick={()=>{setEditingUsername(null);setUserErr("");}}>{t("common.cancel")}</button>
                     </div>
                   </div>
                 ) : (
@@ -294,11 +323,11 @@ export default function SettingsPage() {
                     <div className="user-row-avatar">{u.name.slice(0,2).toUpperCase()}</div>
                     <div className="user-row-info">
                       <strong>{u.name}</strong>
-                      <small>@{u.username} · {u.email || "No email"}</small>
+                      <small>@{u.username} · {u.email || t("settings.noEmail")}</small>
                     </div>
-                    <span className={`role-badge ${u.role.toLowerCase()}`}>{u.role}</span>
-                    <button className="icon-btn-sm" onClick={()=>startEditUser(u)} title="Edit user"><Pencil size={13}/></button>
-                    <button className="icon-btn-sm danger" onClick={()=>deleteUser(u.username)} title="Delete user"><Trash2 size={13}/></button>
+                    <span className={`role-badge ${u.role.toLowerCase()}`}>{roleLabel(t, u.role)}</span>
+                    <button className="icon-btn-sm" onClick={()=>startEditUser(u)} title={t("settings.editUser")}><Pencil size={13}/></button>
+                    <button className="icon-btn-sm danger" onClick={()=>deleteUser(u.username)} title={t("settings.deleteUserTitle")}><Trash2 size={13}/></button>
                   </div>
                 )
               ))}
@@ -309,13 +338,13 @@ export default function SettingsPage() {
         {/* ── Danger zone ── */}
         <section className="settings-section danger-zone">
           <div className="section-header">
-            <h2>Danger zone</h2>
-            <span className="section-sub">Irreversible actions</span>
+            <h2>{t("settings.dangerZone")}</h2>
+            <span className="section-sub">{t("settings.dangerZoneSubtitle")}</span>
           </div>
-          <p>Clear all locally stored data including clients, metrics, and custom statuses. This cannot be undone.</p>
+          <p>{t("settings.clearLocalBody")}</p>
           <div className="danger-actions">
-            <button className="btn-danger" onClick={()=>{if(confirm("Clear all local data?")){localStorage.clear();window.location.reload();}}}><Trash2 size={15}/>Clear local data</button>
-            <button className="btn-ghost" onClick={logout}><LogOut size={15}/>Sign out</button>
+            <button className="btn-danger" onClick={()=>{if(confirm(t("settings.clearLocalConfirm"))){localStorage.clear();window.location.reload();}}}><Trash2 size={15}/>{t("settings.clearLocal")}</button>
+            <button className="btn-ghost" onClick={logout}><LogOut size={15}/>{t("settings.signOut")}</button>
           </div>
         </section>
 

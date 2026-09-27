@@ -11,8 +11,10 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import { useLang } from "@/lib/i18n";
 import type { MarketingMetric } from "@/lib/types";
-import { sar } from "@/lib/format";
+import { sar, dateLocale } from "@/lib/format";
+import { channelLabel } from "@/lib/reporting";
 import { downloadFile, exportQuery } from "@/lib/download";
 import "./marketing.css";
 
@@ -23,13 +25,10 @@ const CH_COLORS: Record<string, string> = {
   GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2",
 };
 const DEFAULT_CHANNELS = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"];
-const CH_LABELS: Record<string, string> = {
-  FACEBOOK: "Facebook", INSTAGRAM: "Instagram", X: "X", TIKTOK: "TikTok",
-  GOOGLE_ADS: "Google Ads", WHATSAPP: "WhatsApp", CALLS: "Calls", SALES: "Sales",
-};
 
 export default function MarketingPage() {
   const router = useRouter();
+  const { t, lang } = useLang();
   const [user, setUser] = useState<User | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [metrics, setMetrics] = useState<MarketingMetric[]>([]);
@@ -102,10 +101,10 @@ export default function MarketingPage() {
       channel = ch;
     }
     const errors: Record<string, string> = {};
-    if (!form.startDate) errors.startDate = "Required";
-    if (!form.endDate) errors.endDate = "Required";
-    if (form.startDate && form.endDate && form.startDate > form.endDate) errors.endDate = "Must be after start";
-    if (!form.spend && form.spend !== "0") errors.spend = "Required";
+    if (!form.startDate) errors.startDate = t("form.required");
+    if (!form.endDate) errors.endDate = t("form.required");
+    if (form.startDate && form.endDate && form.startDate > form.endDate) errors.endDate = t("form.afterStart");
+    if (!form.spend && form.spend !== "0") errors.spend = t("form.required");
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setFormErrors({});
 
@@ -123,7 +122,7 @@ export default function MarketingPage() {
   };
 
   const deleteMetric = async (id: string) => {
-    if (!confirm("Delete this metric?")) return;
+    if (!confirm(t("mkt.deleteConfirm"))) return;
     await fetch("/api/marketing/metrics", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
     await loadMetrics();
   };
@@ -153,8 +152,8 @@ export default function MarketingPage() {
       mo.spend += Number(m.spend ?? 0); mo.reach += Number(m.reach ?? 0); mo.clicks += Number(m.clicks ?? 0);
       months.set(key, mo);
     }
-    return [...months.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([period, d]) => ({ period, ...d, label: new Date(period + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" }) }));
-  }, [filteredMetrics]);
+    return [...months.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([period, d]) => ({ period, ...d, label: new Date(period + "-01").toLocaleDateString(dateLocale(lang), { month: "short", year: "numeric" }) }));
+  }, [filteredMetrics, lang]);
 
   const channelBreakdown = useMemo(() => {
     const map = new Map<string, { spend: number; reach: number; clicks: number }>();
@@ -164,10 +163,10 @@ export default function MarketingPage() {
       map.set(m.channel, ch);
     }
     return [...map.entries()].map(([channel, d]) => ({
-      channel, name: CH_LABELS[channel] ?? channel, spend: d.spend, reach: d.reach, clicks: d.clicks,
+      channel, name: channelLabel(t, channel), spend: d.spend, reach: d.reach, clicks: d.clicks,
       cpm: d.reach > 0 ? (d.spend / d.reach * 1000).toFixed(2) : "0", cpc: d.clicks > 0 ? (d.spend / d.clicks).toFixed(2) : "0",
     }));
-  }, [filteredMetrics]);
+  }, [filteredMetrics, t]);
 
   const rankedChannels = useMemo(
     () => channelBreakdown.filter(c => Number(c.cpm) > 0).sort((a, b) => Number(a.cpm) - Number(b.cpm)),
@@ -177,7 +176,7 @@ export default function MarketingPage() {
   const worstChannel = rankedChannels[rankedChannels.length - 1];
   const bestMonth = useMemo(() => [...monthlyData].sort((a, b) => b.spend - a.spend)[0], [monthlyData]);
 
-  if (!user) return <div className="shell-loading"><div className="spinner"/><p>Loading...</p></div>;
+  if (!user) return <div className="shell-loading"><div className="spinner" /><p>{t("common.loading")}</p></div>;
 
   return (
     <div className="shell marketing-shell">
@@ -188,10 +187,10 @@ export default function MarketingPage() {
         <div className="mkt-hero">
           <div className="mkt-hero-top">
             <div>
-              <div className="breadcrumb mkt-crumb"><Layers size={14} />MARKETING WORKSPACE</div>
-              <h1>Make every campaign count.</h1>
-              <p>Your investment, audience, and channel performance in one place.</p>
-              <span className="mkt-period"><Calendar size={13} /> All-time overview</span>
+              <div className="breadcrumb mkt-crumb"><Layers size={14} />{t("mkt.workspace")}</div>
+              <h1>{t("mkt.title")}</h1>
+              <p>{t("mkt.sub")}</p>
+              <span className="mkt-period"><Calendar size={13} /> {t("dash.allTime")}</span>
             </div>
             <div className="header-actions">
               <button className="btn-outline mkt-hero-btn" onClick={() => {
@@ -202,49 +201,49 @@ export default function MarketingPage() {
                   from: fromDate || undefined,
                   to: toDate || undefined,
                 })}`, `marketing-${new Date().toISOString().slice(0, 10)}.xlsx`)
-                  .catch(() => alert("Export failed. Please try again."));
-              }}><Download size={15} />Export Excel</button>
-              <button className="btn-primary mkt-hero-primary" onClick={openAdd}><Plus size={15} />Add metric</button>
+                  .catch(() => alert(t("mkt.exportFail")));
+              }}><Download size={15} />{t("mkt.exportExcel")}</button>
+              <button className="btn-primary mkt-hero-primary" onClick={openAdd}><Plus size={15} />{t("mkt.addMetric")}</button>
             </div>
           </div>
           <div className="mkt-hero-stats">
-            <div className="mkt-stat"><span>{sar(totalSpend)}</span><small>Tracked spend</small></div>
-            <div className="mkt-stat"><span>{channelBreakdown.length}</span><small>Active channels</small></div>
-            <div className="mkt-stat"><span>{totalClicks.toLocaleString()}</span><small>Total clicks</small></div>
-            <div className="mkt-stat"><span>{filteredMetrics.length}</span><small>Records logged</small></div>
+            <div className="mkt-stat"><span>{sar(totalSpend)}</span><small>{t("dash.trackedSpend")}</small></div>
+            <div className="mkt-stat"><span>{channelBreakdown.length}</span><small>{t("dash.activeChannels")}</small></div>
+            <div className="mkt-stat"><span>{totalClicks.toLocaleString()}</span><small>{t("dash.totalClicks")}</small></div>
+            <div className="mkt-stat"><span>{filteredMetrics.length}</span><small>{t("dash.recordsLogged")}</small></div>
           </div>
         </div>
 
         {/* ── KPI row ── */}
         {loading
-          ? <div className="shell-loading" style={{ minHeight: 60, gridTemplateColumns: "repeat(4,1fr)" }}><div className="spinner" /><p>Loading metrics…</p></div>
+          ? <div className="shell-loading" style={{ minHeight: 60, gridTemplateColumns: "repeat(4,1fr)" }}><div className="spinner" /><p>{t("dash.loadingMetrics")}</p></div>
           : <>
             <section className="kpi-row">
-              <KpiCard label="Total spend" value={sar(totalSpend)} sub={`${filteredMetrics.length} records`} accent="#4f46e5" icon={<DollarSign size={14}/>} />
-              <KpiCard label="Total reach" value={totalReach.toLocaleString()} sub="Impressions reached" accent="#0891b2" icon={<EyeIcon size={14}/>} />
-              <KpiCard label="Avg CPM" value={sar(avgCPM)} sub="Cost per 1K reach" accent="#f59e0b" icon={<TrendingUp size={14}/>} />
-              <KpiCard label="Avg CPC" value={sar(avgCPC)} sub="Cost per click" accent="#16a34a" icon={<MousePointer size={14}/>} />
+              <KpiCard label={t("mkt.totalSpend")} value={sar(totalSpend)} sub={t("dash.kpiRecords", { n: filteredMetrics.length })} accent="#4f46e5" icon={<DollarSign size={14} />} />
+              <KpiCard label={t("mkt.totalReach")} value={totalReach.toLocaleString()} sub={t("dash.kpiReachSub")} accent="#0891b2" icon={<EyeIcon size={14} />} />
+              <KpiCard label={t("mkt.avgCpm")} value={sar(avgCPM)} sub={t("dash.kpiCpmSub")} accent="#f59e0b" icon={<TrendingUp size={14} />} />
+              <KpiCard label={t("mkt.avgCpc")} value={sar(avgCPC)} sub={t("dash.kpiCpcSub")} accent="#16a34a" icon={<MousePointer size={14} />} />
             </section>
 
             {/* ── Filters: date range + channel ── */}
             <section className="mkt-filters">
               <div className="mkt-filter-field">
-                <label>From</label>
+                <label>{t("common.from")}</label>
                 <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
               </div>
               <div className="mkt-filter-field">
-                <label>To</label>
+                <label>{t("common.to")}</label>
                 <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
               </div>
               <div className="mkt-filter-field">
-                <label>Channel</label>
+                <label>{t("form.channel")}</label>
                 <select value={channelFilter} onChange={e => setChannelFilter(e.target.value)}>
-                  <option value="ALL">All channels</option>
-                  {allChannels.map(ch => <option key={ch} value={ch}>{CH_LABELS[ch] ?? ch}</option>)}
+                  <option value="ALL">{t("ch.all")}</option>
+                  {allChannels.map(ch => <option key={ch} value={ch}>{channelLabel(t, ch)}</option>)}
                 </select>
               </div>
               {(fromDate || toDate || channelFilter !== "ALL") && (
-                <button className="btn-ghost mkt-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setChannelFilter("ALL"); }}>Clear filters</button>
+                <button className="btn-ghost mkt-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setChannelFilter("ALL"); }}>{t("dash.clearFilters")}</button>
               )}
             </section>
 
@@ -253,40 +252,40 @@ export default function MarketingPage() {
               <div className="mkt-highlight mkt-hl-good">
                 <span className="mkt-hl-icon"><ArrowDownRight size={16} /></span>
                 <div>
-                  <small>Most efficient channel</small>
+                  <small>{t("dash.bestChannel")}</small>
                   <strong>{bestChannel ? bestChannel.name : "—"}</strong>
-                  <span>{bestChannel ? `${sar(bestChannel.cpm)} CPM · ${sar(bestChannel.spend)} spend` : "No data yet"}</span>
+                  <span>{bestChannel ? t("dash.cpmSpend", { cpm: sar(bestChannel.cpm), spend: sar(bestChannel.spend) }) : t("common.noData")}</span>
                 </div>
               </div>
               <div className="mkt-highlight mkt-hl-bad">
                 <span className="mkt-hl-icon"><ArrowUpRight size={16} /></span>
                 <div>
-                  <small>Highest cost channel</small>
+                  <small>{t("dash.worstChannel")}</small>
                   <strong>{worstChannel && worstChannel !== bestChannel ? worstChannel.name : "—"}</strong>
-                  <span>{worstChannel && worstChannel !== bestChannel ? `${sar(worstChannel.cpm)} CPM · ${sar(worstChannel.spend)} spend` : "Not enough data"}</span>
+                  <span>{worstChannel && worstChannel !== bestChannel ? t("dash.cpmSpend", { cpm: sar(worstChannel.cpm), spend: sar(worstChannel.spend) }) : t("dash.notEnough")}</span>
                 </div>
               </div>
               <div className="mkt-highlight">
                 <span className="mkt-hl-icon"><Calendar size={16} /></span>
                 <div>
-                  <small>Peak period</small>
+                  <small>{t("dash.peakPeriod")}</small>
                   <strong>{bestMonth?.label ?? "—"}</strong>
-                  <span>{bestMonth ? `${sar(bestMonth.spend)} spend` : "No data yet"}</span>
+                  <span>{bestMonth ? t("dash.spendOnly", { spend: sar(bestMonth.spend) }) : t("common.noData")}</span>
                 </div>
               </div>
               <div className="mkt-highlight">
                 <span className="mkt-hl-icon"><TrendingUp size={16} /></span>
                 <div>
-                  <small>Avg cost per 1K reach</small>
+                  <small>{t("dash.kpiCpmSub")}</small>
                   <strong>{sar(avgCPM)}</strong>
-                  <span>{`${totalReach.toLocaleString()} reach`}</span>
+                  <span>{t("dash.reachCount", { n: totalReach.toLocaleString() })}</span>
                 </div>
               </div>
             </section>
 
-            <div className="chart-row-2">
+            <div className="chart-row-2" dir="ltr">
               <div className="panel">
-                <div className="mkt-chart-heading"><div><span className="mkt-eyebrow">INVESTMENT TREND</span><h3>Spend over time</h3></div><span className="mkt-chart-note">Latest 6 months with records</span></div>
+                <div className="mkt-chart-heading"><div><span className="mkt-eyebrow">{t("dash.trendEyebrow")}</span><h3>{t("dash.trendTitle")}</h3></div><span className="mkt-chart-note">{t("dash.trendNote")}</span></div>
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={monthlyData.slice(0, 6).reverse()}>
                     <CartesianGrid stroke="#e5e7eb" vertical={false} />
@@ -299,7 +298,7 @@ export default function MarketingPage() {
                 </ResponsiveContainer>
               </div>
               <div className="panel">
-                <div className="mkt-chart-heading"><div><span className="mkt-eyebrow">BUDGET DISTRIBUTION</span><h3>Spend by channel</h3></div><span className="mkt-chart-note">{channelBreakdown.length} channels</span></div>
+                <div className="mkt-chart-heading"><div><span className="mkt-eyebrow">{t("dash.budgetEyebrow")}</span><h3>{t("dash.budgetTitle")}</h3></div><span className="mkt-chart-note">{t("dash.channelsCount", { n: channelBreakdown.length })}</span></div>
                 <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
                     <Pie data={channelBreakdown.map(c => ({ name: c.name, value: c.spend }))} cx="50%" cy="50%" outerRadius={85} innerRadius={55} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} dataKey="value">
@@ -313,9 +312,9 @@ export default function MarketingPage() {
 
             {/* ── Channel breakdown table ── */}
             <section className="panel">
-              <h3>Channel breakdown <small>{channelBreakdown.length} channels</small></h3>
+              <h3>{t("brk.title")} <small>{t("dash.channelsCount", { n: channelBreakdown.length })}</small></h3>
               <div className="table-head-row">
-                <span>Channel</span><span>Spend</span><span>Reach</span><span>Clicks</span><span>CPM</span><span>CPC</span>
+                <span>{t("dash.thChannel")}</span><span>{t("dash.thSpend")}</span><span>{t("dash.thReach")}</span><span>{t("dash.thClicks")}</span><span>{t("dash.thCpm")}</span><span>{t("dash.thCpc")}</span>
               </div>
               {channelBreakdown.map(c => (
                 <div className="table-row" key={c.channel}>
@@ -325,30 +324,30 @@ export default function MarketingPage() {
                   <span>{sar(c.cpc)}</span>
                 </div>
               ))}
-              {channelBreakdown.length === 0 && <div className="empty-state">No channel data yet. Click &quot;Add metric&quot; to record your first entry.</div>}
+              {channelBreakdown.length === 0 && <div className="empty-state">{t("dash.breakdownEmpty")}</div>}
             </section>
 
             {/* ── Recent entries ── */}
             <section className="panel">
               <div className="panel-heading">
-                <h3>Recent entries</h3>
-                <span className="muted" style={{ fontSize: 11 }}>{filteredMetrics.length} total</span>
+                <h3>{t("dash.recentEntries")}</h3>
+                <span className="muted" style={{ fontSize: 11 }}>{t("common.records", { n: filteredMetrics.length })}</span>
               </div>
               <div className="recent-row recent-head">
-                <span /><span>Channel</span><span>Period</span><span>Spend</span><span>Reach</span><span>Notes</span><span />
+                <span /><span>{t("dash.thChannel")}</span><span>{t("dash.thPeriod")}</span><span>{t("dash.thSpend")}</span><span>{t("dash.thReach")}</span><span>{t("dash.thNotes")}</span><span />
               </div>
-              {filteredMetrics.length === 0 && <div className="empty-state">No metrics recorded yet.</div>}
+              {filteredMetrics.length === 0 && <div className="empty-state">{t("dash.noMetrics")}</div>}
               {filteredMetrics.slice(-10).reverse().map(m => (
                 <div className="recent-row" key={m.id}>
                   <span className="dot" style={{ background: CH_COLORS[m.channel] }} />
-                  <span className="r-channel">{CH_LABELS[m.channel] ?? m.channel}</span>
-                  <span className="r-period">{new Date(m.startDate).toLocaleDateString()} — {new Date(m.endDate).toLocaleDateString()}</span>
+                  <span className="r-channel">{channelLabel(t, m.channel)}</span>
+                  <span className="r-period">{new Date(m.startDate).toLocaleDateString(dateLocale(lang))} — {new Date(m.endDate).toLocaleDateString(dateLocale(lang))}</span>
                   <span className="r-spend">{sar(Number(m.spend))}</span>
                   <span className="r-reach">{Number(m.reach).toLocaleString()}</span>
                   <span className="muted" style={{ flex: 1 }}>{m.notes ? m.notes.slice(0, 40) : "—"}</span>
                   <div className="r-actions no-detail">
-                    <button className="icon-btn-sm" onClick={() => openEdit(m)} title="Edit"><Edit3 size={12} /></button>
-                    <button className="icon-btn-sm danger" onClick={() => deleteMetric(m.id)} title="Delete"><Trash2 size={12} /></button>
+                    <button className="icon-btn-sm" onClick={() => openEdit(m)} title={t("common.edit")}><Edit3 size={12} /></button>
+                    <button className="icon-btn-sm danger" onClick={() => deleteMetric(m.id)} title={t("common.delete")}><Trash2 size={12} /></button>
                   </div>
                 </div>
               ))}
@@ -361,30 +360,30 @@ export default function MarketingPage() {
         <div className="modal-overlay" onClick={closeForm}>
           <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{editingId ? "Edit metric" : "Add metric"}</h2>
+              <h2>{editingId ? t("mkt.editMetric") : t("mkt.addMetric")}</h2>
               <button className="modal-close" onClick={closeForm}><X size={18} /></button>
             </div>
             <div className="modal-body">
               <div className="form-grid">
-                <Field label="Channel">
+                <Field label={t("form.channel")}>
                   <select value={form.channel} onChange={e => setForm(f => ({ ...f, channel: e.target.value, customChannelName: e.target.value === "__custom__" ? "" : f.customChannelName }))}>
-                    {allChannels.map(ch => <option key={ch} value={ch}>{CH_LABELS[ch] ?? ch}</option>)}
-                    <option value="__custom__">+ Add custom channel…</option>
+                    {allChannels.map(ch => <option key={ch} value={ch}>{channelLabel(t, ch)}</option>)}
+                    <option value="__custom__">{t("mkt.addCustom")}</option>
                   </select>
                 </Field>
                 {form.channel === "__custom__" && (
-                  <Field label="New channel name">
-                    <input placeholder="e.g. LINKEDIN" value={form.customChannelName} onChange={e => setForm(f => ({ ...f, customChannelName: e.target.value.toUpperCase() }))} />
+                  <Field label={t("mkt.newChannel")}>
+                    <input placeholder={t("mkt.newChannelPh")} value={form.customChannelName} onChange={e => setForm(f => ({ ...f, customChannelName: e.target.value.toUpperCase() }))} />
                   </Field>
                 )}
-                <Field label="Start date"><input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} /></Field>
-                <Field label="End date"><input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></Field>
-                <Field label="Spend ($)"><input type="number" min="0" step="0.01" placeholder="0.00" value={form.spend} onChange={e => setForm(f => ({ ...f, spend: e.target.value }))} /></Field>
-                <Field label="Reach"><input type="number" min="0" placeholder="0" value={form.reach} onChange={e => setForm(f => ({ ...f, reach: e.target.value }))} /></Field>
-                <Field label="Clicks"><input type="number" min="0" placeholder="0" value={form.clicks} onChange={e => setForm(f => ({ ...f, clicks: e.target.value }))} /></Field>
-                <Field label="Impressions"><input type="number" min="0" placeholder="0" value={form.impressions} onChange={e => setForm(f => ({ ...f, impressions: e.target.value }))} /></Field>
-                <Field label="Notes" wide>
-                  <textarea rows={2} placeholder="Optional notes…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                <Field label={t("mkt.startDate")}><input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} /></Field>
+                <Field label={t("mkt.endDate")}><input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></Field>
+                <Field label={t("mkt.spend")}><input type="number" min="0" step="0.01" placeholder="0.00" value={form.spend} onChange={e => setForm(f => ({ ...f, spend: e.target.value }))} /></Field>
+                <Field label={t("mkt.reach")}><input type="number" min="0" placeholder="0" value={form.reach} onChange={e => setForm(f => ({ ...f, reach: e.target.value }))} /></Field>
+                <Field label={t("mkt.clicks")}><input type="number" min="0" placeholder="0" value={form.clicks} onChange={e => setForm(f => ({ ...f, clicks: e.target.value }))} /></Field>
+                <Field label={t("mkt.impressions")}><input type="number" min="0" placeholder="0" value={form.impressions} onChange={e => setForm(f => ({ ...f, impressions: e.target.value }))} /></Field>
+                <Field label={t("mkt.notes")} wide>
+                  <textarea rows={2} placeholder={t("mkt.notesPh")} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                 </Field>
               </div>
               {Object.keys(formErrors).length > 0 && (
@@ -394,8 +393,8 @@ export default function MarketingPage() {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn-ghost" onClick={closeForm}>Cancel</button>
-              <button className="btn-primary" onClick={handleSubmit}><Save size={15} />{editingId ? "Save changes" : "Add metric"}</button>
+              <button className="btn-ghost" onClick={closeForm}>{t("common.cancel")}</button>
+              <button className="btn-primary" onClick={handleSubmit}><Save size={15} />{editingId ? t("common.saveChanges") : t("mkt.addMetric")}</button>
             </div>
           </div>
         </div>

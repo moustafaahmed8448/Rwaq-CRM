@@ -1,0 +1,64 @@
+const dictionaries: Record<Lang, Record<string, string>> = { ar, en };
+
+const LANG_EVENT = "rwaq-lang-changed";
+
+export function resolveLang(): Lang {
+  if (typeof window === "undefined") return DEFAULT_LANG;
+  const v = window.localStorage.getItem(LANG_KEY);
+  return v === "ar" || v === "en" ? (v as Lang) : DEFAULT_LANG;
+}
+
+export function setDocumentLang(lang: Lang): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+}
+
+function interpolate(str: string, vars?: Record<string, string | number>): string {
+  if (!vars) return str;
+  return str.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+}
+
+// Apply the persisted language to the document on first client load.
+if (typeof window !== "undefined") setDocumentLang(resolveLang());
+
+export interface I18nValue {
+  readonly lang: Lang;
+  readonly setLang: (lang: Lang) => void;
+  readonly t: (key: string, vars?: Record<string, string | number>) => string;
+}
+
+export function useLang(): I18nValue {
+  const [lang, setLangState] = useState<Lang>(resolveLang);
+
+  useEffect(() => {
+    const refresh = () => setLangState((prev) => (prev === resolveLang() ? prev : resolveLang()));
+    window.addEventListener(LANG_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(LANG_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
+
+  const setLang = useCallback((next: Lang) => {
+    const clean: Lang = next === "en" ? "en" : "ar";
+    localStorage.setItem(LANG_KEY, clean);
+    setDocumentLang(clean);
+    setLangState(clean);
+    window.dispatchEvent(new Event(LANG_EVENT));
+    fetch("/api/auth/update-profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: clean }),
+    }).catch(() => {});
+  }, []);
+
+  const t = useCallback(
+    (key: string, vars?: Record<string, string | number>) =>
+      interpolate(dictionaries[lang]?.[key] ?? dictionaries[DEFAULT_LANG]?.[key] ?? key, vars),
+    [lang],
+  );
+
+  return useMemo<I18nValue>(() => ({ lang, setLang, t }), [lang, setLang, t]);
+}

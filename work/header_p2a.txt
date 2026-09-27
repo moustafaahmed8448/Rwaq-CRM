@@ -1,0 +1,107 @@
+  return (
+    <>
+      <header className="topbar">
+        <div className="topbar-left">
+          <button
+            type="button"
+            className="mobile-menu-btn"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label={t("header.menu")}
+            title={t("header.menu")}
+          >
+            <Menu size={20} />
+          </button>
+          <span className="brand-letter">R</span>
+          <span className="brand-name">rwaq</span>
+          {badge}
+        </div>
+
+        <nav className="topbar-nav">
+          {visibleNav.map((item) => (
+            <button key={item.key} onClick={() => go(item.key)} className={active === item.key ? "active" : ""}>
+              {item.icon}{t("nav." + item.key)}
+            </button>
+          ))}
+        </nav>
+
+        <div className="topbar-right">
+          <div className="lang-switch" dir="ltr">
+            <button
+              type="button"
+              className={lang === "ar" ? "active" : ""}
+              onClick={() => setLang("ar")}
+            >
+              AR
+            </button>
+            <button
+              type="button"
+              className={lang === "en" ? "active" : ""}
+              onClick={() => setLang("en")}
+            >
+              EN
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={onToggleDark}
+            title={darkMode ? t("header.switchLight") : t("header.switchDark")}
+            aria-label={darkMode ? t("header.switchLight") : t("header.switchDark")}
+          >
+            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+
+          <div className="user-dropdown">
+            <button
+              type="button"
+              className="icon-btn"
+              title={t("header.notifications")}
+              onClick={() => { setNotifOpen((o) => !o); if (!notifOpen) refreshNotifications(); }}
+            >
+              <Bell size={16} />{unreadCount > 0 && <i />}
+            </button>
+            <div className={`dropdown-menu notif-menu ${notifOpen ? "open" : ""}`}>
+              <div className="notif-head">
+                <strong>{t("header.notifications")}</strong>
+                {unreadCount > 0 && <button type="button" onClick={markAllRead}>{t("header.markAllRead")}</button>}
+              </div>
+              {unreadCount === 0 && (
+                <div className="notif-allread"><CheckCheck size={13} /> {t("header.allCaughtUp")}</div>
+              )}
+              {notifications.filter((n) => !n.read).slice(0, 30).map((n) => (
+                <div key={n.id} className="notif-item unread">
+                  <span className="notif-new-dot" />
+                  <div><strong>{n.message}</strong><small>{new Date(n.createdAt).toLocaleString()}</small></div>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="notif-footer"
+                onClick={() => { setNotifOpen(false); router.push("/notifications"); }}
+              >
+                {t("header.viewAll")}
+              </button>
+            </div>
+          </div>
+
+          <div className="user-dropdown">
+            <button
+              type="button"
+              className="user-pill"
+              onClick={() => document.getElementById("app-user-menu")?.classList.toggle("open")}
+            >
+              <span className="user-avatar">{user.initials}</span>
+              <span>{user.name}</span>
+              <ChevronDown size={14} className="chevron" />
+            </button>
+            <div id="app-user-menu" className="dropdown-menu">
+              {user.role && (
+                <div className="menu-role"><span className={`role-badge ${user.role.toLowerCase()}`}>{user.role}</span></div>
+              )}
+              <button type="button" onClick={() => go("settings")}><Settings size={14} />{t("nav.settings")}</button>
+              <button type="button" className="dropdown-danger" onClick={logout}><LogOut size={14} />{t("header.signOut")}</button>
+            </div>
+          </div>
+        </div>
+      </header>

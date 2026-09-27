@@ -65,6 +65,7 @@ model AppUser {
   email     String?
   role      String   @default("Sales")
   hash      String
+  language  String   @default("ar")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

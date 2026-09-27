@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, ArchiveRestore, Trash2, Search, UsersRound, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import { useLang } from "@/lib/i18n";
+import { apiErrorMessage } from "@/lib/api-errors";
+import { channelLabel, statusLabel } from "@/lib/reporting";
+import { dateLocale } from "@/lib/format";
 
 type Client = {
   id: string; name: string; phoneNumber: string; status: string;
@@ -12,13 +16,9 @@ type Client = {
   notes?: string; createdAt?: string; lastUpdateDate?: string; archived?: boolean; archivedAt?: string;
 };
 
-const CH_LABELS: Record<string, string> = {
-  FACEBOOK: "Facebook", INSTAGRAM: "Instagram", X: "X", TIKTOK: "TikTok",
-  GOOGLE_ADS: "Google Ads", WHATSAPP: "WhatsApp", CALLS: "Calls", SALES: "Sales",
-};
-
 export default function ArchivedPage() {
   const router = useRouter();
+  const { t, lang } = useLang();
   const [user, setUser] = useState<{ name: string; initials: string; role: string } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
@@ -74,16 +74,16 @@ export default function ArchivedPage() {
     });
     if (r.ok) {
       setClients((prev) => prev.filter((x) => x.id !== c.id));
-      showToast(`“${c.name}” restored`);
+      showToast(t("archive.restored", { name: c.name }));
     } else {
       const d = await r.json().catch(() => ({}));
-      showToast(d.error || "Could not restore client");
+      showToast(d.error ? apiErrorMessage(t, d.error) : t("archive.restoreFail"));
     }
     setBusyId(null);
   };
 
   const destroy = async (c: Client) => {
-    if (!confirm(`Permanently delete “${c.name}”? This cannot be undone.`)) return;
+    if (!confirm(t("archive.deleteConfirm", { name: c.name }))) return;
     setBusyId(c.id);
     const r = await fetch("/api/crm/clients", {
       method: "DELETE", headers: { "Content-Type": "application/json" },
@@ -91,15 +91,15 @@ export default function ArchivedPage() {
     });
     if (r.ok) {
       setClients((prev) => prev.filter((x) => x.id !== c.id));
-      showToast(`“${c.name}” deleted`);
+      showToast(t("archive.deleted", { name: c.name }));
     } else {
       const d = await r.json().catch(() => ({}));
-      showToast(d.error || "Could not delete client");
+      showToast(d.error ? apiErrorMessage(t, d.error) : t("archive.deleteFail"));
     }
     setBusyId(null);
   };
 
-  if (!user) return <div className="shell-loading"><div className="spinner" /><p>Loading…</p></div>;
+  if (!user) return <div className="shell-loading"><div className="spinner" /><p>{t("common.loading")}</p></div>;
 
   return (
     <div className="shell">
@@ -108,34 +108,34 @@ export default function ArchivedPage() {
       <div className="content">
         <div className="page-header">
           <div>
-            <div className="breadcrumb"><Archive size={14} />Archive</div>
-            <h1>Archived clients</h1>
-            <p>Archived clients stay here safely. Restore them any time, or delete permanently if you&apos;re an admin.</p>
+            <div className="breadcrumb"><Archive size={14} />{t("archive.crumbs")}</div>
+            <h1>{t("archive.title")}</h1>
+            <p>{t("archive.sub")}</p>
           </div>
           <div className="header-actions">
             <div className="search-box">
               <Search size={15} />
-              <input placeholder="Search archived clients…" value={query} onChange={(e) => setQuery(e.target.value)} />
+              <input placeholder={t("archive.searchPh")} value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
           </div>
         </div>
 
         {!isAdmin && (
-          <div className="archive-note"><AlertCircle size={14} /> Only admins can archive, restore, or permanently delete clients. Your access here is read-only.</div>
+          <div className="archive-note"><AlertCircle size={14} /> {t("archive.adminNote")}</div>
         )}
 
         <section className="panel">
           <div className="panel-heading">
-            <h3>Archive <small>{clients.length} client{clients.length === 1 ? "" : "s"}</small></h3>
-            <span className="muted" style={{ fontSize: 11 }}>{isAdmin ? "Admin — full control" : `${user.role} — read only`}</span>
+            <h3>{t("archive.heading")} <small>{t("archive.clientsCount", { n: clients.length })}</small></h3>
+            <span className="muted" style={{ fontSize: 11 }}>{isAdmin ? t("archive.adminFull") : t("archive.readOnly", { role: user.role })}</span>
           </div>
 
-          {loading && <div className="empty-state">Loading archived clients…</div>}
+          {loading && <div className="empty-state">{t("archive.loading")}</div>}
           {!loading && shown.length === 0 && (
             <div className="archive-empty">
               <UsersRound size={26} />
-              <strong>{clients.length === 0 ? "Nothing archived yet" : "No matches"}</strong>
-              <span>{clients.length === 0 ? "Clients you archive will appear here." : "Try a different search."}</span>
+              <strong>{clients.length === 0 ? t("archive.nothing") : t("archive.noMatch")}</strong>
+              <span>{clients.length === 0 ? t("archive.nothingSub") : t("archive.noMatchSub")}</span>
             </div>
           )}
 
@@ -146,17 +146,17 @@ export default function ArchivedPage() {
                 <strong>{c.name}</strong>
                 <small>{c.phoneNumber} · {c.project} · {c.location}</small>
               </div>
-              <span className="chan-tag"><i className="dot" />{CH_LABELS[c.acquisitionChannel] ?? c.acquisitionChannel}</span>
-              <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{c.status}</span>
+              <span className="chan-tag"><i className="dot" />{channelLabel(t, c.acquisitionChannel)}</span>
+              <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>
               <span className="muted archive-date">
-                {c.archivedAt ? `Archived ${new Date(c.archivedAt).toLocaleDateString()}` : "Archived"}
+                {c.archivedAt ? t("common.archivedOn", { date: new Date(c.archivedAt).toLocaleDateString(dateLocale(lang)) }) : t("archive.archivedLabel")}
               </span>
               <div className="archive-actions">
                 {isAdmin && <button className="btn-outline btn-sm" disabled={busyId === c.id} onClick={() => restore(c)}>
-                  <ArchiveRestore size={13} />Restore
+                  <ArchiveRestore size={13} />{t("clients.restore")}
                 </button>}
                 {isAdmin && (
-                  <button className="icon-btn danger" title="Delete permanently" disabled={busyId === c.id} onClick={() => destroy(c)}>
+                  <button className="icon-btn danger" title={t("archive.deleteTitle")} disabled={busyId === c.id} onClick={() => destroy(c)}>
                     <Trash2 size={14} />
                   </button>
                 )}

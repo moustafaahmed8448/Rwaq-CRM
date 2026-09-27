@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated, unauthorized } from "@/lib/auth";
 import { addSettingValue, databaseErrorMessage, listClients, readSetting } from "@/lib/db";
 
-const DEFAULT_LOCATIONS = ["New Cairo", "6th of October", "North Coast"];
+const DEFAULT_LOCATIONS = ["Riyadh", "Jeddah", "Makkah", "Madinah", "Dammam", "Khobar", "Dhahran", "Taif", "Abha", "Tabuk"];
 
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();

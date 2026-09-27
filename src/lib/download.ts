@@ -2,11 +2,14 @@
  * Trigger an authenticated file download from an API route.
  * Shared by every export button (clients, selected clients, marketing).
  */
+/** Sent when the export request fails without a usable API message. */
+export const EXPORT_FAILED = "Export failed";
+
 export async function downloadFile(url: string, fallbackName: string): Promise<void> {
   const response = await fetch(url, { cache: "no-store" });
 
   if (!response.ok) {
-    let message = "Export failed";
+    let message = EXPORT_FAILED;
     try {
       const data = (await response.json()) as { error?: string };
       if (data?.error) message = data.error;

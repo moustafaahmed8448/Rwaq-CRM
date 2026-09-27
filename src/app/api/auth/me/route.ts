@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if (session === DEMO_SESSION) {
     return NextResponse.json({
       authenticated: true,
-      user: { name: "Amira Mansour", initials: "AM", role: "Admin", email: "demo@rwaq.app" },
+      user: { name: "Amira Mansour", initials: "AM", role: "Admin", email: "demo@rwaq.app", language: "ar" },
     });
   }
 
@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
             initials: user.name.slice(0, 2).toUpperCase(),
             role: normalizeRole(user.role, user.username),
             email: user.email ?? "",
+            language: user.language,
           },
         });
       }

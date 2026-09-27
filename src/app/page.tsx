@@ -9,8 +9,11 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
-import { downloadFile, exportQuery } from "@/lib/download";
-import { sar } from "@/lib/format";
+import { resolveLang, useLang } from "@/lib/i18n";
+import { apiErrorMessage, readApiError } from "@/lib/api-errors";
+import { channelLabel, statusLabel } from "@/lib/reporting";
+import { downloadFile, exportQuery, EXPORT_FAILED } from "@/lib/download";
+import { dateLocale, sar } from "@/lib/format";
 
 type Client = {
   id: string; name: string; phoneNumber: string;
@@ -30,18 +33,25 @@ type SpStat = { name: string; won: number; lost: number; waiting: number; total:
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const CH_COLORS: Record<string, string> = { FACEBOOK: "#4f46e5", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed", GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2" };
-const CH_LABELS: Record<string, string> = { FACEBOOK: "Facebook", INSTAGRAM: "Instagram", X: "X", TIKTOK: "TikTok", GOOGLE_ADS: "Google Ads", WHATSAPP: "WhatsApp", CALLS: "Calls", SALES: "Sales" };
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
 const PREDEFINED_STATUSES = ["WAITING", "WON", "LOST"];
-const STATUS_LABELS: Record<string, string> = { WAITING: "Waiting", WON: "Won", LOST: "Lost" };
-const CUSTOM_LOCATIONS = ["New Cairo", "6th of October", "North Coast"] as const;
+const CUSTOM_LOCATIONS = ["Riyadh", "Jeddah", "Makkah", "Madinah", "Dammam", "Khobar", "Dhahran", "Taif", "Abha", "Tabuk"] as const;
 
+// `label` holds a dictionary key so the preset keeps a stable identity while
+// the rendered text follows the selected language (see FilterBar).
 const DATE_PRESETS: DatePreset[] = [
-  { label: "Today", startDate: new Date().toISOString().slice(0, 10) },
-  { label: "This week", startDate: (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10); })() },
-  { label: "Last 7 days", startDate: (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10); })() },
-  { label: "This month", startDate: (() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); })() },
+  { label: "date.today", startDate: new Date().toISOString().slice(0, 10) },
+  { label: "date.week", startDate: (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10); })() },
+  { label: "date.last7", startDate: (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10); })() },
+  { label: "date.month", startDate: (() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); })() },
 ];
+
+// Field key -> dictionary key, used by the "field updated" toast.
+const FIELD_KEYS: Record<string, string> = {
+  name: "form.name", phoneNumber: "form.phone", project: "form.project", location: "form.location",
+  acquisitionChannel: "form.channel", status: "form.status", firstContactPerson: "form.firstContact",
+  secondContactPerson: "form.secondContact", operationToTake: "form.operation", notes: "form.notes",
+};
 
 const initialFilters: Filters = { query: "", status: [], channel: [], location: [], salesperson: [], startDate: "", endDate: "" };
 
@@ -63,6 +73,7 @@ let toastId = 0;
 
 export default function Home() {
   const router = useRouter();
+  const { t, lang } = useLang();
   const [user, setUser] = useState<User | null>(null);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -261,15 +272,15 @@ export default function Home() {
 
   const saveEdit = async () => {
     if (!editDraft) return;
-    if (!editDraft.name || editDraft.name.trim().length < 2) { addToast("error", "Name must be at least 2 characters"); return; }
-    if (!editDraft.phoneNumber || editDraft.phoneNumber.trim().length < 5) { addToast("error", "Phone number must be at least 5 characters"); return; }
+    if (!editDraft.name || editDraft.name.trim().length < 2) { addToast("error", t("form.errNameMin")); return; }
+    if (!editDraft.phoneNumber || editDraft.phoneNumber.trim().length < 5) { addToast("error", t("form.errPhoneMin")); return; }
 
     if (editDraft.id) {
       await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editDraft) });
       setClients(prev => prev.map(c => c.id === editDraft.id ? { ...c, ...editDraft, lastUpdateDate: new Date().toISOString() } : c));
       if (detailClient?.id === editDraft.id) setDetailClient(prev => prev ? { ...prev, ...editDraft } : null);
       closeEdit();
-      addToast("success", `Saved changes for ${editDraft.name}`);
+      addToast("success", t("clients.savedToast", { name: editDraft.name ?? "" }));
       return;
     }
 
@@ -283,32 +294,31 @@ export default function Home() {
       }),
     });
     if (!res.ok) {
-      const d = await res.json().catch(() => ({})) as { error?: unknown };
-      addToast("error", typeof d.error === "string" ? d.error : "Please fill in all required fields");
+      addToast("error", apiErrorMessage(t, await readApiError(res)));
       return;
     }
     const d = await res.json() as { client?: Client };
     if (d.client) setClients(prev => [d.client as Client, ...prev]);
     closeEdit();
-    addToast("success", `Client “${editDraft.name}” created`);
+    addToast("success", t("clients.createdToast", { name: editDraft.name ?? "" }));
   };
 
   const deleteSelected = async () => {
     if (!confirmDelete || confirmDelete.ids.length === 0) return;
-    if (user?.role !== "Admin") { addToast("error", "Only admins can permanently delete clients"); return; }
+    if (user?.role !== "Admin") { addToast("error", t("archive.adminNote")); return; }
     for (const id of confirmDelete.ids) await fetch("/api/crm/clients", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
     setClients(prev => prev.filter(c => !confirmDelete.ids.includes(c.id)));
     setSelectedIds(new Set());
     closeDelete();
-    addToast("success", `Deleted ${confirmDelete.ids.length} client(s)`);
+    addToast("success", t("clients.bulkDeleted", { n: confirmDelete.ids.length }));
   };
   const closeDelete = () => setConfirmDelete(null);
 
   const archiveClient = async (id: string) => {
     const r = await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, archived: true }) });
-    if (!r.ok) { const d = await r.json().catch(() => ({})); addToast("error", (d as { error?: string }).error || "Could not archive client"); return; }
+    if (!r.ok) { addToast("error", apiErrorMessage(t, await readApiError(r))); return; }
     setClients(prev => prev.filter(c => c.id !== id));
-    addToast("info", "Client archived — find it on the Archived page");
+    addToast("info", t("clients.archivedToast"));
   };
 
   const archiveSelected = async () => {
@@ -317,7 +327,7 @@ export default function Home() {
     for (const id of ids) await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, archived: true }) });
     setClients(prev => prev.filter(c => !selectedIds.has(c.id)));
     setSelectedIds(new Set());
-    addToast("info", `Archived ${ids.length} client(s)`);
+    addToast("info", t("clients.bulkArchived", { n: ids.length }));
   };
 
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -327,7 +337,7 @@ export default function Home() {
     await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
     setClients(prev => prev.map(c => c.id === id ? { ...c, status, lastUpdateDate: new Date().toISOString() } : c));
     if (detailClient?.id === id) setDetailClient(prev => prev ? { ...prev, status } : null);
-    addToast("info", `Status changed to ${STATUS_LABELS[status] ?? status}`);
+    addToast("info", t("clients.statusToast", { status: statusLabel(t, status) }));
   };
 
   const updateClientField = async (id: string, patch: Partial<Client>) => {
@@ -335,7 +345,13 @@ export default function Home() {
     setClients(prev => prev.map(c => c.id === id ? { ...c, ...patch, lastUpdateDate: new Date().toISOString() } : c));
     if (detailClient?.id === id) setDetailClient(prev => prev ? { ...prev, ...patch } : null);
     const [k, v] = Object.entries(patch)[0] ?? [];
-    if (k) addToast("info", `Updated ${k} to ${v}`);
+    if (k) {
+      const field = FIELD_KEYS[k];
+      const value = k === "status" ? statusLabel(t, String(v))
+        : k === "acquisitionChannel" ? channelLabel(t, String(v))
+        : String(v ?? "");
+      addToast("info", t("clients.fieldToast", { field: field ? t(field) : k, value }));
+    }
   };
 
   const refreshNotifications = () => {
@@ -360,7 +376,9 @@ export default function Home() {
       await downloadFile(`/api/export/clients${exportQuery(params)}`, fallbackName);
       addToast("success", successMessage);
     } catch (e) {
-      addToast("error", e instanceof Error ? e.message : "Export failed");
+      addToast("error", e instanceof Error && e.message !== EXPORT_FAILED
+        ? apiErrorMessage(t, e.message)
+        : t("clients.exportFail"));
     } finally {
       setExporting(false);
     }
@@ -380,17 +398,17 @@ export default function Home() {
         to: filters.endDate,
       },
       `rwaq-clients-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      `Exported ${filteredClients.length} client${filteredClients.length === 1 ? "" : "s"} to Excel`,
+      t("clients.exportedToast", { n: filteredClients.length }),
     );
   };
 
   const exportSelected = () => {
     const ids = [...selectedIds];
-    if (ids.length === 0) { addToast("info", "No clients selected"); return; }
+    if (ids.length === 0) { addToast("info", t("clients.noSelection")); return; }
     void exportClientsFile(
       { ids: ids.join(",") },
       `rwaq-clients-selected-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      `Exported ${ids.length} client${ids.length === 1 ? "" : "s"} to Excel`,
+      t("clients.exportedToast", { n: ids.length }),
     );
   };
 
@@ -398,7 +416,7 @@ export default function Home() {
 
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); };
 
-  if (!user) return <main className="shell-loading"><div className="spinner" /><p>Loading workspace...</p></main>;
+  if (!user) return <main className="shell-loading"><div className="spinner" /><p>{t("common.loadingWorkspace")}</p></main>;
 
   return (
     <main className="shell">
@@ -407,7 +425,7 @@ export default function Home() {
         active={view}
         badge={filteredClients.length !== clients.length
           ? <span className="badge-count">{filteredClients.length}/{clients.length}</span>
-          : (waiting > 0 ? <span className="badge">{waiting} pending</span> : null)}
+          : (waiting > 0 ? <span className="badge">{t("dash.clientsInView", { n: waiting })}</span> : null)}
         darkMode={darkMode}
         onToggleDark={() => setDarkMode(d => !d)}
         onNavigate={(tab) => {
@@ -431,6 +449,7 @@ export default function Home() {
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             onAddStatus={addStatus} onAddChannel={addChannel} onAddLocation={addLocation}
             onExport={exportReport} exporting={exporting}
+            t={t}
           />
         ) : (
           <ClientsView
@@ -457,6 +476,7 @@ export default function Home() {
             applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset}
             datePresets={DATE_PRESETS}
             filterCount={activeFilterCount}
+            t={t}
           />
         )}
       </div>
@@ -465,38 +485,38 @@ export default function Home() {
       {editDraft && (
         <div className="modal-overlay" onClick={closeEdit}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>{editDraft.id ? "Edit client" : "New client"}</h2><button className="modal-close" onClick={closeEdit}><XIcon size={18} /></button></div>
+            <div className="modal-header"><h2>{editDraft.id ? t("clients.editTitle") : t("clients.addTitle")}</h2><button className="modal-close" onClick={closeEdit}><XIcon size={18} /></button></div>
             <div className="modal-body">
               <div className="form-grid">
-                <Field label="Name"><input value={editDraft.name ?? ""} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} /></Field>
-                <Field label="Phone"><input value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} /></Field>
-                <Field label="Project"><input value={editDraft.project ?? ""} onChange={e => setEditDraft({ ...editDraft, project: e.target.value })} /></Field>
-                <Field label="Location">
-                  <AddNewSelect value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} placeholder="Select location…" />
+                <Field label={t("form.name")}><input value={editDraft.name ?? ""} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} /></Field>
+                <Field label={t("form.phone")}><input value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} /></Field>
+                <Field label={t("form.project")} wide><textarea rows={3} value={editDraft.project ?? ""} onChange={e => setEditDraft({ ...editDraft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
+                <Field label={t("form.location")}>
+                  <AddNewSelect value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} placeholder={t("form.locationPh")} t={t} />
                 </Field>
-                <Field label="Channel">
-                  <AddNewSelect value={editDraft.acquisitionChannel ?? ""} options={allChannels} onAdd={addChannel} onChange={v => setEditDraft({ ...editDraft, acquisitionChannel: v })} render={v => CH_LABELS[v] ?? v} placeholder="Select channel…" />
+                <Field label={t("form.channel")}>
+                  <AddNewSelect value={editDraft.acquisitionChannel ?? ""} options={allChannels} onAdd={addChannel} onChange={v => setEditDraft({ ...editDraft, acquisitionChannel: v })} render={v => channelLabel(t, v)} placeholder={t("form.channelPh")} t={t} />
                 </Field>
-                <Field label="Status">
-                  <AddNewSelect value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} placeholder="Select status…" />
+                <Field label={t("form.status")}>
+                  <AddNewSelect value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} placeholder={t("form.statusPh")} t={t} />
                 </Field>
-                <Field label="1st contact">
+                <Field label={t("form.firstContact")}>
                   <select value={editDraft.firstContactPerson ?? ""} onChange={e => setEditDraft({ ...editDraft, firstContactPerson: e.target.value })}>
-                    <option value="">Select salesperson...</option>
+                    <option value="">{t("form.unassigned")}</option>
                     {users.map(u => <option key={u.username} value={u.name}>{u.name}</option>)}
                   </select>
                 </Field>
-                <Field label="2nd contact">
+                <Field label={t("form.secondContact")}>
                   <select value={editDraft.secondContactPerson ?? ""} onChange={e => setEditDraft({ ...editDraft, secondContactPerson: e.target.value })}>
-                    <option value="">-- None --</option>
+                    <option value="">{t("form.noneOption")}</option>
                     {users.map(u => <option key={u.username} value={u.name}>{u.name}</option>)}
                   </select>
                 </Field>
-                <Field label="Next operation" wide><input value={editDraft.operationToTake ?? ""} onChange={e => setEditDraft({ ...editDraft, operationToTake: e.target.value })} /></Field>
-                <Field label="Notes" wide><textarea value={editDraft.notes ?? ""} onChange={e => setEditDraft({ ...editDraft, notes: e.target.value })} rows={3} placeholder="Internal notes about this client..." /></Field>
+                <Field label={t("form.operation")} wide><input value={editDraft.operationToTake ?? ""} onChange={e => setEditDraft({ ...editDraft, operationToTake: e.target.value })} placeholder={t("form.operationPh")} /></Field>
+                <Field label={t("form.notes")} wide><textarea value={editDraft.notes ?? ""} onChange={e => setEditDraft({ ...editDraft, notes: e.target.value })} rows={3} placeholder={t("form.notesPh")} /></Field>
               </div>
             </div>
-            <div className="modal-footer"><button className="btn-ghost" onClick={closeEdit}>Cancel</button><button className="btn-primary" onClick={saveEdit}><Check size={15} />{editDraft.id ? "Save changes" : "Create client"}</button></div>
+            <div className="modal-footer"><button className="btn-ghost" onClick={closeEdit}>{t("common.cancel")}</button><button className="btn-primary" onClick={saveEdit}><Check size={15} />{editDraft.id ? t("clients.saveBtn") : t("clients.createBtn")}</button></div>
           </div>
         </div>
       )}
@@ -505,11 +525,11 @@ export default function Home() {
       {confirmDelete && (
         <div className="modal-overlay" onClick={closeDelete}>
           <div className="modal delete-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>{confirmDelete.ids.length > 1 ? "Delete clients" : "Delete client"}</h2><button className="modal-close" onClick={closeDelete}><XIcon size={18} /></button></div>
+            <div className="modal-header"><h2>{t("clients.deleteTitle", { n: confirmDelete.ids.length })}</h2><button className="modal-close" onClick={closeDelete}><XIcon size={18} /></button></div>
             <div className="modal-body">
-              <div className="delete-warning"><AlertCircle size={28} /><div><strong>Are you sure?</strong><p>You&apos;re about to delete <em>{confirmDelete.ids.length} client(s)</em>. This action cannot be undone.</p>{confirmDelete.names.length > 0 && <p className="delete-names">{confirmDelete.names.join(", ")}</p>}</div></div>
+              <div className="delete-warning"><AlertCircle size={28} /><div><strong>{t("common.confirm")}</strong><p>{t("clients.deleteBody")}</p>{confirmDelete.names.length > 0 && <p className="delete-names">{confirmDelete.names.join(", ")}</p>}</div></div>
             </div>
-            <div className="modal-footer"><button className="btn-ghost" onClick={closeDelete}>Cancel</button><button className="btn-danger" onClick={deleteSelected}><Trash2 size={15} />Delete</button></div>
+            <div className="modal-footer"><button className="btn-ghost" onClick={closeDelete}>{t("common.cancel")}</button><button className="btn-danger" onClick={deleteSelected}><Trash2 size={15} />{t("common.delete")}</button></div>
           </div>
         </div>
       )}
@@ -519,33 +539,33 @@ export default function Home() {
         <div className="detail-overlay" onClick={closeDetail}>
           <div className="detail-panel" onClick={e => e.stopPropagation()}>
             <div className="detail-header">
-              <div><div className="breadcrumb"><UsersRound size={14} />Client details</div><h2>{detailClient.name}</h2></div>
+              <div><div className="breadcrumb"><UsersRound size={14} />{t("detail.info")}</div><h2>{detailClient.name}</h2></div>
               <button className="modal-close" onClick={closeDetail}><XIcon size={18} /></button>
             </div>
             <div className="detail-body">
               <div className="detail-meta">
-                <div className="meta-item"><span className="meta-label">Phone</span><span className="meta-value">{detailClient.phoneNumber}</span></div>
-                <div className="meta-item"><span className="meta-label">Status</span>
+                <div className="meta-item"><span className="meta-label">{t("form.phone")}</span><span className="meta-value">{detailClient.phoneNumber}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.status")}</span>
                   <select className={`status-select status-${String(detailClient.status).toLowerCase()}`} value={detailClient.status} onChange={e => updateStatus(detailClient.id, e.target.value)}>
-                    {allStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                    {allStatuses.map(s => <option key={s} value={s}>{statusLabel(t, s)}</option>)}
                   </select>
                 </div>
-                <div className="meta-item"><span className="meta-label">Source</span><span className="chan-tag-inline"><i className="dot" style={{ background: CH_COLORS[detailClient.acquisitionChannel] }} />{CH_LABELS[detailClient.acquisitionChannel]}</span></div>
-                <div className="meta-item"><span className="meta-label">Project</span><span className="meta-value">{detailClient.project}</span></div>
-                <div className="meta-item"><span className="meta-label">Location</span><span className="meta-value">{detailClient.location}</span></div>
-                <div className="meta-item"><span className="meta-label">1st Contact</span><span className="meta-value">{detailClient.firstContactPerson}</span></div>
-                <div className="meta-item"><span className="meta-label">2nd Contact</span><span className="meta-value">{detailClient.secondContactPerson || "—"}</span></div>
-                <div className="meta-item full"><span className="meta-label">Next Operation</span><span className="meta-value op-value">{detailClient.operationToTake}</span></div>
-                {detailClient.notes && <div className="meta-item full"><span className="meta-label">Notes</span><p className="notes-text">{detailClient.notes}</p></div>}
-                <div className="meta-item full"><span className="meta-label">Created</span><span className="meta-value muted">{detailClient.createdAt ? new Date(detailClient.createdAt).toLocaleDateString() : "—"}</span></div>
-                <div className="meta-item full"><span className="meta-label">Last updated</span><span className="meta-value muted">{detailClient.lastUpdateDate ? new Date(detailClient.lastUpdateDate).toLocaleString() : "—"}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.channel")}</span><span className="chan-tag-inline"><i className="dot" style={{ background: CH_COLORS[detailClient.acquisitionChannel] }} />{channelLabel(t, detailClient.acquisitionChannel)}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.project")}</span><span className="meta-value">{detailClient.project}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.location")}</span><span className="meta-value">{detailClient.location}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.firstContact")}</span><span className="meta-value">{detailClient.firstContactPerson}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.secondContact")}</span><span className="meta-value">{detailClient.secondContactPerson || "—"}</span></div>
+                <div className="meta-item full"><span className="meta-label">{t("form.operation")}</span><span className="meta-value op-value">{detailClient.operationToTake}</span></div>
+                {detailClient.notes && <div className="meta-item full"><span className="meta-label">{t("form.notes")}</span><p className="notes-text">{detailClient.notes}</p></div>}
+                <div className="meta-item full"><span className="meta-label">{t("client.field.created")}</span><span className="meta-value muted">{detailClient.createdAt ? new Date(detailClient.createdAt).toLocaleDateString(dateLocale(lang)) : "—"}</span></div>
+                <div className="meta-item full"><span className="meta-label">{t("detail.lastUpdate")}</span><span className="meta-value muted">{detailClient.lastUpdateDate ? new Date(detailClient.lastUpdateDate).toLocaleString(dateLocale(lang)) : "—"}</span></div>
               </div>
               <div className="detail-actions">
-                <button className="btn-outline" onClick={() => { openEdit(detailClient); closeDetail(); }}><Pencil size={14} />Edit</button>
-                <button className="btn-outline" onClick={() => { closeDetail(); setTimeout(() => router.push(`/clients/${detailClient.id}`), 200); }}><ArrowUpRight size={14} />Full history</button>
+                <button className="btn-outline" onClick={() => { openEdit(detailClient); closeDetail(); }}><Pencil size={14} />{t("detail.edit")}</button>
+                <button className="btn-outline" onClick={() => { closeDetail(); setTimeout(() => router.push(`/clients/${detailClient.id}`), 200); }}><ArrowUpRight size={14} />{t("detail.timeline")}</button>
                 {user.role === "Admin" && (<>
-                  <button className="btn-danger-outline" onClick={() => { closeDetail(); setTimeout(() => setConfirmDelete({ ids: [detailClient.id], names: [detailClient.name] }), 200); }}><Trash2 size={14} />Delete</button>
-                  <button className="btn-outline" onClick={() => { closeDetail(); archiveClient(detailClient.id); }}><Archive size={14} />Archive</button>
+                  <button className="btn-danger-outline" onClick={() => { closeDetail(); setTimeout(() => setConfirmDelete({ ids: [detailClient.id], names: [detailClient.name] }), 200); }}><Trash2 size={14} />{t("detail.delete")}</button>
+                  <button className="btn-outline" onClick={() => { closeDetail(); archiveClient(detailClient.id); }}><Archive size={14} />{t("nav.archived")}</button>
                 </>)}
               </div>
             </div>
@@ -562,7 +582,9 @@ export default function Home() {
 
 /* ── Sub-components ─────────────────────────────────────────── */
 
-function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations }: {
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations, t }: {
   filters: Filters;
   updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void;
   setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void;
@@ -576,6 +598,7 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
   allStatuses?: string[];
   allChannels?: string[];
   allLocations?: string[];
+  t: TFn;
 }) {
   const hasPreset = activeDatePreset || filters.startDate || filters.endDate;
   return (
@@ -584,38 +607,39 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
         <div className="date-presets">
           {datePresets.map(p => (
             <button key={p.label} className={`date-preset-btn ${activeDatePreset === p.label ? 'active' : ''}`}
-              onClick={() => applyDatePreset!(p)}>{p.label}</button>
+              onClick={() => applyDatePreset!(p)}>{t(p.label)}</button>
           ))}
-          {hasPreset && <button className="date-preset-btn" onClick={clearDatePreset}>Clear dates</button>}
+          {hasPreset && <button className="date-preset-btn" onClick={clearDatePreset}>{t("filter.clear")}</button>}
         </div>
       )}
       <div className="filter-row">
-        <div className="search-box"><Search size={15}/><input placeholder="Search name, phone, notes..." value={filters.query} onChange={e=>updateFilter("query",e.target.value)}/></div>
-        <MultiSelect label="All statuses" options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} />
-        <MultiSelect label="All channels" options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => CH_LABELS[v] ?? v} />
-        <MultiSelect label="All locations" options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} />
-        <MultiSelect label="All salespeople" options={salespeople} selected={filters.salesperson} onChange={v => setMultiFilter("salesperson", v)} />
+        <div className="search-box"><Search size={15} /><input placeholder={t("filter.queryPh")} value={filters.query} onChange={e => updateFilter("query", e.target.value)} /></div>
+        <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} t={t} />
+        <MultiSelect label={t("filter.allChannels")} options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => channelLabel(t, v)} t={t} />
+        <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} t={t} />
+        <MultiSelect label={t("filter.allSalespeople")} options={salespeople} selected={filters.salesperson} onChange={v => setMultiFilter("salesperson", v)} t={t} />
       </div>
-      <div className="date-bar"><Filter size={13}/><span>Date</span><input type="date" value={filters.startDate} onChange={e=>updateFilter("startDate",e.target.value)}/><span>–</span><input type="date" value={filters.endDate} onChange={e=>updateFilter("endDate",e.target.value)}/></div>
+      <div className="date-bar"><Filter size={13} /><span>{t("th.date")}</span><input type="date" value={filters.startDate} onChange={e => updateFilter("startDate", e.target.value)} /><span>–</span><input type="date" value={filters.endDate} onChange={e => updateFilter("endDate", e.target.value)} /></div>
       {(filterCount ?? 0) > 0 && (
         <div className="filter-chips">
-          {filters.query && <span className="filter-chip">&ldquo;{filters.query.slice(0, 24)}&rdquo;<button title="Clear search" onClick={() => updateFilter("query", "")}>×</button></span>}
-          {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{STATUS_LABELS[s] ?? s}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
-          {filters.channel.map(c => <span key={`ch-${c}`} className="filter-chip">{CH_LABELS[c] ?? c}<button onClick={() => setMultiFilter("channel", filters.channel.filter(x => x !== c))}>×</button></span>)}
+          {filters.query && <span className="filter-chip">&ldquo;{filters.query.slice(0, 24)}&rdquo;<button title={t("common.clear")} onClick={() => updateFilter("query", "")}>×</button></span>}
+          {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{statusLabel(t, s)}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
+          {filters.channel.map(c => <span key={`ch-${c}`} className="filter-chip">{channelLabel(t, c)}<button onClick={() => setMultiFilter("channel", filters.channel.filter(x => x !== c))}>×</button></span>)}
           {filters.location.map(l => <span key={`lo-${l}`} className="filter-chip">{l}<button onClick={() => setMultiFilter("location", filters.location.filter(x => x !== l))}>×</button></span>)}
           {filters.salesperson.map(p => <span key={`sp-${p}`} className="filter-chip">{p}<button onClick={() => setMultiFilter("salesperson", filters.salesperson.filter(x => x !== p))}>×</button></span>)}
-          {filters.startDate && <span className="filter-chip">From {filters.startDate}<button onClick={() => updateFilter("startDate", "")}>×</button></span>}
-          {filters.endDate && <span className="filter-chip">To {filters.endDate}<button onClick={() => updateFilter("endDate", "")}>×</button></span>}
-          <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>Clear all ×</button>
+          {filters.startDate && <span className="filter-chip">{t("common.from")} {filters.startDate}<button onClick={() => updateFilter("startDate", "")}>×</button></span>}
+          {filters.endDate && <span className="filter-chip">{t("common.to")} {filters.endDate}<button onClick={() => updateFilter("endDate", "")}>×</button></span>}
+          <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>{t("filter.clear")} ×</button>
         </div>
       )}
     </>
   );
 }
 
-function MultiSelect({ label, options, selected, onChange, render }: {
+function MultiSelect({ label, options, selected, onChange, render, t }: {
   label: string; options: string[]; selected: string[];
   onChange: (values: string[]) => void; render?: (v: string) => string;
+  t: TFn;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -646,21 +670,21 @@ function MultiSelect({ label, options, selected, onChange, render }: {
       </button>
       {open && (
         <div className="ms-menu">
-          {options.length === 0 && <div className="ms-empty">No options yet</div>}
+          {options.length === 0 && <div className="ms-empty">{t("common.noData")}</div>}
           {options.map(o => (
             <button type="button" key={o} className={`ms-opt ${selected.includes(o) ? "ms-opt-on" : ""}`} onClick={() => toggleValue(o)}>
               <span className="ms-check">{selected.includes(o) && <Check size={11} />}</span>
               {lab(o)}
             </button>
           ))}
-          {selected.length > 0 && <button type="button" className="ms-clear" onClick={() => { onChange([]); setOpen(false); }}>Clear selection</button>}
+          {selected.length > 0 && <button type="button" className="ms-clear" onClick={() => { onChange([]); setOpen(false); }}>{t("clients.clearSelection")}</button>}
         </div>
       )}
     </div>
   );
 }
 
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, clients, salespeople, spStats, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; clients: Client[]; salespeople: string[]; spStats: SpStat[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean }) {
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, clients, salespeople, spStats, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; clients: Client[]; salespeople: string[]; spStats: SpStat[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
 
@@ -668,37 +692,37 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
     <div className="page dashboard-page">
       <header className="dashboard-hero">
         <div>
-          <span className="dashboard-eyebrow">RWAQ / WORKSPACE OVERVIEW</span>
-          <h1>Your pipeline. A clearer picture.</h1>
-          <p>Clients, channels and team performance — all in one place.</p>
+          <span className="dashboard-eyebrow">{t("dash.heroEyebrow")}</span>
+          <h1>{t("dash.heroTitle")}</h1>
+          <p>{t("dash.heroSubtitle")}</p>
         </div>
         <div className="dashboard-hero-summary">
-          <span>Client overview</span>
+          <span>{t("dash.clientOverview")}</span>
           <strong>{MONEY.format(clients.length)}</strong>
-          <small>clients in this view</small>
-          <button type="button" onClick={onExport} disabled={exporting}><Download size={14} />{exporting ? "Exporting…" : "Export report"}</button>
+          <small>{t("dash.clientsInThisView")}</small>
+          <button type="button" onClick={onExport} disabled={exporting}><Download size={14} />{exporting ? t("dash.exporting") : t("dash.exportReport")}</button>
         </div>
       </header>
       {/* KPI strip */}
       <section className="kpi-row kpi-row-6">
-        <KpiCard label="Total spend" value={sar(totalSpend)} sub="Weekly investment" accent="#4f46e5"/>
-        <KpiCard label="Total reach" value={MONEY.format(totalReach)} sub="Across all channels" accent="#0891b2"/>
-        <KpiCard label="Won" value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% win rate`} accent="#22c55e"/>
-        <KpiCard label="Lost" value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% of total`} accent="#ef4444"/>
-        <KpiCard label="In pipeline" value={String(waiting)} sub="Awaiting action" accent="#f59e0b"/>
-        <KpiCard label="Avg CPA" value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"} sub={won>0?`${won} customers won`:"No wins yet"} accent="#7c3aed"/>
+        <KpiCard label={t("kpi.totalSpend")} value={sar(totalSpend)} sub={t("kpi.weeklyInvestment")} accent="#4f46e5"/>
+        <KpiCard label={t("kpi.totalReach")} value={MONEY.format(totalReach)} sub={t("kpi.acrossChannels")} accent="#0891b2"/>
+        <KpiCard label={t("kpi.won")} value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% ${t("kpi.winRate")}`} accent="#22c55e"/>
+        <KpiCard label={t("kpi.lost")} value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% ${t("kpi.ofTotal")}`} accent="#ef4444"/>
+        <KpiCard label={t("kpi.pipeline")} value={String(waiting)} sub={t("kpi.awaiting")} accent="#f59e0b"/>
+        <KpiCard label={t("kpi.avgCpa")} value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"} sub={won>0?t("kpi.customersWon",{n:won}):t("kpi.noWins")} accent="#7c3aed"/>
       </section>
 
       {/* Funnel + ROI */}
       <section className="funnel-row">
         <div className="panel sp-perf-panel">
-          <h3>Sales Performance</h3>
+          <h3>{t("sp.title")}</h3>
           <div className="sp-perf-legend">
-            <span className="sp-won">Won</span>
-            <span className="sp-lost">Lost</span>
-            <span className="sp-wait">Waiting</span>
+            <span className="sp-won">{t("status.wonLabel")}</span>
+            <span className="sp-lost">{t("status.lostLabel")}</span>
+            <span className="sp-wait">{t("status.waitingLabel")}</span>
           </div>
-          {spStats.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>No data yet</div>}
+          {spStats.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>{t("sp.noData")}</div>}
           {spStats.map(sp => (
             <div className="sp-perf-row" key={sp.name}>
               <div className="sp-perf-avatar">{sp.name.slice(0,2).toUpperCase()}</div>
@@ -714,9 +738,9 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
           ))}
         </div>
         <div className="panel channel-roi-panel">
-          <h3>Channel ROI</h3>
+          <h3>{t("roi.title")}</h3>
           <div className="roi-table">
-            <div className="roi-head"><span>Channel</span><span>Spend</span><span>Won</span><span>CPA</span></div>
+            <div className="roi-head"><span>{t("roi.channel")}</span><span>{t("roi.spend")}</span><span>{t("roi.won")}</span><span>{t("roi.cpa")}</span></div>
             {metrics.filter((m: Metric)=>m.totalClients>0).map((m: Metric)=>(
               <div className="roi-row" key={m.channel}>
                 <span className="chan-cell"><i className="dot" style={{background:CH_COLORS[m.channel]}}/>{m.platform}</span>
@@ -731,27 +755,27 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
       {/* Recent clients + Top locations */}
       <div className="dashboard-grid-2">
         <section className="panel">
-          <div className="panel-heading"><h3>Recent clients</h3><button className="btn-ghost" onClick={()=>onExport()} disabled={exporting} style={{fontSize:11}}>Export</button></div>
-          {recentClients.length === 0 && <div className="empty-state">No clients yet.</div>}
+          <div className="panel-heading"><h3>{t("recent.title")}</h3><button className="btn-ghost" onClick={()=>onExport()} disabled={exporting} style={{fontSize:11}}>{t("common.export")}</button></div>
+          {recentClients.length === 0 && <div className="empty-state">{t("recent.empty")}</div>}
           {recentClients.map(c => (
             <div className="recent-client-row" key={c.id}>
               <span className="rc-avatar">{c.name.slice(0,2).toUpperCase()}</span>
               <div className="rc-info">
                 <strong>{c.name}</strong>
                 <small>
-                  <span className="rc-kv"><span className="rc-k">Project</span>{c.project || "—"}</span>
-                  {c.location ? <span className="rc-kv"><span className="rc-k">Location</span>{c.location}</span> : null}
+                  <span className="rc-kv"><span className="rc-k">{t("recent.project")}</span>{c.project || "—"}</span>
+                  {c.location ? <span className="rc-kv"><span className="rc-k">{t("recent.location")}</span>{c.location}</span> : null}
                 </small>
               </div>
-              <span className="chan-tag-inline" style={{ flexShrink: 0 }}><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{CH_LABELS[c.acquisitionChannel]??c.acquisitionChannel}</span>
-              <span className={`status-pill status-${String(c.status).toLowerCase()}`} style={{ flexShrink: 0 }}>{STATUS_LABELS[c.status] ?? c.status}</span>
+              <span className="chan-tag-inline" style={{ flexShrink: 0 }}><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
+              <span className={`status-pill status-${String(c.status).toLowerCase()}`} style={{ flexShrink: 0 }}>{statusLabel(t, c.status)}</span>
             </div>
           ))}
         </section>
         <div className="dash-stack">
         <section className="panel">
-          <div className="panel-heading"><h3>Top locations</h3><span className="muted" style={{fontSize:11}}>{clients.length} clients</span></div>
-          {topLocations.length === 0 && <div className="empty-state">No location data.</div>}
+          <div className="panel-heading"><h3>{t("loc.title")}</h3><span className="muted" style={{fontSize:11}}>{t("loc.clients", { n: clients.length })}</span></div>
+          {topLocations.length === 0 && <div className="empty-state">{t("loc.noData")}</div>}
           {topLocations.map(([loc, count], i) => (
             <div className="loc-bar-row" key={loc}>
               <span className="loc-rank">#{i+1}</span>
@@ -762,14 +786,14 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
           ))}
           </section>
           <section className="panel funnel-panel">
-            <h3>Conversion funnel</h3>
+            <h3>{t("funnel.title")}</h3>
             <div className="funnel-stages">
-              <div className="funnel-stage stage-total"><span className="funnel-num">{clients.length}</span><span className="funnel-label">Total</span></div>
+              <div className="funnel-stage stage-total"><span className="funnel-num">{clients.length}</span><span className="funnel-label">{t("funnel.total")}</span></div>
               <div className="funnel-arrow">↓</div>
-              <div className="funnel-stage stage-waiting"><span className="funnel-num">{waiting}</span><span className="funnel-label">Waiting</span></div>
+              <div className="funnel-stage stage-waiting"><span className="funnel-num">{waiting}</span><span className="funnel-label">{t("funnel.waiting")}</span></div>
               <div className="funnel-arrow">↓</div>
-              <div className="funnel-stage stage-won"><span className="funnel-num">{won}</span><span className="funnel-label">Won</span></div>
-              <div className="funnel-stage stage-lost"><span className="funnel-num">{lost}</span><span className="funnel-label">Lost</span></div>
+              <div className="funnel-stage stage-won"><span className="funnel-num">{won}</span><span className="funnel-label">{t("funnel.won")}</span></div>
+              <div className="funnel-stage stage-lost"><span className="funnel-num">{lost}</span><span className="funnel-label">{t("funnel.lost")}</span></div>
             </div>
           </section>
         </div>
@@ -777,8 +801,8 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
 
       {/* Channel breakdown */}
       <section className="panel channel-breakdown-panel">
-        <h3>Channel breakdown <small>{clients.length} clients</small></h3>
-        <div className="table-head-row"><span>Platform</span><span>Spend</span><span>Reach</span><span>Clients</span><span>CPA</span></div>
+        <h3>{t("brk.title")} <small>{t("loc.clients", { n: clients.length })}</small></h3>
+        <div className="table-head-row"><span>{t("brk.platform")}</span><span>{t("roi.spend")}</span><span>{t("brk.reach")}</span><span>{t("brk.clients")}</span><span>{t("roi.cpa")}</span></div>
         {metrics.map((item: Metric)=><div className="table-row" key={item.channel}>
           <span className="chan-cell"><i className="dot" style={{background:CH_COLORS[item.channel]}}/>{item.platform}</span>
           <span>{sar(item.spend)}</span><span>{MONEY.format(item.reach)}</span><span>{item.totalClients}</span><span>{item.cpa.toFixed(2)}</span>
@@ -795,112 +819,67 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   return (
     <div className="page">
       <div className="page-header">
-        <div><div className="breadcrumb"><UsersRound size={14}/>CRM</div><h1>Clients</h1><p>Manage your pipeline. Click a client to view details.</p></div>
+        <div><div className="breadcrumb"><UsersRound size={14}/>{t("clients.crm")}</div><h1>{t("clients.title")}</h1><p>{t("clients.subtitle")}</p></div>
         <div className="header-actions">
-          {bulkCount>0&&<span className="selection-info">{bulkCount} selected
-            {isAdmin && <><button className="btn-danger-sm" onClick={onBulkDelete}>Delete selected</button>
-              <button className="btn-archive-sm" onClick={onArchiveSelected}>Archive selected</button></>}
+          {bulkCount>0&&<span className="selection-info">{t("clients.selectedCount",{n:bulkCount})}
+            {isAdmin && <><button className="btn-danger-sm" onClick={onBulkDelete}>{t("clients.deleteSelected")}</button>
+              <button className="btn-archive-sm" onClick={onArchiveSelected}>{t("clients.archiveSelected")}</button></>}
           </span>}
           <div className="segmented">
-            <button className={mode==="table"?"seg-active":""} onClick={()=>setMode("table")}><LayoutDashboard size={14}/>Table</button>
-            <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>Kanban</button>
+            <button className={mode==="table"?"seg-active":""} onClick={()=>setMode("table")}><LayoutDashboard size={14}/>{t("clients.table")}</button>
+            <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>{t("clients.kanban")}</button>
           </div>
-          <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>New client</button>
-          <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>Export selected ({bulkCount})</button>
-          <button className="btn-outline" onClick={exportExcel}><Download size={15}/>Export all</button>
+          <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>{t("clients.newClient")}</button>
+          <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>{t("clients.exportSelected",{n:bulkCount})}</button>
+          <button className="btn-outline" onClick={exportExcel}><Download size={15}/>{t("clients.exportAll")}</button>
         </div>
       </div>
-      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} />
-      <div className="result-note">Showing {clients.length} of {allClients.length} clients</div>
-      {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation}/>}
+      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} t={t} />
+      <div className="result-note">{t("clients.showing",{n:clients.length,total:allClients.length})} · {t("clients.selected",{n:selectedIds.size})}</div>
+      {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
     </div>
   );
 }
 
-
-function Picker({ label, value, options, onChange, onAddNew }: {
-  label: string; value: string; options: string[];
-  onChange: (v: string) => void;
-  onAddNew?: (v: string) => Promise<void>;
-}) {
-  const [input, setInput] = useState(value);
-  const [open, setOpen] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const filtered = options.filter(o => o.toLowerCase().includes(input.toLowerCase()) && o.toLowerCase() !== input.toLowerCase());
-  const isCustom = input.length > 0 && !options.some(o => o.toLowerCase() === input.toLowerCase());
-
-  const commit = async (val: string) => {
-    setInput(val);
-    onChange(val);
-    setOpen(false);
-    if (onAddNew && val.length > 0 && !options.some(o => o.toLowerCase() === val.toLowerCase())) {
-      setAdding(true);
-      try { await onAddNew(val); } catch {} finally { setAdding(false); }
-    }
-  };
-
-  return (
-    <div className="picker-wrapper">
-      <span className="picker-label">{label}</span>
-      <div className={`picker-box ${open ? "open" : ""}`}>
-        <button type="button" className="picker-selected" onClick={() => setOpen(!open)}>
-          <span className="picker-selected-text">{value || `Select ${label}...`}</span>
-          <ChevronDown size={12} className="picker-chevron" />
-        </button>
-        {open && <><div className="picker-overlay" onClick={() => setOpen(false)} /><div className="picker-dropdown">
-          {filtered.slice(0, 8).map(opt => (
-            <button key={opt} type="button" className="picker-option" onClick={() => commit(opt)}>{opt}</button>
-          ))}
-          {isCustom && (
-            <button type="button" className="picker-option picker-add" onClick={() => commit(input)} disabled={adding}>
-              {adding ? "Saving…" : `+ Save “${input}”`}
-            </button>
-          )}
-        </div></>}
-      </div>
-    </div>
-  );
-}
-
-function ClientTable({ clients, updateStatus, updateClientField, onAssigned, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, tableRef, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; tableRef?: React.RefObject<HTMLDivElement> | null; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
+function ClientTable({ clients, updateStatus, updateClientField, onAssigned, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, tableRef, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; tableRef?: React.RefObject<HTMLDivElement> | null; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   const allSelected = clients.length>0&&clients.every(c=>selectedIds.has(c.id));
   return (
     <div className="table-scroll-wrapper">
-      <div className="scroll-indicator-left hidden" ref={(el) => { if(el) { const t = tableRef?.current; if(t){ const check = ()=>{ el.classList.toggle("hidden", t.scrollLeft <= 0); }; check(); t.addEventListener("scroll",check,{passive:true}); } } }} />
+      <div className="scroll-indicator-left hidden" ref={(el) => { if(el) { const t2 = tableRef?.current; if(t2){ const check = ()=>{ el.classList.toggle("hidden", t2.scrollLeft <= 0); }; check(); t2.addEventListener("scroll",check,{passive:true}); } } }} />
       <div className="scroll-indicator-right hidden" />
       <div className="client-table" ref={tableRef}>
         <div className="client-row client-head">
           <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="cb"/>
-          <span>Client</span><span>Status</span><span>Source</span><span>Project</span><span>Location</span><span>Date</span><span>Operation</span><span>1st</span><span>2nd</span><span>Updated</span><span/></div>
+          <span>{t("th.client")}</span><span>{t("th.status")}</span><span>{t("th.source")}</span><span>{t("th.project")}</span><span>{t("th.location")}</span><span>{t("th.date")}</span><span>{t("form.operation")}</span><span>{t("th.first")}</span><span>{t("th.second")}</span><span>{t("detail.lastUpdate")}</span><span/></div>
         {clients.map(c=>(
           <div className={`client-row client-row-clickable ${selectedIds.has(c.id)?"selected":""}`} key={c.id} onClick={e=>{(e.target as HTMLElement).tagName!=="INPUT"&&(e.target as HTMLElement).tagName!=="SELECT"&&! (e.target as HTMLElement).closest(".no-detail")&&onOpenDetail(c)}}>
-            <input type="checkbox" checked={selectedIds.has(c.id)} onChange={()=>toggleSelect(c.id)} className="cb" onClick={e=>e.stopPropagation()}/>  
+            <input type="checkbox" checked={selectedIds.has(c.id)} onChange={()=>toggleSelect(c.id)} className="cb" onClick={e=>e.stopPropagation()}/>
             <span className="person-cell" onClick={()=>onOpenDetail(c)}><b>{c.name}</b><small>{c.phoneNumber}</small>{c.notes&&<span className="notes-indicator"><MessageSquare size={10}/></span>}</span>
-            <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{STATUS_LABELS[c.status] ?? c.status}</span>
-            <span className="chan-tag"><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{CH_LABELS[c.acquisitionChannel]??c.acquisitionChannel}</span>
-            <span>{c.project}</span><span>{c.location}</span><span className="muted">{c.createdAt?new Date(c.createdAt).toLocaleDateString():"—"}</span>
+            <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>
+            <span className="chan-tag"><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
+            <span>{c.project}</span><span>{c.location}</span><span className="muted">{c.createdAt?new Date(c.createdAt).toLocaleDateString(dateLocale(resolveLang())):"—"}</span>
             <span className="op-text">{c.operationToTake}</span>
             <span className="muted">{c.firstContactPerson || "—"}</span>
             <span className="muted">{c.secondContactPerson || "—"}</span>
-            <span className="muted">{c.lastUpdateDate?new Date(c.lastUpdateDate).toLocaleDateString():"—"}</span>
+            <span className="muted">{c.lastUpdateDate?new Date(c.lastUpdateDate).toLocaleDateString(dateLocale(resolveLang())):"—"}</span>
             <span className="actions-cell no-detail">
-              <button className="icon-btn" title="Edit" onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={14}/></button>
-              {isAdmin && <><button className="icon-btn danger" title="Delete" onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={14}/></button>
-                <button className="icon-btn" title="Archive" onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={14}/></button></>}
+              <button className="icon-btn" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={14}/></button>
+              {isAdmin && <><button className="icon-btn danger" title={t("common.delete")} onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={14}/></button>
+                <button className="icon-btn" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={14}/></button></>}
             </span>
           </div>
         ))}
-        {clients.length===0&&<div className="empty-state">No clients match your filters.</div>}
+        {clients.length===0&&<div className="empty-state">{t("clients.noResults")}</div>}
       </div>
     </div>
   );
 }
 
-function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void> }) {
+function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   const [draggedId, setDraggedId] = useState<string|null>(null);
   const [dropTarget, setDropTarget] = useState<string|null>(null);
   const columns: string[] = [...new Set([...(allStatuses ?? ["WAITING","WON","LOST"]), ...clients.map(c => c.status)])];
@@ -911,29 +890,29 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
           onDragEnter={()=>setDropTarget(col)} onDragOver={e=>{e.preventDefault();setDropTarget(col);}}
           onDragLeave={()=>setDropTarget(null)} onDrop={()=>{if(draggedId){updateStatus(draggedId,col);setDraggedId(null);setDropTarget(null);}}}>
           <div className="kanban-head">
-            <span className={`kanban-dot dot-${col.toLowerCase()}`}/><span>{STATUS_LABELS[col]??col}</span><small>{clients.filter(c=>c.status===col).length}</small>
+            <span className={`kanban-dot dot-${col.toLowerCase()}`}/><span>{statusLabel(t, col)}</span><small>{clients.filter(c=>c.status===col).length}</small>
           </div>
           {clients.filter(c=>c.status===col).map(c=>(
-            <article className={`client-card ${draggedId===c.id?"dragging":""} ${selectedIds.has(c.id)?"card-selected":""}`} key={c.id} draggable onDragStart={()=>setDraggedId(c.id)} onDragEnd={()=>{setDraggedId(null);setDropTarget(null);}} onDoubleClick={()=>onOpenDetail(c)}>  
+            <article className={`client-card ${draggedId===c.id?"dragging":""} ${selectedIds.has(c.id)?"card-selected":""}`} key={c.id} draggable onDragStart={()=>setDraggedId(c.id)} onDragEnd={()=>{setDraggedId(null);setDropTarget(null);}} onDoubleClick={()=>onOpenDetail(c)}>
               <div className="card-top"><b className="card-name">{c.name}</b><span className="card-actions no-detail">
-                <button className="icon-btn-sm" title="Edit" onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={12}/></button>
-                {isAdmin && <><button className="icon-btn-sm danger" title="Delete" onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={12}/></button>
-                  <button className="icon-btn-sm" title="Archive" onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={12}/></button></>}
+                <button className="icon-btn-sm" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={12}/></button>
+                {isAdmin && <><button className="icon-btn-sm danger" title={t("common.delete")} onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={12}/></button>
+                  <button className="icon-btn-sm" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={12}/></button></>}
               </span></div>
               <div className="card-ch">
                 <i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>
-                <span>{CH_LABELS[c.acquisitionChannel]??c.acquisitionChannel}</span>
+                <span>{channelLabel(t, c.acquisitionChannel)}</span>
               </div>
               <p className="card-project">{c.project}</p>
               <p className="card-location">{c.location}</p>
               {c.notes&&<p className="card-notes"><MessageSquare size={10}/>{c.notes.slice(0,40)}{c.notes.length>40?"...":""}</p>}
               <strong className="card-op">{c.operationToTake}</strong>
               <footer className="card-contacts">
-                <span className="muted">1st: {c.firstContactPerson || "—"}</span>
-                <span className="muted">2nd: {c.secondContactPerson || "—"}</span>
+                <span className="muted">{t("card.first")}: {c.firstContactPerson || "—"}</span>
+                <span className="muted">{t("card.second")}: {c.secondContactPerson || "—"}</span>
               </footer>
               <div className="card-status-wrap">
-                <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{STATUS_LABELS[c.status] ?? c.status}</span>
+                <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>
               </div>
             </article>
           ))}
@@ -942,12 +921,13 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
     </div>
   );
 }
-function AddNewSelect({ value, options, onChange, onAdd, render, placeholder }: {
+function AddNewSelect({ value, options, onChange, onAdd, render, placeholder, t }: {
   value: string; options: string[];
   onChange: (v: string) => void;
   onAdd?: (v: string) => Promise<string | void>;
   render?: (v: string) => string;
   placeholder?: string;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
@@ -967,13 +947,13 @@ function AddNewSelect({ value, options, onChange, onAdd, render, placeholder }: 
         <input
           autoFocus
           value={text}
-          placeholder={placeholder ?? "New value…"}
+          placeholder={placeholder ?? t("form.newValuePh")}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter") confirmAdd(); else if (e.key === "Escape") { setAdding(false); setText(""); } }}
           style={{ flex: 1, height: 36, border: "1px solid #dfe2e6", borderRadius: 6, padding: "0 10px", fontSize: 12, outline: "none" }}
         />
-        <button type="button" className="btn-sm" onClick={confirmAdd}><Check size={14} />Add</button>
-        <button type="button" className="btn-ghost" onClick={() => { setAdding(false); setText(""); }}>Cancel</button>
+        <button type="button" className="btn-sm" onClick={confirmAdd}><Check size={14} />{t("form.addBtn")}</button>
+        <button type="button" className="btn-ghost" onClick={() => { setAdding(false); setText(""); }}>{t("common.cancel")}</button>
       </div>
     );
   }
@@ -983,9 +963,9 @@ function AddNewSelect({ value, options, onChange, onAdd, render, placeholder }: 
       value={value}
       onChange={e => { if (e.target.value === "__NEW__") { setAdding(true); } else { onChange(e.target.value); } }}
     >
-      <option value="" disabled>{placeholder ?? "Select…"}</option>
+      <option value="" disabled>{placeholder ?? t("form.statusPh")}</option>
       {options.map(o => <option key={o} value={o}>{render ? render(o) : o}</option>)}
-      <option value="__NEW__">＋ Add new…</option>
+      <option value="__NEW__">{t("form.addNewOpt")}</option>
     </select>
   );
 }

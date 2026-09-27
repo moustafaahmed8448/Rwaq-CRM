@@ -502,9 +502,10 @@ export type UserRecord = {
   email?: string;
   role: string;
   hash: string;
+  language: string;
 };
 
-type UserDb = Prisma.AppUserGetPayload<Record<string, never>>;
+type UserDb = Prisma.AppUserGetPayload<Record<string, never>> & { language?: unknown };
 
 const toUserRecord = (row: UserDb): UserRecord => ({
   username: row.username,
@@ -512,46 +513,114 @@ const toUserRecord = (row: UserDb): UserRecord => ({
   email: row.email ?? undefined,
   role: row.role,
   hash: row.hash,
+  language: typeof row.language === "string" && row.language === "en" ? "en" : "ar",
 });
 
+function isMissingLanguageColumn(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error ?? "");
+  return /column .*"?language"? does not exist|Unknown column 'language'|no such column: language/i.test(msg);
+}
+
+async function ensureLanguageColumn(): Promise<void> {
+  try {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "AppUser" ADD COLUMN IF NOT EXISTS "language" text NOT NULL DEFAULT 'ar'`,
+    );
+  } catch {
+    // Best-effort: databases without DDL permission keep working via fallbacks.
+  }
+}
+
 export async function listUsers(): Promise<UserRecord[]> {
-  const rows = await prisma.appUser.findMany({ orderBy: { username: "asc" } });
-  return rows.map(toUserRecord);
+  try {
+    const rows = await prisma.appUser.findMany({ orderBy: { username: "asc" } });
+    return rows.map(toUserRecord);
+  } catch (error) {
+    if (!isMissingLanguageColumn(error)) throw error;
+    const rows = await prisma.$queryRawUnsafe<UserDb[]>(
+      `SELECT "username", "name", "email", "role", "hash" FROM "AppUser" ORDER BY "username" ASC`,
+    );
+    return rows.map(toUserRecord);
+  }
 }
 
 export async function findUser(username: string): Promise<UserRecord | null> {
-  const row = await prisma.appUser.findUnique({
-    where: { username: String(username ?? "").toLowerCase() },
-  });
-  return row ? toUserRecord(row) : null;
+  try {
+    const row = await prisma.appUser.findUnique({
+      where: { username: String(username ?? "").toLowerCase() },
+    });
+    return row ? toUserRecord(row) : null;
+  } catch (error) {
+    if (!isMissingLanguageColumn(error)) throw error;
+    const rows = await prisma.$queryRawUnsafe<UserDb[]>(
+      `SELECT "username", "name", "email", "role", "hash" FROM "AppUser" WHERE "username" = $1 LIMIT 1`,
+      String(username ?? "").toLowerCase(),
+    );
+    return rows.length > 0 ? toUserRecord(rows[0]) : null;
+  }
 }
 
 export async function countUsers(): Promise<number> {
   return prisma.appUser.count();
 }
 
-export async function createUser(input: UserRecord): Promise<UserRecord> {
-  const row = await prisma.appUser.create({
-    data: {
-      username: input.username.toLowerCase(),
-      name: input.name,
-      email: input.email ?? null,
-      role: input.role,
-      hash: input.hash,
-    },
-  });
-  return toUserRecord(row);
+export async function createUser(
+  input: Omit<UserRecord, "language"> & { language?: string },
+): Promise<UserRecord> {
+  try {
+    const row = await prisma.appUser.create({
+      data: {
+        username: input.username.toLowerCase(),
+        name: input.name,
+        email: input.email ?? null,
+        role: input.role,
+        hash: input.hash,
+        language: input.language ?? "ar",
+      },
+    });
+    return toUserRecord(row);
+  } catch (error) {
+    if (!isMissingLanguageColumn(error)) throw error;
+    await ensureLanguageColumn();
+    const row = await prisma.appUser.create({
+      data: {
+        username: input.username.toLowerCase(),
+        name: input.name,
+        email: input.email ?? null,
+        role: input.role,
+        hash: input.hash,
+        language: input.language ?? "ar",
+      },
+    });
+    return toUserRecord(row);
+  }
 }
 
 export async function updateUser(
   username: string,
-  patch: { newUsername?: string; name?: string; email?: string; role?: string },
+  patch: { newUsername?: string; name?: string; email?: string; role?: string; language?: string },
 ): Promise<UserRecord | null> {
   const data: Prisma.AppUserUpdateInput = {};
   if (patch.name !== undefined) data.name = patch.name;
   if (patch.email !== undefined) data.email = patch.email;
   if (patch.role !== undefined) data.role = patch.role;
+  if (patch.language !== undefined) data.language = patch.language;
   if (patch.newUsername !== undefined) data.username = patch.newUsername.toLowerCase();
+
+  // Language-only updates (from the header switch) must not fail on databases
+  // that have not run the language-column migration yet.
+  if (patch.language !== undefined && patch.name === undefined && patch.email === undefined && patch.role === undefined && patch.newUsername === undefined) {
+    try {
+      const row = await prisma.appUser.update({
+        where: { username: username.toLowerCase() },
+        data,
+      });
+      return toUserRecord(row);
+    } catch (error) {
+      if (!isMissingLanguageColumn(error)) return null;
+      return findUser(username);
+    }
+  }
 
   try {
     const row = await prisma.appUser.update({
@@ -559,7 +628,19 @@ export async function updateUser(
       data,
     });
     return toUserRecord(row);
-  } catch {
+  } catch (error) {
+    if (isMissingLanguageColumn(error) && patch.language !== undefined) {
+      await ensureLanguageColumn();
+      try {
+        const row = await prisma.appUser.update({
+          where: { username: username.toLowerCase() },
+          data,
+        });
+        return toUserRecord(row);
+      } catch {
+        return null;
+      }
+    }
     return null;
   }
 }
