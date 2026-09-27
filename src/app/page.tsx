@@ -9,12 +9,27 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
-import { resolveLang, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
+import { canWrite } from "@/lib/auth";
 import { apiErrorMessage, readApiError } from "@/lib/api-errors";
-import { channelLabel, statusLabel } from "@/lib/reporting";
+import {
+  PIPELINE_STAGES,
+  PREDEFINED_STATUSES,
+  channelLabel,
+  isInProgress,
+  isLost,
+  isWon,
+  BUILTIN_LOCATION_KEYS,
+  locationLabel,
+  statusColor,
+  statusLabel,
+  type PeriodKind,
+} from "@/lib/reporting";
 import { downloadFile, exportQuery, EXPORT_FAILED } from "@/lib/download";
-import { dateLocale, sar } from "@/lib/format";
+import { num, sar, dateLocale } from "@/lib/format";
 import { useLogo } from "@/lib/logo";
+import StatusPill, { StatusDot } from "@/components/StatusPill";
+import RefPicker from "@/components/RefPicker";
 
 type Client = {
   id: string; name: string; phoneNumber: string;
@@ -35,8 +50,7 @@ type SpStat = { name: string; won: number; lost: number; waiting: number; total:
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const CH_COLORS: Record<string, string> = { FACEBOOK: "#4f46e5", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed", GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2" };
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
-const PREDEFINED_STATUSES = ["WAITING", "WON", "LOST"];
-const CUSTOM_LOCATIONS = ["Riyadh", "Jeddah", "Makkah", "Madinah", "Dammam", "Khobar", "Dhahran", "Taif", "Abha", "Tabuk"] as const;
+
 
 // `label` holds a dictionary key so the preset keeps a stable identity while
 // the rendered text follows the selected language (see FilterBar).
@@ -88,6 +102,19 @@ export default function Home() {
   const [customStatuses, setCustomStatuses] = useState<string[]>([]);
   const [customChannels, setCustomChannels] = useState<string[]>([]);
   const [customLocations, setCustomLocations] = useState<string[]>([]);
+  // Only saved (custom) values can be deleted; built-ins are code constants.
+  // The usage maps let the UI warn before removing a value still in use.
+  const [removableChannels, setRemovableChannels] = useState<string[]>([]);
+  const [removableLocations, setRemovableLocations] = useState<string[]>([]);
+  const [channelUsage, setChannelUsage] = useState<Record<string, number>>({});
+  const [locationUsage, setLocationUsage] = useState<Record<string, number>>({});
+  // Reporting window for the KPI figures. Defaults to the current week, as
+  // requested; month and a custom range are also supported.
+  const [periodKind, setPeriodKind] = useState<PeriodKind>("week");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const [periodInfo, setPeriodInfo] = useState({ from: "", to: "", campaignCount: 0, campaignNames: [] as string[], totals: { total: 0, won: 0, lost: 0, waiting: 0 } });
   const [users, setUsers] = useState<{ username: string; name: string; role: string }[]>([]);
   const [adding, setAdding] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState("");
@@ -137,22 +164,50 @@ export default function Home() {
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([fetch("/api/analytics/weekly"), fetch("/api/crm/clients")])
-      .then(async ([a, c]) => {
-        if (!a.ok || !c.ok) throw new Error("Unable to load workspace");
-        return Promise.all([a.json(), c.json()]);
+    Promise.all([fetch("/api/crm/clients"), fetch("/api/users")])
+      .then(async ([c, u]) => {
+        if (!c.ok) throw new Error("Unable to load workspace");
+        return Promise.all([c.json(), u.json()]);
       })
-      .then(([analytics, crm]) => {
-        setMetrics(analytics.rows || []);
+      .then(([crm, usersData]) => {
         setClients(crm.clients || []);
+        setUsers(usersData.users ?? []);
       })
       .catch(() => undefined);
     fetch("/api/crm/clients").then(r => r.json()).then(d => setCustomStatuses(d.statuses ?? [])).catch(() => {});
-    fetch("/api/channels").then(r => r.json()).then(d => setCustomChannels(d.channels ?? CHANNEL_VALUES)).catch(() => {});
-    fetch("/api/locations").then(r => r.json()).then(d => setCustomLocations(d.locations ?? [])).catch(() => {});
-    fetch("/api/users").then(r => r.json()).then(d => setUsers(d.users ?? [])).catch(() => {});
+    fetch("/api/channels").then(r => r.json()).then(d => { setCustomChannels(d.channels ?? CHANNEL_VALUES); setRemovableChannels(d.removable ?? []); setChannelUsage(d.usage ?? {}); }).catch(() => {});
+    fetch("/api/locations").then(r => r.json()).then(d => { setCustomLocations(d.locations ?? []); setRemovableLocations(d.removable ?? []); setLocationUsage(d.usage ?? {}); }).catch(() => {});
     fetch("/api/notifications").then(r => r.json()).then(d => setNotifications(d.notifications ?? [])).catch(() => {});
   }, [user]);
+
+  // Reporting figures are period-scoped, so they refetch whenever the window
+  // changes. Separate from the client list above, which is not period-scoped.
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams({ period: periodKind });
+    if (periodKind === "custom") {
+      if (customFrom) params.set("from", customFrom);
+      if (customTo) params.set("to", customTo);
+    }
+    // Flagging the pending fetch so the period summary can show a loading state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPeriodLoading(true);
+    fetch(`/api/analytics/weekly?${params.toString()}`, { cache: "no-store" })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (!d) return;
+        setMetrics(d.rows || []);
+        setPeriodInfo({
+          from: d.period?.from ?? "",
+          to: d.period?.to ?? "",
+          campaignCount: d.campaignCount ?? 0,
+          campaignNames: d.campaignNames ?? [],
+          totals: d.totals ?? { total: 0, won: 0, lost: 0, waiting: 0 },
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => setPeriodLoading(false));
+  }, [user, periodKind, customFrom, customTo]);
 
   // Table scroll detection
   useEffect(() => {
@@ -171,9 +226,30 @@ export default function Home() {
   const salespeople = useMemo(() => [...new Set(clients.flatMap(c => [c.firstContactPerson, c.secondContactPerson].filter(Boolean)))], [clients]);
   const totalSpend = metrics.reduce((s, m) => s + m.spend, 0);
   const totalReach = metrics.reduce((s, m) => s + m.reach, 0);
-  const won = clients.filter(c => c.status === "WON").length;
-  const lost = clients.filter(c => c.status === "LOST").length;
-  const waiting = clients.filter(c => c.status !== "WON" && c.status !== "LOST").length;
+  // Registry-driven so a new pipeline stage is counted correctly without
+  // editing this file (the old version hardcoded "WON"/"LOST"/"WAITING").
+  // Period totals, straight from the API. These used to be counted from the
+  // full client list, which silently reverted them to all-time numbers while the
+  // spend beside them stayed week-scoped — so Avg CPA divided one period's spend
+  // by another period's wins.
+  const won = periodInfo.totals.won;
+  const lost = periodInfo.totals.lost;
+  const waiting = periodInfo.totals.waiting;
+
+  // Non-admins see only their own book; the server already scopes the query, so
+  // this just tells the UI which message to show.
+  const isScoped = user?.role !== "Admin";
+
+  // Visitor is read-only. The API rejects writes for this role (see
+  // canWrite in src/lib/auth.ts); these flags only hide the controls so the UI
+  // matches what the server will actually allow.
+  const canEdit = canWrite(user?.role);
+
+  // Clicking a stage row in the status panel filters the clients view to it.
+  const toggleStageFilter = (status: string) => {
+    setView("clients");
+    setMultiFilter("status", [status]);
+  };
 
   const updateFilter = (key: "query" | "startDate" | "endDate", value: string) => {
     setFilters(cur => ({ ...cur, [key]: value }));
@@ -207,7 +283,7 @@ export default function Home() {
 
   const allStatuses = [...PREDEFINED_STATUSES, ...customStatuses.filter(s => !PREDEFINED_STATUSES.includes(s))];
   const allChannels = [...CHANNEL_VALUES, ...customChannels.filter(ch => !CHANNEL_VALUES.includes(ch as typeof CHANNEL_VALUES[number]))];
-  const allLocations = [...CUSTOM_LOCATIONS, ...customLocations.filter(l => !(CUSTOM_LOCATIONS as unknown as string[]).includes(l))];
+  const allLocations = [...BUILTIN_LOCATION_KEYS, ...customLocations.filter(l => !BUILTIN_LOCATION_KEYS.includes(l))];
 
   const addChannel = async (label: string): Promise<string> => {
     const key = label.trim().toUpperCase().replace(/\s+/g, "_");
@@ -224,7 +300,44 @@ export default function Home() {
     await fetch("/api/locations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: clean }) }).catch(() => {});
     const r = await fetch("/api/locations").then(x => x.json()).catch(() => ({}));
     setCustomLocations(r.locations ?? []);
+    setRemovableLocations(r.removable ?? []);
+    setLocationUsage(r.usage ?? {});
     return clean;
+  };
+
+  /**
+   * Deletes a saved location/channel from the reference list.
+   *
+   * Only removes the value from the saved list — clients already set to it keep
+   * it, which is why the caller confirms with the usage count first. The server
+   * rejects this for non-admins regardless of what the UI shows.
+   */
+  const removeLocation = async (label: string) => {
+    const res = await fetch("/api/locations", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label }) }).catch(() => null);
+    if (!res || !res.ok) {
+      const err = res ? await res.json().catch(() => ({})) : null;
+      addToast("error", apiErrorMessage(t, err?.error));
+      return;
+    }
+    const r = await res.json().catch(() => ({}));
+    setCustomLocations(r.locations ?? []);
+    setRemovableLocations([]);
+    setLocationUsage({});
+    addToast("success", t("refData.removedLocation", { value: label }));
+  };
+
+  const removeChannel = async (label: string) => {
+    const res = await fetch("/api/channels", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label }) }).catch(() => null);
+    if (!res || !res.ok) {
+      const err = res ? await res.json().catch(() => ({})) : null;
+      addToast("error", apiErrorMessage(t, err?.error));
+      return;
+    }
+    const r = await res.json().catch(() => ({}));
+    setCustomChannels(r.channels ?? []);
+    setRemovableChannels([]);
+    setChannelUsage({});
+    addToast("success", t("refData.removedChannel", { value: label }));
   };
 
   const addStatus = async (label: string): Promise<string> => {
@@ -244,8 +357,8 @@ export default function Home() {
       const people = [...new Set([cl.firstContactPerson, cl.secondContactPerson].filter(Boolean))];
       for (const key of people) {
         const s = m.get(key) ?? { won: 0, lost: 0, waiting: 0, total: 0 };
-        if (cl.status === "WON") s.won++;
-        else if (cl.status === "LOST") s.lost++;
+        if (isWon(cl.status)) s.won++;
+        else if (isLost(cl.status)) s.lost++;
         else s.waiting++;
         s.total++;
         m.set(key, s);
@@ -256,11 +369,14 @@ export default function Home() {
     }));
   }, [clients]);
 
-    const visibleMetrics = useMemo(() => metrics.map(metric => {
-    const scoped = filteredClients.filter(c => c.acquisitionChannel === metric.channel);
-    const wonCount = scoped.filter(c => c.status === "WON").length;
-    return { ...metric, totalClients: scoped.length, won: wonCount, lost: scoped.filter(c => c.status === "LOST").length, waiting: scoped.filter(c => c.status === "WAITING").length, cpa: wonCount ? metric.spend / wonCount : 0 };
-  }), [metrics, filteredClients]);
+    const visibleMetrics = useMemo(() => metrics.map(metric => ({
+    // Keep the API's period-scoped won/lost/waiting/cpa. This used to recompute
+    // them from `filteredClients` (the unfiltered, all-time client list), which
+    // threw away the period and made the ROI table disagree with the KPI cards.
+    ...metric,
+    // The local client list is still used to decide which channels to show.
+    inUse: filteredClients.some(c => c.acquisitionChannel === metric.channel),
+  })), [metrics, filteredClients]);
 
   const openEdit = (client: Client) => setEditDraft({ ...client });
   const openCreate = () => setEditDraft({
@@ -453,6 +569,15 @@ export default function Home() {
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             onAddStatus={addStatus} onAddChannel={addChannel} onAddLocation={addLocation}
             onExport={exportReport} exporting={exporting}
+            scoped={isScoped}
+            onToggleStageFilter={toggleStageFilter}
+            periodKind={periodKind}
+            periodInfo={periodInfo}
+            onPeriodChange={setPeriodKind}
+            onCustomRange={(f, to) => { setCustomFrom(f); setCustomTo(to); }}
+            customFrom={customFrom}
+            customTo={customTo}
+            periodLoading={periodLoading}
             t={t}
           />
         ) : (
@@ -468,10 +593,16 @@ export default function Home() {
             exportExcel={exportExcel} exportSelected={exportSelected}
             bulkCount={selectedIds.size}
             isAdmin={user.role === "Admin"}
+            canEdit={canEdit}
             onArchive={archiveClient}
             onArchiveSelected={archiveSelected}
             onBulkDelete={() => { if (selectedIds.size === 0) return; setConfirmDelete({ ids: [...selectedIds], names: filteredClients.filter(c => selectedIds.has(c.id)).map(c => c.name) }); }}
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
+            refData={{
+              onRemoveChannel: user.role === "Admin" ? removeChannel : undefined,
+              onRemoveLocation: user.role === "Admin" ? removeLocation : undefined,
+              removableChannels, removableLocations, channelUsage, locationUsage,
+            }}
             customLocationInput={customLocationInput} setCustomLocationInput={setCustomLocationInput}
             customChannels={customChannels}
             users={users}
@@ -496,13 +627,13 @@ export default function Home() {
                 <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} /></Field>
                 <Field label={t("form.project")} wide><textarea rows={3} value={editDraft.project ?? ""} onChange={e => setEditDraft({ ...editDraft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
                 <Field label={t("form.location")}>
-                  <AddNewSelect value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} placeholder={t("form.locationPh")} t={t} />
+                  <RefPicker value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} render={v => locationLabel(t, v)} onRemove={user.role === "Admin" ? removeLocation : undefined} removable={removableLocations} removeUsage={locationUsage} placeholder={t("form.locationPh")} t={t} />
                 </Field>
                 <Field label={t("form.channel")}>
-                  <AddNewSelect value={editDraft.acquisitionChannel ?? ""} options={allChannels} onAdd={addChannel} onChange={v => setEditDraft({ ...editDraft, acquisitionChannel: v })} render={v => channelLabel(t, v)} placeholder={t("form.channelPh")} t={t} />
+                  <RefPicker value={editDraft.acquisitionChannel ?? ""} options={allChannels} onAdd={addChannel} onChange={v => setEditDraft({ ...editDraft, acquisitionChannel: v })} render={v => channelLabel(t, v)} onRemove={user.role === "Admin" ? removeChannel : undefined} removable={removableChannels} removeUsage={channelUsage} placeholder={t("form.channelPh")} t={t} />
                 </Field>
                 <Field label={t("form.status")}>
-                  <AddNewSelect value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} placeholder={t("form.statusPh")} t={t} />
+                  <RefPicker value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} render={v => statusLabel(t, v)} placeholder={t("form.statusPh")} t={t} />
                 </Field>
                 <Field label={t("form.firstContact")}>
                   <select value={editDraft.firstContactPerson ?? ""} onChange={e => setEditDraft({ ...editDraft, firstContactPerson: e.target.value })}>
@@ -550,9 +681,21 @@ export default function Home() {
               <div className="detail-meta">
                 <div className="meta-item"><span className="meta-label">{t("form.phone")}</span><span className="meta-value"><span className="ltr-num">{detailClient.phoneNumber}</span></span></div>
                 <div className="meta-item"><span className="meta-label">{t("form.status")}</span>
-                  <select className={`status-select status-${String(detailClient.status).toLowerCase()}`} value={detailClient.status} onChange={e => updateStatus(detailClient.id, e.target.value)}>
-                    {allStatuses.map(s => <option key={s} value={s}>{statusLabel(t, s)}</option>)}
-                  </select>
+                  {canEdit ? (
+                    // Coloured from the registry, not a per-status CSS class:
+                    // .status-select.waiting never matched `status-no_response`,
+                    // so every new stage rendered as a bare unstyled select.
+                    <select
+                      className="status-select"
+                      value={detailClient.status}
+                      onChange={e => updateStatus(detailClient.id, e.target.value)}
+                      style={{ background: statusColor(detailClient.status) + "1f", color: statusColor(detailClient.status) }}
+                    >
+                      {allStatuses.map(s => <option key={s} value={s}>{statusLabel(t, s)}</option>)}
+                    </select>
+                  ) : (
+                    <StatusPill status={detailClient.status} t={t} />
+                  )}
                 </div>
                 <div className="meta-item"><span className="meta-label">{t("form.channel")}</span><span className="chan-tag-inline"><i className="dot" style={{ background: CH_COLORS[detailClient.acquisitionChannel] }} />{channelLabel(t, detailClient.acquisitionChannel)}</span></div>
                 <div className="meta-item"><span className="meta-label">{t("form.project")}</span><span className="meta-value">{detailClient.project}</span></div>
@@ -588,7 +731,7 @@ export default function Home() {
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
-function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations, t }: {
+function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations, onRemoveChannel, onRemoveLocation, removableChannels, removableLocations, channelUsage, locationUsage, t }: {
   filters: Filters;
   updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void;
   setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void;
@@ -602,6 +745,12 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
   allStatuses?: string[];
   allChannels?: string[];
   allLocations?: string[];
+  onRemoveChannel?: (value: string) => void;
+  onRemoveLocation?: (value: string) => void;
+  removableChannels?: string[];
+  removableLocations?: string[];
+  channelUsage?: Record<string, number>;
+  locationUsage?: Record<string, number>;
   t: TFn;
 }) {
   const hasPreset = activeDatePreset || filters.startDate || filters.endDate;
@@ -619,8 +768,8 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
       <div className="filter-row">
         <div className="search-box"><Search size={15} /><input placeholder={t("filter.queryPh")} value={filters.query} onChange={e => updateFilter("query", e.target.value)} /></div>
         <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} t={t} />
-        <MultiSelect label={t("filter.allChannels")} options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => channelLabel(t, v)} t={t} />
-        <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} t={t} />
+        <MultiSelect label={t("filter.allChannels")} options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => channelLabel(t, v)} onRemove={onRemoveChannel} removable={removableChannels} removeUsage={channelUsage} t={t} />
+        <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} render={v => locationLabel(t, v)} onRemove={onRemoveLocation} removable={removableLocations} removeUsage={locationUsage} t={t} />
         <MultiSelect label={t("filter.allSalespeople")} options={salespeople} selected={filters.salesperson} onChange={v => setMultiFilter("salesperson", v)} t={t} />
       </div>
       <div className="date-bar"><Filter size={13} /><span>{t("th.date")}</span><input type="date" value={filters.startDate} onChange={e => updateFilter("startDate", e.target.value)} /><span>–</span><input type="date" value={filters.endDate} onChange={e => updateFilter("endDate", e.target.value)} /></div>
@@ -640,9 +789,15 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
   );
 }
 
-function MultiSelect({ label, options, selected, onChange, render, t }: {
+function MultiSelect({ label, options, selected, onChange, render, onRemove, removable, removeUsage, t }: {
   label: string; options: string[]; selected: string[];
   onChange: (values: string[]) => void; render?: (v: string) => string;
+  /** Deletes the value from the saved reference list (admin only, server-gated). */
+  onRemove?: (value: string) => void;
+  /** Only values in this list may be removed; built-ins are code constants. */
+  removable?: string[];
+  /** Client count per value, used to warn before removing something in use. */
+  removeUsage?: Record<string, number>;
   t: TFn;
 }) {
   const [open, setOpen] = useState(false);
@@ -675,12 +830,43 @@ function MultiSelect({ label, options, selected, onChange, render, t }: {
       {open && (
         <div className="ms-menu">
           {options.length === 0 && <div className="ms-empty">{t("common.noData")}</div>}
-          {options.map(o => (
-            <button type="button" key={o} className={`ms-opt ${selected.includes(o) ? "ms-opt-on" : ""}`} onClick={() => toggleValue(o)}>
-              <span className="ms-check">{selected.includes(o) && <Check size={11} />}</span>
-              {lab(o)}
-            </button>
-          ))}
+          {options.map(o => {
+            // Only saved (custom) values, and only while nothing references them.
+            // A value still attached to clients cannot be removed: deleting it from
+            // the list would leave those clients pointing at a value that no longer
+            // exists anywhere in the UI. The count on the row explains why.
+            const used = removeUsage?.[o] ?? 0;
+            const canRemove = Boolean(onRemove && removable?.includes(o) && used === 0);
+            return (
+              <div key={o} className={`ms-opt-row ${selected.includes(o) ? "ms-opt-on" : ""}`}>
+                <button type="button" className="ms-opt" onClick={() => toggleValue(o)}>
+                  <span className="ms-check">{selected.includes(o) && <Check size={11} />}</span>
+                  {lab(o)}
+                  {used > 0 && <span className="ms-opt-count">{num(used)}</span>}
+                </button>
+                {canRemove && (
+                  <button
+                    type="button"
+                    className="ms-opt-del"
+                    title={t("refData.removeTitle")}
+                    aria-label={t("refData.removeAria", { value: lab(o) })}
+                    onClick={() => {
+                      // Removing the value from the saved list does NOT touch
+                      // clients already using it, so say so before doing it.
+                      const msg = used > 0
+                        ? t("refData.removeUsedConfirm", { value: lab(o), n: used })
+                        : t("refData.removeConfirm", { value: lab(o) });
+                      if (!confirm(msg)) return;
+                      onChange(selected.filter(x => x !== o));
+                      onRemove?.(o);
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
           {selected.length > 0 && <button type="button" className="ms-clear" onClick={() => { onChange([]); setOpen(false); }}>{t("clients.clearSelection")}</button>}
         </div>
       )}
@@ -688,10 +874,48 @@ function MultiSelect({ label, options, selected, onChange, render, t }: {
   );
 }
 
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, clients, salespeople, spStats, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; clients: Client[]; salespeople: string[]; spStats: SpStat[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; t: TFn }) {
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, clients, salespeople, spStats, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; clients: Client[]; salespeople: string[]; spStats: SpStat[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number } }; onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
   const { logo: heroLogo } = useLogo();
+
+  // Status panel: one row per pipeline stage, in registry order.
+  const stageCounts = useMemo(
+    () => PIPELINE_STAGES.map((stage) => ({
+      stage,
+      count: clients.filter((c) => c.status === stage.value).length,
+    })),
+    [clients],
+  );
+
+  const inProgress = useMemo(
+    () => clients.filter((c) => isInProgress(c.status)).length,
+    [clients],
+  );
+
+  // Funnel: the active pipeline (everything up to "Contracted"), each step
+  // showing its pass rate from the previous one. "Final loss" is terminal and
+  // sits outside the funnel, so it is reported separately below.
+  //
+  // Written as a two-pass reduce rather than a loop with a reassigned variable:
+  // mutating a `let` while building a memo trips the compiler's
+  // "cannot reassign variable after render completes" rule.
+  const funnelStages = useMemo(() => {
+    const active = PIPELINE_STAGES.filter((s) => s.outcome !== "lost");
+    const counts = active.map((stage) => clients.filter((c) => c.status === stage.value).length);
+    return active.map((stage, i) => ({
+      stage,
+      count: counts[i],
+      // Pass rate is measured against the step above; the first step is measured
+      // against the total, so it has no rate of its own.
+      rate: i === 0 || counts[i - 1] === 0 ? null : Math.round((counts[i] / counts[i - 1]) * 100),
+      entering: i === 0,
+    }));
+  }, [clients]);
+
+  const finalConversionRate = clients.length > 0
+    ? Math.round((clients.filter((c) => isWon(c.status)).length / clients.length) * 100)
+    : 0;
 
   return (
     <div className="page dashboard-page">
@@ -709,14 +933,78 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
           <button type="button" onClick={onExport} disabled={exporting}><Download size={14} />{exporting ? t("dash.exporting") : t("dash.exportReport")}</button>
         </div>
       </header>
+      {/* Reporting period — scopes the six cards below. Defaults to this week. */}
+      <div className="period-bar">
+        <div className="period-tabs" role="group" aria-label={t("period.label")}>
+          {(["week", "month", "custom"] as PeriodKind[]).map(k => (
+            <button
+              key={k}
+              type="button"
+              className={periodKind === k ? "active" : ""}
+              aria-pressed={periodKind === k}
+              onClick={() => onPeriodChange(k)}
+            >
+              {t(`period.${k}`)}
+            </button>
+          ))}
+        </div>
+        {periodKind === "custom" && (
+          <div className="period-custom">
+            <input type="date" value={customFrom} onChange={e => onCustomRange(e.target.value, customTo)} aria-label={t("common.from")} />
+            <span>–</span>
+            <input type="date" value={customTo} onChange={e => onCustomRange(customFrom, e.target.value)} aria-label={t("common.to")} />
+          </div>
+        )}
+        <span className="period-summary">
+          {periodLoading
+            ? t("common.loading")
+            : periodInfo.from && periodInfo.to
+              ? `${periodInfo.from} — ${periodInfo.to} · ${t("period.campaigns", { n: periodInfo.campaignCount })}`
+              : t(`period.${periodKind}`)}
+        </span>
+      </div>
+
       {/* KPI strip */}
       <section className="kpi-row kpi-row-6">
         <KpiCard label={t("kpi.totalSpend")} value={sar(totalSpend)} sub={t("kpi.weeklyInvestment")} accent="#4f46e5"/>
         <KpiCard label={t("kpi.totalReach")} value={MONEY.format(totalReach)} sub={t("kpi.acrossChannels")} accent="#0891b2"/>
         <KpiCard label={t("kpi.won")} value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% ${t("kpi.winRate")}`} accent="#22c55e"/>
-        <KpiCard label={t("kpi.lost")} value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% ${t("kpi.ofTotal")}`} accent="#ef4444"/>
-        <KpiCard label={t("kpi.pipeline")} value={String(waiting)} sub={t("kpi.awaiting")} accent="#f59e0b"/>
+        <KpiCard label={t("stage.lost")} value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% ${t("kpi.ofTotal")}`} accent="#ef4444"/>
+        <KpiCard label={t("funnel.inProgress")} value={String(waiting)} sub={t("kpi.awaiting")} accent="#f59e0b"/>
         <KpiCard label={t("kpi.avgCpa")} value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"} sub={won>0?t("kpi.customersWon",{n:won}):t("kpi.noWins")} accent="#7c3aed"/>
+      </section>
+
+      {/* Client status — above Sales performance and Channel ROI */}
+      <section className="panel stage-panel">
+        <div className="panel-heading">
+          <h3>{t("stage.title")} <small>{scoped ? t("dash.scopeMine") : t("dash.scopeAll")}</small></h3>
+        </div>
+        <div className="stage-total-row">
+          <span className="stage-total-label">{t("stage.total")}</span>
+          <strong className="stage-total-value">{num(clients.length)}</strong>
+        </div>
+        <div className="stage-rows">
+          {stageCounts.map(({ stage, count }) => {
+            const pct = clients.length > 0 ? Math.round((count / clients.length) * 100) : 0;
+            return (
+              <button
+                type="button"
+                className="stage-row"
+                key={stage.value}
+                title={t("stage.clickFilter")}
+                onClick={() => onToggleStageFilter(stage.value)}
+              >
+                <span className="stage-row-dot" style={{ background: stage.color }} />
+                <span className="stage-row-name">{statusLabel(t, stage.value)}</span>
+                <span className="stage-row-track">
+                  <span className="stage-row-fill" style={{ width: `${pct}%`, background: stage.color }} />
+                </span>
+                <span className="stage-row-count">{num(count)}</span>
+                <span className="stage-row-pct">{pct}%</span>
+              </button>
+            );
+          })}
+        </div>
       </section>
 
       {/* Funnel + ROI */}
@@ -724,9 +1012,9 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
         <div className="panel sp-perf-panel">
           <h3>{t("sp.title")}</h3>
           <div className="sp-perf-legend">
-            <span className="sp-won">{t("status.wonLabel")}</span>
-            <span className="sp-lost">{t("status.lostLabel")}</span>
-            <span className="sp-wait">{t("status.waitingLabel")}</span>
+            <span className="sp-won">{statusLabel(t, "WON")}</span>
+            <span className="sp-lost">{statusLabel(t, "LOST")}</span>
+            <span className="sp-wait">{t("funnel.inProgress")}</span>
           </div>
           {spStats.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>{t("sp.noData")}</div>}
           {spStats.map(sp => (
@@ -773,7 +1061,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
               </small>
             </div>
             <span className="chan-tag-inline" style={{ flexShrink: 0 }}><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
-            <span className={`status-pill status-${String(c.status).toLowerCase()}`} style={{ flexShrink: 0 }}>{statusLabel(t, c.status)}</span>
+            <StatusPill status={c.status} t={t} style={{ flexShrink: 0 }} />
           </div>
         ))}
       </section>
@@ -793,14 +1081,38 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
           ))}
         </section>
         <section className="panel funnel-panel">
-          <h3>{t("funnel.title")}</h3>
-          <div className="funnel-stages">
-            <div className="funnel-stage stage-total"><span className="funnel-num">{clients.length}</span><span className="funnel-label">{t("funnel.total")}</span></div>
-            <div className="funnel-arrow">↓</div>
-            <div className="funnel-stage stage-waiting"><span className="funnel-num">{waiting}</span><span className="funnel-label">{t("funnel.waiting")}</span></div>
-            <div className="funnel-arrow">↓</div>
-            <div className="funnel-stage stage-won"><span className="funnel-num">{won}</span><span className="funnel-label">{t("funnel.won")}</span></div>
-            <div className="funnel-stage stage-lost"><span className="funnel-num">{lost}</span><span className="funnel-label">{t("funnel.lost")}</span></div>
+          <div className="panel-heading">
+            <h3>{t("funnel.newTitle")}</h3>
+            <span className="muted" style={{ fontSize: 11 }}>{t("funnel.inProgress")}: {num(inProgress)}</span>
+          </div>
+          <div className="funnel2">
+            {funnelStages.map(({ stage, count, rate, entering }, i) => {
+              const width = clients.length > 0 ? Math.max(2, Math.round((count / clients.length) * 100)) : 0;
+              return (
+                <div className="funnel2-step" key={stage.value}>
+                  <div className="funnel2-head">
+                    <span className="funnel2-dot" style={{ background: stage.color }} />
+                    <span className="funnel2-name">{statusLabel(t, stage.value)}</span>
+                    <span className="funnel2-count">{num(count)}</span>
+                  </div>
+                  <div className="funnel2-track">
+                    <div
+                      className="funnel2-fill"
+                      style={{ width: `${width}%`, background: stage.color, opacity: entering ? 1 : 0.82 }}
+                    />
+                  </div>
+                  {i > 0 && (
+                    <span className="funnel2-rate">
+                      {rate === null ? "—" : `${rate}%`} · {t("funnel.dropoff")}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            <div className="funnel2-final">
+              <span>{t("funnel.finalRate")}</span>
+              <strong>{finalConversionRate}%</strong>
+            </div>
           </div>
         </section>
       </div>
@@ -821,11 +1133,11 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
 function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub: string; accent: string }) {
   return (<div className="kpi-card" style={{borderTopColor:accent}}><div className="kpi-label"><span>{label}</span><span className="kpi-dot" style={{background:accent}}/></div><div className="kpi-value">{value}</div><div className="kpi-sub">{sub}</div></div>);}
 
-function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, updateStatus, updateClientField, onAssigned, isAdmin, onArchive, onArchiveSelected,
+function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableChannels?: string[]; removableLocations?: string[]; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   return (
     <div className="page">
       <div className="page-header">
@@ -839,20 +1151,24 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
             <button className={mode==="table"?"seg-active":""} onClick={()=>setMode("table")}><LayoutDashboard size={14}/>{t("clients.table")}</button>
             <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>{t("clients.kanban")}</button>
           </div>
-          <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>{t("clients.newClient")}</button>
+          {canEdit && <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>{t("clients.newClient")}</button>}
           <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>{t("clients.exportSelected",{n:bulkCount})}</button>
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>{t("clients.exportAll")}</button>
         </div>
       </div>
-      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} t={t} />
+      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
       <div className="result-note">{t("clients.showing",{n:clients.length,total:allClients.length})} · {t("clients.selected",{n:selectedIds.size})}</div>
-      {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
+      {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
     </div>
   );
 }
 
-function ClientTable({ clients, updateStatus, updateClientField, onAssigned, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, tableRef, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; tableRef?: React.RefObject<HTMLDivElement> | null; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+function ClientTable({ clients, updateStatus, updateClientField, onAssigned, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; canEdit?: boolean; onArchive?: (id: string) => void | Promise<void>; tableRef?: React.RefObject<HTMLDivElement> | null; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   const allSelected = clients.length>0&&clients.every(c=>selectedIds.has(c.id));
+  // Date locale must follow the same `lang` state as the translated text.
+  // resolveLang() read localStorage during render, which the server cannot see,
+  // so the server and client would have formatted these dates differently.
+  const { lang } = useLang();
   return (
     <div className="table-scroll-wrapper">
       <div className="scroll-indicator-left hidden" ref={(el) => { if(el) { const t2 = tableRef?.current; if(t2){ const check = ()=>{ el.classList.toggle("hidden", t2.scrollLeft <= 0); }; check(); t2.addEventListener("scroll",check,{passive:true}); } } }} />
@@ -866,15 +1182,15 @@ function ClientTable({ clients, updateStatus, updateClientField, onAssigned, sel
             <input type="checkbox" checked={selectedIds.has(c.id)} onChange={()=>toggleSelect(c.id)} className="cb" onClick={e=>e.stopPropagation()}/>
             <span className="id-cell" title={t("th.id")}>#{c.id}</span>
             <span className="person-cell" onClick={()=>onOpenDetail(c)}><b>{c.name}</b><small><span className="ltr-num">{c.phoneNumber}</span></small>{c.notes&&<span className="notes-indicator"><MessageSquare size={10}/></span>}</span>
-            <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>
+            <StatusPill status={c.status} t={t} />
             <span className="chan-tag"><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
-            <span>{c.project}</span><span>{c.location}</span><span className="muted">{c.createdAt?new Date(c.createdAt).toLocaleDateString(dateLocale(resolveLang())):"—"}</span>
+            <span>{c.project}</span><span>{c.location}</span><span className="muted">{c.createdAt?new Date(c.createdAt).toLocaleDateString(dateLocale(lang)):"—"}</span>
             <span className="op-text">{c.operationToTake}</span>
             <span className="muted">{c.firstContactPerson || "—"}</span>
             <span className="muted">{c.secondContactPerson || "—"}</span>
-            <span className="muted">{c.lastUpdateDate?new Date(c.lastUpdateDate).toLocaleDateString(dateLocale(resolveLang())):"—"}</span>
+            <span className="muted">{c.lastUpdateDate?new Date(c.lastUpdateDate).toLocaleDateString(dateLocale(lang)):"—"}</span>
             <span className="actions-cell no-detail">
-              <button className="icon-btn" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={14}/></button>
+              {canEdit && <><button className="icon-btn" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={14}/></button></>}
               {isAdmin && <><button className="icon-btn danger" title={t("common.delete")} onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={14}/></button>
                 <button className="icon-btn" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={14}/></button></>}
             </span>
@@ -886,7 +1202,7 @@ function ClientTable({ clients, updateStatus, updateClientField, onAssigned, sel
   );
 }
 
-function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, onArchive, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; onArchive?: (id: string) => void | Promise<void>; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; canEdit?: boolean; onArchive?: (id: string) => void | Promise<void>; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   const [draggedId, setDraggedId] = useState<string|null>(null);
   const [dropTarget, setDropTarget] = useState<string|null>(null);
   const columns: string[] = [...new Set([...(allStatuses ?? ["WAITING","WON","LOST"]), ...clients.map(c => c.status)])];
@@ -894,15 +1210,15 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
     <div className="kanban-board">
       {columns.map(col=>(
         <section key={col} className={`kanban-col ${dropTarget===col?"drop-target":""}`}
-          onDragEnter={()=>setDropTarget(col)} onDragOver={e=>{e.preventDefault();setDropTarget(col);}}
-          onDragLeave={()=>setDropTarget(null)} onDrop={()=>{if(draggedId){updateStatus(draggedId,col);setDraggedId(null);setDropTarget(null);}}}>
+          onDragEnter={canEdit?()=>setDropTarget(col):undefined} onDragOver={canEdit?(e=>{e.preventDefault();setDropTarget(col);}):undefined}
+          onDragLeave={canEdit?()=>setDropTarget(null):undefined} onDrop={canEdit?()=>{if(draggedId){updateStatus(draggedId,col);setDraggedId(null);setDropTarget(null);}}:undefined}>
           <div className="kanban-head">
-            <span className={`kanban-dot dot-${col.toLowerCase()}`}/><span>{statusLabel(t, col)}</span><small>{clients.filter(c=>c.status===col).length}</small>
+            <StatusDot status={col} /><span>{statusLabel(t, col)}</span><small>{clients.filter(c=>c.status===col).length}</small>
           </div>
           {clients.filter(c=>c.status===col).map(c=>(
-            <article className={`client-card ${draggedId===c.id?"dragging":""} ${selectedIds.has(c.id)?"card-selected":""}`} key={c.id} draggable onDragStart={()=>setDraggedId(c.id)} onDragEnd={()=>{setDraggedId(null);setDropTarget(null);}} onDoubleClick={()=>onOpenDetail(c)}>
+            <article className={`client-card ${draggedId===c.id?"dragging":""} ${selectedIds.has(c.id)?"card-selected":""}`} key={c.id} draggable={canEdit} onDragStart={canEdit?()=>setDraggedId(c.id):undefined} onDragEnd={canEdit?()=>{setDraggedId(null);setDropTarget(null);}:undefined} onDoubleClick={()=>onOpenDetail(c)}>
               <div className="card-top"><b className="card-name"><span className="id-cell" title={t("th.id")}>#{c.id}</span>{c.name}</b><span className="card-actions no-detail">
-                <button className="icon-btn-sm" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={12}/></button>
+                {canEdit && <button className="icon-btn-sm" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={12}/></button>}
                 {isAdmin && <><button className="icon-btn-sm danger" title={t("common.delete")} onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={12}/></button>
                   <button className="icon-btn-sm" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={12}/></button></>}
               </span></div>
@@ -919,7 +1235,7 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
                 <span className="muted">{t("card.second")}: {c.secondContactPerson || "—"}</span>
               </footer>
               <div className="card-status-wrap">
-                <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>
+                <StatusPill status={c.status} t={t} />
               </div>
             </article>
           ))}
@@ -928,55 +1244,6 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
     </div>
   );
 }
-function AddNewSelect({ value, options, onChange, onAdd, render, placeholder, t }: {
-  value: string; options: string[];
-  onChange: (v: string) => void;
-  onAdd?: (v: string) => Promise<string | void>;
-  render?: (v: string) => string;
-  placeholder?: string;
-  t: (key: string, vars?: Record<string, string | number>) => string;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [text, setText] = useState("");
-
-  const confirmAdd = async () => {
-    const val = text.trim();
-    if (!val) { setAdding(false); return; }
-    const res = onAdd ? await onAdd(val) : val;
-    const final = typeof res === "string" && res ? res : val;
-    onChange(final);
-    setAdding(false); setText("");
-  };
-
-  if (adding) {
-    return (
-      <div style={{ display: "flex", gap: 6 }}>
-        <input
-          autoFocus
-          value={text}
-          placeholder={placeholder ?? t("form.newValuePh")}
-          onChange={e => setText(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter") confirmAdd(); else if (e.key === "Escape") { setAdding(false); setText(""); } }}
-          style={{ flex: 1, height: 36, border: "1px solid #dfe2e6", borderRadius: 6, padding: "0 10px", fontSize: 12, outline: "none" }}
-        />
-        <button type="button" className="btn-sm" onClick={confirmAdd}><Check size={14} />{t("form.addBtn")}</button>
-        <button type="button" className="btn-ghost" onClick={() => { setAdding(false); setText(""); }}>{t("common.cancel")}</button>
-      </div>
-    );
-  }
-
-  return (
-    <select
-      value={value}
-      onChange={e => { if (e.target.value === "__NEW__") { setAdding(true); } else { onChange(e.target.value); } }}
-    >
-      <option value="" disabled>{placeholder ?? t("form.statusPh")}</option>
-      {options.map(o => <option key={o} value={o}>{render ? render(o) : o}</option>)}
-      <option value="__NEW__">{t("form.addNewOpt")}</option>
-    </select>
-  );
-}
-
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
   return (<label className={wide?"field field-wide":"field"}><span>{label}</span>{children}</label>);}
 

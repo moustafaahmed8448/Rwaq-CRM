@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated, unauthorized } from "@/lib/auth";
+import { assigneeScope, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
 import { databaseErrorMessage, listClients, listMetrics } from "@/lib/db";
-import { channelLabels } from "@/lib/reporting";
+import { channelLabels, isWon } from "@/lib/reporting";
 
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
 
   try {
     const [clients, metrics] = await Promise.all([
-      listClients({ includeArchived: true }),
+      listClients({ includeArchived: true, assignee: assigneeScope(await getSessionUser(request)) }),
       listMetrics(),
     ]);
 
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
       accent: "#7266d7",
       spend: metric.spend,
       customers: clients.filter(
-        (c) => c.acquisitionChannel === metric.channel && c.status === "WON",
+        (c) => c.acquisitionChannel === metric.channel && isWon(c.status),
       ).length,
       reach: String(metric.reach),
       trend: 0,

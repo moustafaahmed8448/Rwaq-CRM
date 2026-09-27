@@ -103,7 +103,7 @@ export default function LoginPage() {
         <section className="login-v2-card">
           <div className="login-v2-card-header">
             <div className="login-v2-icon-wrap">
-              <BrandMark logo={logo} alt={t("brand.logoAlt")} variant="login" />
+              <BrandMark logo={logo} alt={t("brand.logoAlt")} variant="login" size="lg" />
             </div>
             <h1>{t("auth.welcomeBack")}</h1>
             <p>{t("auth.signinSub")}</p>

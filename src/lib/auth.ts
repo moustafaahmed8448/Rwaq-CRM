@@ -6,8 +6,43 @@ import { findUser } from "./db";
  * because every lookup hits the database. All call sites must `await`.
  */
 
-export type Role = "Admin" | "Sales" | "CRM";
-export const ROLES: Role[] = ["Admin", "Sales", "CRM"];
+export type Role = "Admin" | "Sales" | "CRM" | "Visitor";
+export const ROLES: Role[] = ["Admin", "Sales", "CRM", "Visitor"];
+
+/**
+ * Visitor is strictly read-only: it may look at results but must never change
+ * or destroy data. Checked in the API routes (the real enforcement) and mirrored
+ * in the UI so the buttons are hidden — the UI check alone would be cosmetic.
+ */
+export function canWrite(role?: string | null): boolean {
+  return role === "Admin" || role === "Sales" || role === "CRM";
+}
+
+/** Only admins may archive, restore or permanently delete. */
+export function canArchive(role?: string | null): boolean {
+  return role === "Admin";
+}
+
+/** Admin-only surfaces: team management, the dashboard logo, marketing spend. */
+export function isAdmin(role?: string | null): boolean {
+  return role === "Admin";
+}
+
+/**
+ * Restricts a client query to the signed-in user's own book.
+ *
+ * Admin keeps the company-wide view; everyone else only sees clients where they
+ * are the 1st or 2nd contact. Returns `undefined` for admins so the caller can
+ * spread it into a filter object without overriding an explicit `assignee`.
+ *
+ * Caveat: Client stores contacts as free-text display names, not user ids, so
+ * this matches on name. Renaming a user would orphan their clients — the real
+ * fix is a salespersonUsername column.
+ */
+export function assigneeScope(user: SessionUser | null): string | undefined {
+  if (!user) return undefined;
+  return user.role === "Admin" ? undefined : user.name;
+}
 
 export const SESSION_COOKIE = "rwaq_session";
 const SESSION_PREFIX = "rwaq-session-";
@@ -17,12 +52,13 @@ export const DEMO_SESSION = "rwaq-demo-session";
 export const sessionCookieValue = (username: string) =>
   `${SESSION_PREFIX}${String(username).toLowerCase()}`;
 
-/** Normalize any stored role value into one of the three supported roles. */
+/** Normalize any stored role value into one of the supported roles. */
 export function normalizeRole(role?: string, username?: string): Role {
   const r = String(role ?? "").trim().toLowerCase();
   if (r === "admin") return "Admin";
   if (r === "sales") return "Sales";
   if (r === "crm") return "CRM";
+  if (r === "visitor" || r === "viewer" || r === "readonly") return "Visitor";
   if (r === "member") return "Sales";
   // The workspace owner always keeps full privileges.
   if (String(username ?? "").trim().toLowerCase() === "moustafa") return "Admin";

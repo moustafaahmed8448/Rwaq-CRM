@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { type ActivityEntry, type ClientData, type MarketingMetric, makeActivityEntry } from "./types";
+import { normalizeStatus } from "./reporting";
 
 /**
  * Postgres is the single source of truth. Every read and write in the app goes
@@ -115,7 +116,7 @@ export function toClientRow(row: ClientRecordDb): ClientRow {
     lastUpdateDate: iso(row.lastUpdateDate) ?? "",
     name: row.name,
     phoneNumber: row.phoneNumber,
-    status: row.status,
+    status: normalizeStatus(row.status),
     project: row.project,
     location: row.location,
     acquisitionChannel: row.acquisitionChannel,
@@ -136,6 +137,20 @@ export type ClientFilters = {
   status?: string;
   location?: string;
   salesperson?: string;
+  /**
+   * Restrict to clients where this person is the 1st or 2nd contact. Used to
+   * scope Sales/CRM users to their own book. Matched with `equals` rather than
+   * `contains` (unlike the user-typed `salesperson` filter above) so a user
+   * named "Ann" never inherits clients belonging to "Anna".
+   */
+  assignee?: string;
+  /**
+   * Only clients created within [createdFrom, createdTo). This is what makes the
+   * dashboard's period figures line up: spend and client counts then describe the
+   * same window instead of one being this week and the other all of time.
+   */
+  createdFrom?: string;
+  createdTo?: string;
   archived?: boolean;
   includeArchived?: boolean;
 };
@@ -151,8 +166,28 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
       { secondContactPerson: { contains: filters.salesperson, mode: "insensitive" } },
     ];
   }
+  if (filters.assignee) {
+    // AND, not OR: this has to compose with an explicit salesperson filter
+    // rather than overwrite it.
+    where.AND = [
+      {
+        OR: [
+          { firstContactPerson: { equals: filters.assignee, mode: "insensitive" } },
+          { secondContactPerson: { equals: filters.assignee, mode: "insensitive" } },
+        ],
+      },
+    ];
+  }
   if (filters.archived) where.archived = true;
   else if (!filters.includeArchived) where.archived = false;
+  if (filters.createdFrom || filters.createdTo) {
+    // Local midnight, not UTC: Client.createdAt is a timestamp, so "the 1st"
+    // should mean the user's own 1st, not 00:00 UTC on the 1st.
+    where.createdAt = {
+      ...(filters.createdFrom ? { gte: startOfLocalDay(filters.createdFrom) } : {}),
+      ...(filters.createdTo ? { lt: startOfLocalDay(filters.createdTo) } : {}),
+    };
+  }
   return where;
 }
 
@@ -358,13 +393,24 @@ export type MarketingMetricRow = MarketingMetric;
 const dateOnly = (value: Date | string): string =>
   typeof value === "string" ? value.slice(0, 10) : new Date(value).toISOString().slice(0, 10);
 
+/** UTC midnight — correct for `@db.Date` columns, which Prisma stores as UTC. */
 const startOfDay = (value: string): Date => new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+
+/**
+ * Local midnight — correct for timestamp columns such as Client.createdAt, so a
+ * date the user picked means that day in their own timezone.
+ */
+const startOfLocalDay = (value: string): Date => {
+  const [y, m, d] = value.slice(0, 10).split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1, 0, 0, 0, 0);
+};
 
 type MetricDb = Prisma.MarketingMetricGetPayload<Record<string, never>>;
 
 function toMetricRow(row: MetricDb): MarketingMetricRow {
   return {
     id: row.id,
+    name: row.name ?? "",
     startDate: dateOnly(row.startDate),
     endDate: dateOnly(row.endDate),
     channel: row.channel,
@@ -396,6 +442,7 @@ export async function listMetrics(filters: MetricFilters = {}): Promise<Marketin
 
 export type NewMetricInput = {
   id?: string;
+  name?: string;
   startDate: string;
   endDate: string;
   channel: string;
@@ -410,6 +457,7 @@ export async function createMetric(input: NewMetricInput): Promise<MarketingMetr
   const row = await prisma.marketingMetric.create({
     data: {
       id: input.id ?? `m-${Date.now()}`,
+      name: input.name ?? null,
       startDate: startOfDay(input.startDate),
       endDate: startOfDay(input.endDate),
       channel: input.channel,

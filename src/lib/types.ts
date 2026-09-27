@@ -29,6 +29,8 @@ export interface ActivityEntry {
 
 export interface MarketingMetric {
   id: string;
+  /** Campaign name. Optional — older rows and unnamed campaigns show as "—". */
+  name?: string;
   /** YYYY-MM-DD */
   startDate: string;
   /** YYYY-MM-DD */

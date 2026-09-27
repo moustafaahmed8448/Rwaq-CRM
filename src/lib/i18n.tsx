@@ -480,6 +480,63 @@ const ar: Record<string, string> = {
   "role.crm": "علاقات العملاء",
 
   "errors.generic": "تعذّر إتمام العملية. حاول مرة أخرى.",
+  "mkt.saveFailed": "تعذّر حفظ الحملة. حاول مرة أخرى.",
+  "mkt.newChannelRequired": "اكتب اسم القناة الجديدة.",
+  "form.fixErrors": "يرجى تصحيح الحقول المميزة.",
+  "mkt.campaignName": "اسم الحملة",
+  "mkt.campaignNamePh": "مثال: حملة رمضان",
+  "period.label": "الفترة الزمنية",
+  "period.week": "هذا الأسبوع",
+  "period.month": "هذا الشهر",
+  "period.custom": "فترة مخصصة",
+  "period.campaigns": "{n} حملة",
+  "period.noCampaigns": "لا توجد حملات في هذه الفترة",
+  "errors.builtinLocation": "لا يمكن إزالة موقع مدمج.",
+  "errors.builtinChannel": "لا يمكن إزالة قناة مدمجة.",
+  "errors.locationInUse": "الموقع مستخدم من عملاء حاليًا ولا يمكن إزالته.",
+  "errors.channelInUse": "القناة مستخدمة من عملاء حاليًا ولا يمكن إزالتها.",
+  "loc.riyadh": "الرياض",
+  "loc.jeddah": "جدة",
+  "loc.makkah": "مكة المكرمة",
+  "loc.madinah": "المدينة المنورة",
+  "loc.dammam": "الدمام",
+  "loc.khobar": "الخبر",
+  "loc.dhahran": "الظهران",
+  "loc.taif": "الطائف",
+  "loc.abha": "أبها",
+  "loc.tabuk": "تبوك",
+  "refData.inUseBy": "مستخدمة في {n} عميل",
+  "refData.removeTitle": "إزالة من القائمة المحفوظة",
+  "refData.removeAria": "إزالة {value}",
+  "refData.removeConfirm": "إزالة “{value}” من القائمة المحفوظة؟",
+  "refData.removeUsedConfirm": "إزالة “{value}” من القائمة المحفوظة؟\n\nيستخدمه {n} عميل حالياً. لن تتغير بياناتهم.",
+  "refData.removedLocation": "تمت إزالة الموقع “{value}”",
+  "refData.removedChannel": "تمت إزالة القناة “{value}”",
+  "stage.noResponse": "عملاء غير متفاعلين",
+  "stage.contacted": "عميل تم التواصل معهم",
+  "stage.qualified": "عميل جاد",
+  "stage.quotes": "مطلوب من المبيعات التواصل وعمل عروض أسعار",
+  "stage.won": "تم التعاقد",
+  "stage.lost": "خسارة نهائية",
+  "stage.title": "حالة العملاء",
+  "stage.subtitle": "توزيع العملاء على مراحل المتابعة",
+  "stage.total": "إجمالي العملاء",
+  "stage.share": "{n} عميل",
+  "stage.sharePct": "{n}% من الإجمالي",
+  "stage.clickFilter": "عرض العملاء في هذه المرحلة",
+  "funnel.newTitle": "قمع المتابعة",
+  "funnel.dropOff": "تحويل {n}% إلى المرحلة التالية",
+  "funnel.dropoff": "نسبة التحويل",
+  "funnel.finalRate": "نسبة التعاقد النهائية",
+  "funnel.stageCount": "{n} عميل في هذه المرحلة",
+  "funnel.inProgress": "قيد المتابعة",
+  "role.visitor": "زائر",
+  "sp.myPerformance": "أدائي",
+  "sp.scopeMine": "عملاؤك فقط",
+  "sp.scopeAll": "كل العملاء",
+  "dash.scopeMine": "تعرض نتائجك أنت فقط",
+  "dash.scopeAll": "تعرض نتائج جميع العملاء",
+  "errors.readOnly": "حساب الزائر للقراءة فقط ولا يمكنه تعديل البيانات.",
   "errors.logoRequired": "الشعار مطلوب.",
   "errors.logoInvalid": "بيانات الصورة غير صالحة.",
   "errors.logoTooLarge": "حجم الصورة كبير جداً (بحد أقصى 2 ميجابايت).",
@@ -986,6 +1043,63 @@ const en: Record<string, string> = {
 
   "auth.togglePassword": "Toggle password visibility",
   "errors.generic": "Something went wrong. Please try again.",
+  "mkt.saveFailed": "Could not save the campaign. Please try again.",
+  "mkt.newChannelRequired": "Enter the new channel name.",
+  "form.fixErrors": "Please fix the highlighted fields.",
+  "mkt.campaignName": "Campaign name",
+  "mkt.campaignNamePh": "e.g. Ramadan campaign",
+  "period.label": "Reporting period",
+  "period.week": "This week",
+  "period.month": "This month",
+  "period.custom": "Custom range",
+  "period.campaigns": "{n} campaign(s)",
+  "period.noCampaigns": "No campaigns in this period",
+  "errors.builtinLocation": "A built-in location cannot be removed.",
+  "errors.builtinChannel": "A built-in channel cannot be removed.",
+  "errors.locationInUse": "This location is still used by clients and cannot be removed.",
+  "errors.channelInUse": "This channel is still used by clients and cannot be removed.",
+  "loc.riyadh": "Riyadh",
+  "loc.jeddah": "Jeddah",
+  "loc.makkah": "Makkah",
+  "loc.madinah": "Madinah",
+  "loc.dammam": "Dammam",
+  "loc.khobar": "Khobar",
+  "loc.dhahran": "Dhahran",
+  "loc.taif": "Taif",
+  "loc.abha": "Abha",
+  "loc.tabuk": "Tabuk",
+  "refData.inUseBy": "Used by {n} client(s)",
+  "refData.removeTitle": "Remove from the saved list",
+  "refData.removeAria": "Remove {value}",
+  "refData.removeConfirm": "Remove “{value}” from the saved list?",
+  "refData.removeUsedConfirm": "Remove “{value}” from the saved list?\n\n{n} client(s) currently use it — their data will not change.",
+  "refData.removedLocation": "Location “{value}” removed",
+  "refData.removedChannel": "Channel “{value}” removed",
+  "stage.noResponse": "Non-responsive",
+  "stage.contacted": "Contacted",
+  "stage.qualified": "Qualified",
+  "stage.quotes": "Sales to contact & quote",
+  "stage.won": "Contracted",
+  "stage.lost": "Final loss",
+  "stage.title": "Client status",
+  "stage.subtitle": "How clients are spread across the pipeline",
+  "stage.total": "Total clients",
+  "stage.share": "{n} clients",
+  "stage.sharePct": "{n}% of total",
+  "stage.clickFilter": "Show clients in this stage",
+  "funnel.newTitle": "Follow-up funnel",
+  "funnel.dropOff": "{n}% carried to the next stage",
+  "funnel.dropoff": "Pass rate",
+  "funnel.finalRate": "Final conversion",
+  "funnel.stageCount": "{n} clients in this stage",
+  "funnel.inProgress": "In progress",
+  "role.visitor": "Visitor",
+  "sp.myPerformance": "My performance",
+  "sp.scopeMine": "Your clients only",
+  "sp.scopeAll": "All clients",
+  "dash.scopeMine": "Showing your results only",
+  "dash.scopeAll": "Showing all clients",
+  "errors.readOnly": "Visitor accounts are read-only and cannot modify data.",
   "errors.logoRequired": "Logo required.",
   "errors.logoInvalid": "Invalid image data.",
   "errors.logoTooLarge": "Image is too large (max 2MB).",
@@ -1046,8 +1160,11 @@ function interpolate(str: string, vars?: Record<string, string | number>): strin
   return str.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 }
 
-// Apply the persisted language to the document on first client load.
-if (typeof window !== "undefined") setDocumentLang(resolveLang());
+// NOTE: do not call setDocumentLang() at module scope. It used to run here, and
+// on the client that meant <html dir> was flipped to the stored language at
+// import time — before React hydrated markup that was rendered in the server's
+// language. The direction and the text then disagreed for the whole hydration
+// pass. useLang() applies both together in an effect instead.
 
 export interface I18nValue {
   readonly lang: Lang;
@@ -1056,10 +1173,31 @@ export interface I18nValue {
 }
 
 export function useLang(): I18nValue {
-  const [lang, setLangState] = useState<Lang>(resolveLang);
+  /**
+   * Always start from DEFAULT_LANG, never from resolveLang().
+   *
+   * useState's initialiser runs during render on the server AND on the client.
+   * resolveLang() reads localStorage, which the server cannot see, so it always
+   * returned DEFAULT_LANG on the server but the stored language in the browser.
+   * The first client render then disagreed with the server HTML, and React threw
+   * away the whole tree and re-rendered it. The persisted preference is adopted
+   * in the effect below, once we are safely past hydration.
+   */
+  const [lang, setLangState] = useState<Lang>(DEFAULT_LANG);
 
   useEffect(() => {
-    const refresh = () => setLangState((prev) => (prev === resolveLang() ? prev : resolveLang()));
+    /** Apply a language to the document and to state, skipping no-op updates. */
+    const apply = (next: Lang) => {
+      setDocumentLang(next);
+      setLangState((prev) => (prev === next ? prev : next));
+    };
+
+    // Adopt the persisted preference. Guarded so Arabic users (the default)
+    // never re-render at all.
+    apply(resolveLang());
+
+    // Keep every mounted consumer in step when the preference changes.
+    const refresh = () => apply(resolveLang());
     window.addEventListener(LANG_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {

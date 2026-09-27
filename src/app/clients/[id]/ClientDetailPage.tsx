@@ -6,19 +6,21 @@ import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import { useLang } from "@/lib/i18n";
 import { dateLocale } from "@/lib/format";
-import { activityFieldLabel, activityValueLabel, channelLabel, describeActivity, statusLabel as localizeStatus } from "@/lib/reporting";
+import { canWrite } from "@/lib/auth";
+import StatusPill from "@/components/StatusPill";
+import { activityFieldLabel, activityValueLabel, channelLabel, describeActivity, PIPELINE_STAGES, pipelineStage, statusLabel as localizeStatus } from "@/lib/reporting";
 import type { ActivityEntry, ClientData } from "@/lib/types";
 
-const PREDEFINED_STATUSES = ["WAITING", "WON", "LOST"];
+const PREDEFINED_STATUSES = PIPELINE_STAGES.map((s) => s.value);
 
-const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
-  WAITING: { bg: "#fef3c7", fg: "#92400e", label: "Waiting" },
-  WON: { bg: "#d1fae5", fg: "#065f46", label: "Won" },
-  LOST: { bg: "#fee2e2", fg: "#991b1b", label: "Lost" },
-};
-
+/**
+ * Badge colours derive from the registry's accent so a stage can never show one
+ * colour in the dashboard panel and another on the detail page. User-defined
+ * custom statuses keep the violet fallback.
+ */
 function getStatusStyle(status: string) {
-  if (PREDEFINED_STATUSES.includes(status)) return STATUS_STYLE[status];
+  const stage = pipelineStage(status);
+  if (stage) return { bg: stage.color + "22", fg: stage.color, label: stage.fallback };
   return { bg: "#ede9fe", fg: "#5b21b6", label: status };
 }
 
@@ -148,12 +150,12 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
       <div className="detail-topbar">
         <button className="btn-ghost" onClick={() => router.back()}><ArrowLeft size={16} /> {t("detail.back")}</button>
         <div className="detail-title">
-          <span className={`status-badge status-${client.status.toLowerCase()}`}>{statusStyle.label}</span>
+          <StatusPill status={client.status} t={t} variant="badge" />
           <span className="id-cell" title={t("th.id")}>#{client.id}</span>
           <h1>{client.name}</h1>
         </div>
         <div className="detail-actions">
-          <button className="btn-outline" onClick={() => setEditMode(!editMode)}>{editMode ? <Check size={15} /> : <Edit3 size={15} />}{editMode ? t("common.cancel") : t("detail.edit")}</button>
+          {canWrite(user?.role) && <button className="btn-outline" onClick={() => setEditMode(!editMode)}>{editMode ? <Check size={15} /> : <Edit3 size={15} />}{editMode ? t("common.cancel") : t("detail.edit")}</button>}
           {user?.role === "Admin" && <button className="btn-danger" onClick={deleteClient}><Trash2 size={15} />{t("detail.delete")}</button>}
         </div>
       </div>
@@ -201,7 +203,7 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
             </div>
           ) : (
             <dl className="info-list">
-              <InfoItem icon={<Tag size={14} />} label={t("form.status")}><span className={`status-badge status-${client.status.toLowerCase()}`}>{statusStyle.label}</span></InfoItem>
+              <InfoItem icon={<Tag size={14} />} label={t("form.status")}><StatusPill status={client.status} t={t} variant="badge" /></InfoItem>
               <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}><span><span className="ltr-num">{client.phoneNumber}</span></span></InfoItem>
               <InfoItem icon={<Tag size={14} />} label={t("form.project")}><span>{client.project}</span></InfoItem>
               <InfoItem icon={<Tag size={14} />} label={t("form.channel")}><span>{channelLabel(t, client.acquisitionChannel)}</span></InfoItem>

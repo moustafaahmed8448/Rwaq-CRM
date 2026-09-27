@@ -13,6 +13,18 @@ export function sar(value: number | string, decimals = 0): string {
 }
 
 /**
+ * Thousands-separated number using a fixed locale.
+ *
+ * A bare `toLocaleString()` resolves to the runtime default, which differs
+ * between the Node server and the user's browser — "1,234" on en-US, "1.234" on
+ * de-DE — so the first client render would not match the server HTML. Pinning
+ * the locale keeps digits Western, consistent with sar() and dateLocale().
+ */
+export function num(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+/**
  * Locale used for UI dates and times.
  *
  * Arabic stays on the Gregorian calendar with Latin digits ("ar-SA-u-ca-gregory-nu-latn")

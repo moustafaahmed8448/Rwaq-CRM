@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
   if (g.error) return g.error;
 
   const body = await request.json().catch(() => ({}));
+  const name = String(body.name ?? "").trim();
   const channel = parseChannel(String(body.channel ?? ""));
   const startDate = String(body.startDate ?? "").trim();
   const endDate = String(body.endDate ?? "").trim();
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const metric = await createMetric({
+      name,
       startDate,
       endDate,
       channel,
@@ -104,6 +106,7 @@ export async function PATCH(request: NextRequest) {
     patch.channel = channel;
   }
   if (body.spend !== undefined) patch.spend = Number(body.spend);
+  if (body.name !== undefined) patch.name = String(body.name).trim();
   if (body.reach !== undefined) patch.reach = Number(body.reach);
   if (body.impressions !== undefined) patch.impressions = Number(body.impressions);
   if (body.clicks !== undefined) patch.clicks = Number(body.clicks);

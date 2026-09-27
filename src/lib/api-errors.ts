@@ -52,6 +52,11 @@ const MESSAGES: Record<string, string> = {
   "Logo required": "errors.logoRequired",
   "Invalid image data": "errors.logoInvalid",
   "Image is too large (max 2MB).": "errors.logoTooLarge",
+  "Read-only role": "errors.readOnly",
+  "Cannot remove a built-in location": "errors.builtinLocation",
+  "Cannot remove a built-in channel": "errors.builtinChannel",
+  "Location is still used by existing clients": "errors.locationInUse",
+  "Channel is still used by existing clients": "errors.channelInUse",
 };
 
 /** Raw database / configuration noise that must never be shown to a user. */

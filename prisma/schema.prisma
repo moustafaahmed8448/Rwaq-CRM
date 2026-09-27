@@ -17,6 +17,9 @@ datasource db {
 
 model MarketingMetric {
   id          String   @id
+  // Campaign name. Nullable so existing rows need no backfill; a metric without
+  // one is simply shown as "—" in the UI.
+  name        String?
   startDate   DateTime @db.Date
   endDate     DateTime @db.Date
   channel     String

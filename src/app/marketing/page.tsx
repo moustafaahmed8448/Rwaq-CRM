@@ -11,10 +11,12 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import RefPicker from "@/components/RefPicker";
 import { useLang } from "@/lib/i18n";
 import type { MarketingMetric } from "@/lib/types";
-import { sar, dateLocale } from "@/lib/format";
+import { num, sar, dateLocale } from "@/lib/format";
 import { channelLabel } from "@/lib/reporting";
+import { apiErrorMessage } from "@/lib/api-errors";
 import { downloadFile, exportQuery } from "@/lib/download";
 import "./marketing.css";
 
@@ -33,14 +35,24 @@ export default function MarketingPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [metrics, setMetrics] = useState<MarketingMetric[]>([]);
   const [customChannels, setCustomChannels] = useState<string[]>([]);
+  // Only saved (custom) channels can be deleted; built-ins are code constants.
+  const [removableChannels, setRemovableChannels] = useState<string[]>([]);
+  const [channelUsage, setChannelUsage] = useState<Record<string, number>>({});
   const [showForm, setShowForm] = useState(false);
+  // Campaign figures are company-wide, so every role can view this page; only an
+  // admin may add, edit or delete a metric. The API enforces that too, so this is
+  // about matching the UI to what the server will actually allow.
+  const canEdit = user?.role === "Admin";
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    channel: "FACEBOOK", startDate: "", endDate: "",
+    name: "", channel: "FACEBOOK", startDate: "", endDate: "",
     spend: "", reach: "", impressions: "", clicks: "", notes: "",
     customChannelName: "",
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  // A failed save used to be completely silent: `if (res.ok)` had no else
+  // branch, so a 500 / 409 / 403 looked identical to clicking nothing.
+  const [saveError, setSaveError] = useState("");
   const [loading, setLoading] = useState(true);
 
   /* ── Filters: date range + channel ── */
@@ -60,10 +72,12 @@ export default function MarketingPage() {
       if (!r.ok) { router.replace("/login"); return; }
       const d = await r.json();
       if (!d.authenticated) { router.replace("/login"); return; }
-      if (d.user?.role !== "Admin") { router.replace("/"); return; }
+      // Viewable by every role: campaign spend and performance are company-wide
+      // figures, not per-rep. Writes stay admin-only — the API rejects them and
+      // the controls are hidden below.
       setUser(d.user);
       await loadMetrics();
-      fetch("/api/channels").then(r => r.json()).then(d => setCustomChannels(d.channels ?? DEFAULT_CHANNELS)).catch(() => {});
+      fetch("/api/channels").then(r => r.json()).then(d => { setCustomChannels(d.channels ?? DEFAULT_CHANNELS); setRemovableChannels(d.removable ?? []); setChannelUsage(d.usage ?? {}); }).catch(() => {});
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/set-state-in-effect
     const stored = localStorage.getItem("rwaq-dark");
@@ -80,35 +94,79 @@ export default function MarketingPage() {
   const allChannels = [...DEFAULT_CHANNELS, ...customChannels.filter(ch => !DEFAULT_CHANNELS.includes(ch))];
   const openAdd = () => {
     setEditingId(null);
-    setForm({ channel: "FACEBOOK", startDate: "", endDate: "", spend: "", reach: "", impressions: "", clicks: "", notes: "", customChannelName: "" });
+    setForm({ name: "", channel: "FACEBOOK", startDate: "", endDate: "", spend: "", reach: "", impressions: "", clicks: "", notes: "", customChannelName: "" });
     setFormErrors({});
+    setSaveError("");
     setShowForm(true);
   };
   const openEdit = (m: MarketingMetric) => {
     setEditingId(m.id);
-    setForm({ channel: m.channel, startDate: m.startDate, endDate: m.endDate, spend: String(m.spend), reach: String(m.reach), impressions: String(m.impressions), clicks: String(m.clicks), notes: m.notes ?? "", customChannelName: "" });
+    setForm({ name: m.name ?? "", channel: m.channel, startDate: m.startDate, endDate: m.endDate, spend: String(m.spend), reach: String(m.reach), impressions: String(m.impressions), clicks: String(m.clicks), notes: m.notes ?? "", customChannelName: "" });
     setFormErrors({});
+    setSaveError("");
     setShowForm(true);
   };
-  const closeForm = () => setShowForm(false);
+  const closeForm = () => { setShowForm(false); setSaveError(""); setFormErrors({}); };
+
+  /** Editing a field clears just that field's error. */
+  const clearError = (key: string) => {
+    setFormErrors((prev) => (prev[key] ? { ...prev, [key]: "" } : prev));
+    setSaveError("");
+  };
+
+  /** Creates a new channel and returns its stored (upper-cased) value. */
+  const addChannel = async (label: string): Promise<string> => {
+    const ch = label.trim().toUpperCase().replace(/\s+/g, "_");
+    if (!ch) return label;
+    await fetch("/api/channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: ch }) }).catch(() => {});
+    const r = await fetch("/api/channels").then((x) => x.json() as { channels?: string[]; removable?: string[]; usage?: Record<string, number> }).catch((): { channels?: string[]; removable?: string[]; usage?: Record<string, number> } => ({}));
+    setCustomChannels(r.channels ?? customChannels);
+    setRemovableChannels(r.removable ?? []);
+    setChannelUsage(r.usage ?? {});
+    return ch;
+  };
+
+  /**
+   * Deletes a saved channel from the reference list.
+   *
+   * Only admins reach this (the button is not rendered otherwise), and the API
+   * independently refuses to delete a built-in or a channel still used by
+   * clients — the picker's own `used === 0` gate is the matching UI guard.
+   */
+  const removeChannel = async (label: string) => {
+    const res = await fetch("/api/channels", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label }) }).catch(() => null);
+    if (!res || !res.ok) {
+      const err = res ? await res.json().catch(() => ({})) : null;
+      setSaveError(apiErrorMessage(t, (err as { error?: unknown })?.error));
+      return;
+    }
+    const r = await res.json().catch(() => ({}));
+    setCustomChannels(r.channels ?? []);
+    setRemovableChannels([]);
+    setChannelUsage({});
+    // Drop it from the form if it was the selected channel.
+    setForm((f) => (f.channel === label ? { ...f, channel: "FACEBOOK" } : f));
+  };
 
   const handleSubmit = async () => {
-    let channel = form.channel;
-    if (channel === "__custom__" && form.customChannelName.trim()) {
-      const ch = form.customChannelName.trim().toUpperCase().replace(/\s+/g, "_");
-      try { await fetch("/api/channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: ch }) }); } catch {}
-      const r = await fetch("/api/channels").then(x => x.json() as { channels?: string[] }); setCustomChannels(r.channels ?? customChannels);
-      channel = ch;
-    }
+    // The picker creates custom channels as you type them, so there is no
+    // separate "__custom__" branch to resolve here any more.
+    const channel = form.channel;
     const errors: Record<string, string> = {};
+    if (!form.channel) errors.channel = t("form.required");
     if (!form.startDate) errors.startDate = t("form.required");
     if (!form.endDate) errors.endDate = t("form.required");
     if (form.startDate && form.endDate && form.startDate > form.endDate) errors.endDate = t("form.afterStart");
     if (!form.spend && form.spend !== "0") errors.spend = t("form.required");
-    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      setSaveError(t("form.fixErrors"));
+      return;
+    }
     setFormErrors({});
+    setSaveError("");
 
-    const body = { channel, startDate: form.startDate, endDate: form.endDate, spend: Number(form.spend), reach: Number(form.reach ?? 0), impressions: Number(form.impressions ?? 0), clicks: Number(form.clicks ?? 0), notes: form.notes };
+    const body = { name: form.name, channel, startDate: form.startDate, endDate: form.endDate, spend: Number(form.spend), reach: Number(form.reach ?? 0), impressions: Number(form.impressions ?? 0), clicks: Number(form.clicks ?? 0), notes: form.notes };
 
     const res = editingId
       ? await fetch("/api/marketing/metrics", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingId, ...body }) })
@@ -117,8 +175,24 @@ export default function MarketingPage() {
     if (res.ok) {
       await loadMetrics();
       setShowForm(false);
-      setForm({ channel: "FACEBOOK", startDate: "", endDate: "", spend: "", reach: "", impressions: "", clicks: "", notes: "", customChannelName: "" });
+      setSaveError("");
+      setForm({ name: "", channel: "FACEBOOK", startDate: "", endDate: "", spend: "", reach: "", impressions: "", clicks: "", notes: "", customChannelName: "" });
+      return;
     }
+
+    // The failure branch that used to be missing. Without it a 500, a 409
+    // "duplicate metric" and a 403 all looked like clicking nothing happened.
+    let detail: unknown;
+    try {
+      detail = (await res.json()) as { error?: unknown };
+    } catch {
+      detail = undefined;
+    }
+    setSaveError(
+      typeof (detail as { error?: unknown })?.error === "string"
+        ? apiErrorMessage(t, (detail as { error: string }).error)
+        : t("mkt.saveFailed"),
+    );
   };
 
   const deleteMetric = async (id: string) => {
@@ -203,13 +277,13 @@ export default function MarketingPage() {
                 })}`, `marketing-${new Date().toISOString().slice(0, 10)}.xlsx`)
                   .catch(() => alert(t("mkt.exportFail")));
               }}><Download size={15} />{t("mkt.exportExcel")}</button>
-              <button className="btn-primary mkt-hero-primary" onClick={openAdd}><Plus size={15} />{t("mkt.addMetric")}</button>
+              {canEdit && <button className="btn-primary mkt-hero-primary" onClick={openAdd}><Plus size={15} />{t("mkt.addMetric")}</button>}
             </div>
           </div>
           <div className="mkt-hero-stats">
             <div className="mkt-stat"><span>{sar(totalSpend)}</span><small>{t("dash.trackedSpend")}</small></div>
             <div className="mkt-stat"><span>{channelBreakdown.length}</span><small>{t("dash.activeChannels")}</small></div>
-            <div className="mkt-stat"><span>{totalClicks.toLocaleString()}</span><small>{t("dash.totalClicks")}</small></div>
+            <div className="mkt-stat"><span>{num(totalClicks)}</span><small>{t("dash.totalClicks")}</small></div>
             <div className="mkt-stat"><span>{filteredMetrics.length}</span><small>{t("dash.recordsLogged")}</small></div>
           </div>
         </div>
@@ -220,7 +294,7 @@ export default function MarketingPage() {
           : <>
             <section className="kpi-row">
               <KpiCard label={t("mkt.totalSpend")} value={sar(totalSpend)} sub={t("dash.kpiRecords", { n: filteredMetrics.length })} accent="#4f46e5" icon={<DollarSign size={14} />} />
-              <KpiCard label={t("mkt.totalReach")} value={totalReach.toLocaleString()} sub={t("dash.kpiReachSub")} accent="#0891b2" icon={<EyeIcon size={14} />} />
+              <KpiCard label={t("mkt.totalReach")} value={num(totalReach)} sub={t("dash.kpiReachSub")} accent="#0891b2" icon={<EyeIcon size={14} />} />
               <KpiCard label={t("mkt.avgCpm")} value={sar(avgCPM)} sub={t("dash.kpiCpmSub")} accent="#f59e0b" icon={<TrendingUp size={14} />} />
               <KpiCard label={t("mkt.avgCpc")} value={sar(avgCPC)} sub={t("dash.kpiCpcSub")} accent="#16a34a" icon={<MousePointer size={14} />} />
             </section>
@@ -278,7 +352,7 @@ export default function MarketingPage() {
                 <div>
                   <small>{t("dash.kpiCpmSub")}</small>
                   <strong>{sar(avgCPM)}</strong>
-                  <span>{t("dash.reachCount", { n: totalReach.toLocaleString() })}</span>
+                  <span>{t("dash.reachCount", { n: num(totalReach) })}</span>
                 </div>
               </div>
             </section>
@@ -319,7 +393,7 @@ export default function MarketingPage() {
               {channelBreakdown.map(c => (
                 <div className="table-row" key={c.channel}>
                   <span className="chan-cell"><i className="dot" style={{ background: CH_COLORS[c.channel] }} />{c.name}</span>
-                  <span>{sar(c.spend)}</span><span>{c.reach.toLocaleString()}</span><span>{c.clicks.toLocaleString()}</span>
+                  <span>{sar(c.spend)}</span><span>{num(c.reach)}</span><span>{num(c.clicks)}</span>
                   <span className={Number(c.cpm) < 1 ? "good" : Number(c.cpm) < 3 ? "" : "bad"}>{sar(c.cpm)}</span>
                   <span>{sar(c.cpc)}</span>
                 </div>
@@ -334,20 +408,21 @@ export default function MarketingPage() {
                 <span className="muted" style={{ fontSize: 11 }}>{t("common.records", { n: filteredMetrics.length })}</span>
               </div>
               <div className="recent-row recent-head">
-                <span /><span>{t("dash.thChannel")}</span><span>{t("dash.thPeriod")}</span><span>{t("dash.thSpend")}</span><span>{t("dash.thReach")}</span><span>{t("dash.thNotes")}</span><span />
+                <span /><span>{t("mkt.campaignName")}</span><span>{t("dash.thChannel")}</span><span>{t("dash.thPeriod")}</span><span>{t("dash.thSpend")}</span><span>{t("dash.thReach")}</span><span>{t("dash.thNotes")}</span><span />
               </div>
               {filteredMetrics.length === 0 && <div className="empty-state">{t("dash.noMetrics")}</div>}
               {filteredMetrics.slice(-10).reverse().map(m => (
                 <div className="recent-row" key={m.id}>
                   <span className="dot" style={{ background: CH_COLORS[m.channel] }} />
+                  <span className="r-campaign">{m.name || "—"}</span>
                   <span className="r-channel">{channelLabel(t, m.channel)}</span>
                   <span className="r-period">{new Date(m.startDate).toLocaleDateString(dateLocale(lang))} — {new Date(m.endDate).toLocaleDateString(dateLocale(lang))}</span>
                   <span className="r-spend">{sar(Number(m.spend))}</span>
-                  <span className="r-reach">{Number(m.reach).toLocaleString()}</span>
+                  <span className="r-reach">{num(Number(m.reach))}</span>
                   <span className="muted" style={{ flex: 1 }}>{m.notes ? m.notes.slice(0, 40) : "—"}</span>
                   <div className="r-actions no-detail">
-                    <button className="icon-btn-sm" onClick={() => openEdit(m)} title={t("common.edit")}><Edit3 size={12} /></button>
-                    <button className="icon-btn-sm danger" onClick={() => deleteMetric(m.id)} title={t("common.delete")}><Trash2 size={12} /></button>
+                    {canEdit && <button className="icon-btn-sm" onClick={() => openEdit(m)} title={t("common.edit")}><Edit3 size={12} /></button>}
+                    {canEdit && <button className="icon-btn-sm danger" onClick={() => deleteMetric(m.id)} title={t("common.delete")}><Trash2 size={12} /></button>}
                   </div>
                 </div>
               ))}
@@ -365,20 +440,26 @@ export default function MarketingPage() {
             </div>
             <div className="modal-body">
               <div className="form-grid">
-                <Field label={t("form.channel")}>
-                  <select value={form.channel} onChange={e => setForm(f => ({ ...f, channel: e.target.value, customChannelName: e.target.value === "__custom__" ? "" : f.customChannelName }))}>
-                    {allChannels.map(ch => <option key={ch} value={ch}>{channelLabel(t, ch)}</option>)}
-                    <option value="__custom__">{t("mkt.addCustom")}</option>
-                  </select>
+                <Field label={t("mkt.campaignName")} wide>
+                  <input placeholder={t("mkt.campaignNamePh")} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
                 </Field>
-                {form.channel === "__custom__" && (
-                  <Field label={t("mkt.newChannel")}>
-                    <input placeholder={t("mkt.newChannelPh")} value={form.customChannelName} onChange={e => setForm(f => ({ ...f, customChannelName: e.target.value.toUpperCase() }))} />
-                  </Field>
-                )}
-                <Field label={t("mkt.startDate")}><input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} /></Field>
-                <Field label={t("mkt.endDate")}><input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></Field>
-                <Field label={t("mkt.spend")}><input type="number" min="0" step="0.01" placeholder="0.00" value={form.spend} onChange={e => setForm(f => ({ ...f, spend: e.target.value }))} /></Field>
+                <Field label={t("form.channel")} error={formErrors.channel}>
+                  <RefPicker
+                    value={form.channel === "__custom__" ? (form.customChannelName || "") : form.channel}
+                    options={allChannels}
+                    onChange={v => { clearError("channel"); setForm(f => ({ ...f, channel: v, customChannelName: "" })); }}
+                    render={v => channelLabel(t, v)}
+                    placeholder={t("form.channelPh")}
+                    onAdd={addChannel}
+                    onRemove={canEdit ? removeChannel : undefined}
+                    removable={removableChannels}
+                    removeUsage={channelUsage}
+                    t={t}
+                  />
+                </Field>
+                <Field label={t("mkt.startDate")} error={formErrors.startDate}><input type="date" value={form.startDate} onChange={e => { clearError("startDate"); setForm(f => ({ ...f, startDate: e.target.value })); }} /></Field>
+                <Field label={t("mkt.endDate")} error={formErrors.endDate}><input type="date" value={form.endDate} onChange={e => { clearError("endDate"); setForm(f => ({ ...f, endDate: e.target.value })); }} /></Field>
+                <Field label={t("mkt.spend")} error={formErrors.spend}><input type="number" min="0" step="0.01" placeholder="0.00" value={form.spend} onChange={e => { clearError("spend"); setForm(f => ({ ...f, spend: e.target.value })); }} /></Field>
                 <Field label={t("mkt.reach")}><input type="number" min="0" placeholder="0" value={form.reach} onChange={e => setForm(f => ({ ...f, reach: e.target.value }))} /></Field>
                 <Field label={t("mkt.clicks")}><input type="number" min="0" placeholder="0" value={form.clicks} onChange={e => setForm(f => ({ ...f, clicks: e.target.value }))} /></Field>
                 <Field label={t("mkt.impressions")}><input type="number" min="0" placeholder="0" value={form.impressions} onChange={e => setForm(f => ({ ...f, impressions: e.target.value }))} /></Field>
@@ -386,9 +467,9 @@ export default function MarketingPage() {
                   <textarea rows={2} placeholder={t("mkt.notesPh")} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                 </Field>
               </div>
-              {Object.keys(formErrors).length > 0 && (
-                <div className="form-errors" style={{ marginTop: 12 }}>
-                  {Object.values(formErrors).map((e, i) => <div key={i}>• {e}</div>)}
+              {saveError && (
+                <div className="form-errors" style={{ marginTop: 12 }} role="alert">
+                  <div>{saveError}</div>
                 </div>
               )}
             </div>
@@ -417,6 +498,21 @@ function KpiCard({ label, value, sub, accent, icon }: { label: string; value: st
   );
 }
 
-function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
-  return (<label className={wide ? "field field-wide" : "field"}><span>{label}</span>{children}</label>);
+/**
+ * Labelled form field.
+ *
+ * The validation state has always been keyed by field name (startDate, endDate,
+ * spend, …) but was only ever rendered as an anonymous bullet list at the
+ * bottom of the modal, so nothing told the user *which* input to fix. `error`
+ * now marks the offending control directly: red border, message underneath and
+ * aria-invalid for assistive tech.
+ */
+function Field({ label, wide, error, children }: { label: string; wide?: boolean; error?: string; children: React.ReactNode }) {
+  return (
+    <label className={`field${wide ? " field-wide" : ""}${error ? " field-invalid" : ""}`}>
+      <span>{label}</span>
+      {children}
+      {error && <em className="field-error">{error}</em>}
+    </label>
+  );
 }

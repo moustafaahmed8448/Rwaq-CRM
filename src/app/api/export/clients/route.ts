@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated, unauthorized } from "@/lib/auth";
+import { assigneeScope, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
 import { databaseErrorMessage, listClients } from "@/lib/db";
-import { parseChannel } from "@/lib/reporting";
+import { parseChannel, stageFallback } from "@/lib/reporting";
 import { buildWorkbook, dateStamp, xlsxResponse, type ExcelColumn } from "@/lib/excel";
 
 const CH_LABELS: Record<string, string> = {
@@ -9,7 +9,6 @@ const CH_LABELS: Record<string, string> = {
   GOOGLE_ADS: "Google Ads", WHATSAPP: "WhatsApp", CALLS: "Calls", SALES: "Sales",
 };
 
-const STATUS_LABELS: Record<string, string> = { WAITING: "Waiting", WON: "Won", LOST: "Lost" };
 
 const COLUMNS: ExcelColumn[] = [
   { header: "Client ID", key: "clientId", width: 12 },
@@ -57,7 +56,12 @@ export async function GET(request: NextRequest) {
     const archivedOnly = q.get("archived") === "1";
     const includeArchived = q.get("includeArchived") === "1";
 
-    const all = await listClients({ includeArchived: true });
+    // Scoped to the signed-in user's book for non-admins, so a Sales/CRM export
+    // can never leak another rep's clients.
+    const all = await listClients({
+      includeArchived: true,
+      assignee: assigneeScope(await getSessionUser(request)),
+    });
     let rows = all;
 
     if (archivedOnly) rows = rows.filter((c) => c.archived);
@@ -100,7 +104,7 @@ export async function GET(request: NextRequest) {
       created: day(c.createdAt),
       name: c.name,
       phone: c.phoneNumber,
-      status: STATUS_LABELS[c.status] ?? c.status,
+      status: stageFallback(c.status),
       project: c.project,
       location: c.location,
       channel: CH_LABELS[c.acquisitionChannel] ?? c.acquisitionChannel,

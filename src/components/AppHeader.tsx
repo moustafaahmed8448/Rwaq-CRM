@@ -69,9 +69,10 @@ export default function AppHeader({
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
-  const visibleNav = NAV.filter(item => item.key !== "marketing" || user.role === "Admin");
+  // Marketing is viewable by every role (campaign figures are company-wide);
+  // only its write actions are admin-gated, inside the page itself.
+  const visibleNav = NAV;
   const go = (tab: NavTab) => {
-    if (tab === "marketing" && user.role !== "Admin") return;
     setMobileMenuOpen(false);
     if (onNavigate) { onNavigate(tab); return; }
     if (tab === "dashboard") router.push("/");

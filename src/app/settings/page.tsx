@@ -340,6 +340,7 @@ export default function SettingsPage() {
                       <option value="Admin">{roleLabel(t, "Admin")}</option>
                       <option value="Sales">{roleLabel(t, "Sales")}</option>
                       <option value="CRM">{roleLabel(t, "CRM")}</option>
+                      <option value="Visitor">{roleLabel(t, "Visitor")}</option>
                     </select>
                   </Field>
                 </div>
@@ -362,6 +363,7 @@ export default function SettingsPage() {
                           <option value="Admin">{roleLabel(t, "Admin")}</option>
                           <option value="Sales">{roleLabel(t, "Sales")}</option>
                           <option value="CRM">{roleLabel(t, "CRM")}</option>
+                          <option value="Visitor">{roleLabel(t, "Visitor")}</option>
                         </select>
                       </Field>
                     </div>

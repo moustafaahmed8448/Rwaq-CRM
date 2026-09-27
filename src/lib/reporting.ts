@@ -16,10 +16,137 @@ export const channelLabels: Record<string, string> = {
 
 export const channelValues = Object.keys(channelLabels);
 
-export const statusValues = ["WAITING", "WON", "LOST"] as const;
+/**
+ * Built-in locations. This list used to be duplicated in src/app/page.tsx
+ * (CUSTOM_LOCATIONS) and src/app/api/locations/route.ts (DEFAULT_LOCATIONS), so
+ * the two could silently disagree about which values are built-ins — and
+ * therefore which are deletable.
+ *
+ * `key` is the stored/English value and is never translated on write; the label
+ * is only for display, so switching language never rewrites client data.
+ */
+export interface LocationEntry { key: string; labelKey: string }
 
-/** Fallback labels used when a translation entry is missing. */
-export const statusLabels: Record<string, string> = { WAITING: "Waiting", WON: "Won", LOST: "Lost" };
+export const BUILTIN_LOCATIONS: readonly LocationEntry[] = [
+  { key: "Riyadh", labelKey: "loc.riyadh" },
+  { key: "Jeddah", labelKey: "loc.jeddah" },
+  { key: "Makkah", labelKey: "loc.makkah" },
+  { key: "Madinah", labelKey: "loc.madinah" },
+  { key: "Dammam", labelKey: "loc.dammam" },
+  { key: "Khobar", labelKey: "loc.khobar" },
+  { key: "Dhahran", labelKey: "loc.dhahran" },
+  { key: "Taif", labelKey: "loc.taif" },
+  { key: "Abha", labelKey: "loc.abha" },
+  { key: "Tabuk", labelKey: "loc.tabuk" },
+] as const;
+
+export const BUILTIN_LOCATION_KEYS = BUILTIN_LOCATIONS.map((l) => l.key);
+
+const LOCATION_KEYS: Record<string, string> = Object.fromEntries(
+  BUILTIN_LOCATIONS.map((l) => [l.key, l.labelKey]),
+);
+
+/**
+ * Localized display label for a location.
+ *
+ * Only the built-in cities are translated. User-defined locations are customer
+ * data and are returned untouched, so nothing the user typed is ever altered.
+ */
+export function locationLabel(t: TranslateFn, location: string): string {
+  const key = LOCATION_KEYS[location];
+  return key ? translated(t, key, location) : location;
+}
+
+/** True when the location is one of the built-in, non-deletable cities. */
+export function isBuiltinLocation(location: string): boolean {
+  return BUILTIN_LOCATION_KEYS.includes(location);
+}
+
+/* ── Client pipeline ─────────────────────────────────────────────────────────
+   Single source of truth for the built-in statuses. This used to be duplicated
+   as a bare ["WAITING","WON","LOST"] array in four files, so adding a status in
+   one place silently left the other three disagreeing. Everything now imports
+   from here.
+
+   The pipeline is ordered: `order` drives the funnel and the status panel, so a
+   stage can never drift out of sequence. `outcome` marks the two terminal
+   stages, which is what the win rate, ROI and CPA calculations key off —
+   everything that is neither WON nor LOST is still "in progress". */
+
+export type StageOutcome = "progress" | "won" | "lost";
+
+export interface PipelineStage {
+  /** Stored Client.status value. Never renamed without a migration. */
+  value: string;
+  /** Dictionary key for the localized label. */
+  labelKey: string;
+  /** English fallback used when the dictionary entry is missing. */
+  fallback: string;
+  /** Position in the funnel, ascending. */
+  order: number;
+  outcome: StageOutcome;
+  /** Accent colour, used by the status panel, funnel and pills. */
+  color: string;
+}
+
+export const PIPELINE_STAGES: readonly PipelineStage[] = [
+  { value: "NO_RESPONSE", labelKey: "stage.noResponse", fallback: "Non-responsive", order: 1, outcome: "progress", color: "#94a3b8" },
+  { value: "CONTACTED", labelKey: "stage.contacted", fallback: "Contacted", order: 2, outcome: "progress", color: "#0891b2" },
+  { value: "QUALIFIED", labelKey: "stage.qualified", fallback: "Qualified", order: 3, outcome: "progress", color: "#4f46e5" },
+  { value: "QUOTES", labelKey: "stage.quotes", fallback: "Sales to contact & quote", order: 4, outcome: "progress", color: "#f59e0b" },
+  { value: "WON", labelKey: "stage.won", fallback: "Contracted", order: 5, outcome: "won", color: "#22c55e" },
+  { value: "LOST", labelKey: "stage.lost", fallback: "Final loss", order: 6, outcome: "lost", color: "#ef4444" },
+] as const;
+
+export const PREDEFINED_STATUSES: string[] = PIPELINE_STAGES.map((s) => s.value);
+
+/** Ordered stage list, excluding the two terminal ones — the active pipeline. */
+export const PROGRESS_STAGES: readonly PipelineStage[] =
+  PIPELINE_STAGES.filter((s) => s.outcome === "progress");
+
+const STAGE_BY_VALUE = new Map(PIPELINE_STAGES.map((s) => [s.value, s]));
+
+/**
+ * Maps a stored status onto the current pipeline.
+ *
+ * Rows written before the 6-stage pipeline used WAITING. Left alone, that value
+ * matches no stage, so the client silently vanishes from every count, the "in
+ * progress" total reads 0, and the pill has no colour. Applied on the read path
+ * (toClientRow) so the UI is correct immediately — the SQL migration then only
+ * has to clean up rows that are never re-written.
+ */
+export function normalizeStatus(status: string): string {
+  const key = String(status ?? "").trim().toUpperCase().replace(/[ /-]+/g, "_");
+  if (key === "WAITING") return "NO_RESPONSE";
+  return status;
+}
+
+/** Looks up a stage; undefined for user-defined custom statuses. */
+export function pipelineStage(status: string): PipelineStage | undefined {
+  return STAGE_BY_VALUE.get(normalizeStatus(status));
+}
+
+/** True when the status is a terminal outcome (contracted / lost). */
+export function isWon(status: string): boolean {
+  return pipelineStage(status)?.outcome === "won";
+}
+export function isLost(status: string): boolean {
+  return pipelineStage(status)?.outcome === "lost";
+}
+/** True while the client is still moving through the pipeline. */
+export function isInProgress(status: string): boolean {
+  return pipelineStage(status)?.outcome === "progress";
+}
+
+/** English stage name, for server-side output such as the Excel export. */
+export function stageFallback(status: string): string {
+  return STAGE_BY_VALUE.get(normalizeStatus(status))?.fallback ?? status;
+}
+
+/** Accent colour for a status; custom statuses get a neutral grey. */
+export function statusColor(status: string): string {
+  return STAGE_BY_VALUE.get(status)?.color ?? "#94a3b8";
+}
 
 /** Dictionary keys for the built-in channels / statuses (see src/lib/i18n.tsx). */
 const CHANNEL_KEYS: Record<string, string> = {
@@ -32,16 +159,15 @@ const CHANNEL_KEYS: Record<string, string> = {
   CALLS: "ch.calls",
   SALES: "ch.sales",
 };
-const STATUS_KEYS: Record<string, string> = {
-  WAITING: "status.waitingLabel",
-  WON: "status.wonLabel",
-  LOST: "status.lostLabel",
-};
+const STATUS_KEYS: Record<string, string> = Object.fromEntries(
+  PIPELINE_STAGES.map((s) => [s.value, s.labelKey]),
+);
 /** App roles stored on AppUser.role (never renamed, only displayed translated). */
 const ROLE_KEYS: Record<string, string> = {
   Admin: "role.admin",
   Sales: "role.sales",
   CRM: "role.crm",
+  Visitor: "role.visitor",
 };
 
 export type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
@@ -66,8 +192,9 @@ export function channelLabel(t: TranslateFn, channel: string): string {
 /** Localized display label for a status; custom statuses stay as stored. */
 export function statusLabel(t: TranslateFn, status: string): string {
   const key = STATUS_KEYS[status];
-  const fallback = statusLabels[status];
-  return key && fallback ? translated(t, key, fallback) : status;
+  const stage = pipelineStage(status);
+  if (key && stage) return translated(t, key, stage.fallback);
+  return status;
 }
 
 /** Localized display label for a user role (Admin / Sales / CRM). */
@@ -222,6 +349,10 @@ export function parseStatus(value: unknown): string | undefined {
   if (typeof value !== "string") return;
   const key = value.trim().toUpperCase().replace(/[ /-]+/g, "_");
   if (!key || key === "ALL") return undefined;
+  // Rows written before the 6-stage pipeline used WAITING. Treat it as the
+  // first stage so legacy data still reads correctly even if the migration
+  // has not been applied yet.
+  if (key === "WAITING") return "NO_RESPONSE";
   return key;
 }
 
@@ -238,3 +369,75 @@ export const endOfWeek = (date = new Date()) => {
   value.setDate(value.getDate() + 7);
   return value;
 };
+
+export const startOfMonth = (date = new Date()) => {
+  const value = new Date(date);
+  value.setDate(1);
+  value.setHours(0, 0, 0, 0);
+  return value;
+};
+
+export const endOfMonth = (date = new Date()) => {
+  const value = startOfMonth(date);
+  value.setMonth(value.getMonth() + 1);
+  return value;
+};
+
+export type PeriodKind = "week" | "month" | "custom";
+
+export interface ResolvedPeriod {
+  kind: PeriodKind;
+  from: Date;
+  to: Date;
+  /** YYYY-MM-DD bounds, ready to hand to the query layer. */
+  fromStr: string;
+  toStr: string;
+}
+
+/**
+ * YYYY-MM-DD in the viewer's own calendar.
+ *
+ * Deliberately NOT `toISOString()`, which converts to UTC: in any timezone
+ * east of Greenwich, local midnight serializes to the *previous* day. That
+ * silently shifted every reporting boundary a day early (a custom 1st–30th range
+ * became 31st-of-previous → 30th) and dropped the final day from the query.
+ */
+const dayKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/**
+ * Resolves the dashboard reporting window.
+ *
+ * The period used to be hardcoded to startOfWeek()/endOfWeek() with no way to
+ * change it, and the client counts were never filtered by date at all — so the
+ * spend figures described this week while won/lost described all of time. Every
+ * consumer now derives both from the same ResolvedPeriod, which is what makes
+ * the ratios (CPA, win rate) meaningful.
+ *
+ * `custom` falls back to the current week when the bounds are unusable, so a
+ * malformed query string can never produce an inverted or empty range.
+ */
+export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now = new Date()): ResolvedPeriod {
+  if (kind === "custom" && from && to) {
+    const a = new Date(from);
+    const b = new Date(to);
+    if (!Number.isNaN(a.getTime()) && !Number.isNaN(b.getTime()) && a <= b) {
+      // `to` is exclusive in the internal helpers (endOfWeek is start + 7), but a
+      // user-supplied end date is inclusive, so widen it to the start of the next
+      // day and keep every downstream comparison a simple gte/lt.
+      const inclusiveEnd = new Date(b);
+      inclusiveEnd.setDate(inclusiveEnd.getDate() + 1);
+      a.setHours(0, 0, 0, 0);
+      inclusiveEnd.setHours(0, 0, 0, 0);
+      return { kind, from: a, to: inclusiveEnd, fromStr: dayKey(a), toStr: dayKey(inclusiveEnd) };
+    }
+  }
+  const fromDate = kind === "month" ? startOfMonth(now) : startOfWeek(now);
+  const toDate = kind === "month" ? endOfMonth(now) : endOfWeek(now);
+  return { kind: kind === "month" ? "month" : "week", from: fromDate, to: toDate, fromStr: dayKey(fromDate), toStr: dayKey(toDate) };
+}
+
+/** Parses a `?period=` query value, defaulting to week. */
+export function parsePeriodKind(value: string | null | undefined): PeriodKind {
+  return value === "month" || value === "custom" ? value : "week";
+}

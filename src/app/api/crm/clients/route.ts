@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
-import { parseChannel, parseStatus } from "@/lib/reporting";
+import { assigneeScope, canWrite, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
+import { PREDEFINED_STATUSES, parseChannel, parseStatus } from "@/lib/reporting";
 import {
   addSettingValue,
   createClient,
@@ -16,8 +16,6 @@ import {
 } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
-const PREDEFINED_STATUSES = ["WAITING", "WON", "LOST"];
-
 async function allStatuses(): Promise<string[]> {
   const custom = await readSetting("statuses");
   return [...new Set([...PREDEFINED_STATUSES, ...custom])];
@@ -27,6 +25,15 @@ const actorOf = async (request: NextRequest): Promise<string> =>
   (await getSessionUser(request))?.name ?? "Unknown";
 const roleOf = async (request: NextRequest): Promise<string> =>
   (await getSessionUser(request))?.role ?? "Sales";
+
+/**
+ * Visitor is read-only. This is the real enforcement — hiding the buttons in the
+ * UI would be cosmetic, since any client can call these endpoints directly.
+ */
+async function readOnlyGuard(request: NextRequest): Promise<NextResponse | null> {
+  if (canWrite(await roleOf(request))) return null;
+  return NextResponse.json({ error: "Read-only role" }, { status: 403 });
+}
 
 const baseSchema = z.object({
   name: z.string().min(2),
@@ -72,7 +79,9 @@ function filtered(request: NextRequest) {
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   try {
-    const clients = await listClients(filtered(request));
+    const session = await getSessionUser(request);
+    // Sales/CRM only ever see their own book; Admin keeps the full view.
+    const clients = await listClients({ ...filtered(request), assignee: assigneeScope(session) });
     const archivedCount = await prisma.client.count({ where: { archived: true } });
     return NextResponse.json({
       source: "postgres",
@@ -89,6 +98,8 @@ export async function GET(request: NextRequest) {
 /* ── POST — create client ───────────────────────────────────── */
 export async function POST(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
+  const blocked = await readOnlyGuard(request);
+  if (blocked) return blocked;
   const parsed = baseSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -112,6 +123,8 @@ export async function POST(request: NextRequest) {
 /* ── PATCH — update client, archive/restore, log activity ───── */
 export async function PATCH(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
+  const blocked = await readOnlyGuard(request);
+  if (blocked) return blocked;
   const parsed = patchSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -176,9 +189,11 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-/* ── PUT — custom statuses ─────────────────────────────────── */
+/* ── PUT — custom statuses (workspace-wide, so not read-only) ─── */
 export async function PUT(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
+  const blocked = await readOnlyGuard(request);
+  if (blocked) return blocked;
   const body = await request.json().catch(() => ({}));
   const action = String(body.action ?? "");
   const label = String(body.label ?? "").trim();

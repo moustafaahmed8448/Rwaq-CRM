@@ -1,8 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
-:root { --ink: #202127; --muted: #858892; --line: #e8e8e5; --paper: #f7f8f5; --lime: #d3f36b; --purple: #7266d7; --coral: #ef806c; --sky: #6ec6ee; }
-[data-theme="dark"] { --ink: #e4e4e7; --muted: #71717a; --line: #3f3f46; --paper: #0f0f11; --purple: #a5b4fc; }
+:root { --ink: #202127; --muted: #858892; --line: #e8e8e5; --paper: #f7f8f5; --lime: #d3f36b; --ink-soft: #374151; --ink-faint: #6b7280; --purple: #7266d7; --coral: #ef806c; --sky: #6ec6ee; }
+[data-theme="dark"] { --ink: #e4e4e7; --muted: #71717a; --line: #3f3f46; --paper: #0f0f11; --purple: #a5b4fc; --ink-soft: #a1a1aa; --ink-faint: #8b8b95; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); color: var(--ink); font-family: 'Manrope', sans-serif; }
 button, input, select { font: inherit; }
@@ -49,7 +49,7 @@ button { cursor: pointer; }
 .status-waiting { background: #fff0d3; color: #b78434; }.status-won { background: #e4f5e4; color: #58a260; }.status-lost { background: #fff0ed; color: #c85d4e; }
 .table-subtext { display: block; color: #a0a1a3; font-size: 9px; margin-top: 4px; }.rank-badge { width: 26px; color: #8a8c91; font: 10px 'DM Mono', monospace; }.crm-panel .secondary-button { height: 32px; padding: 7px 10px; }
 .kanban-board > section { transition: background .16s ease, box-shadow .16s ease; border-radius: 9px; padding: 8px; margin: -8px; }.kanban-board > section.drop-target { background: #f1f7e3; box-shadow: inset 0 0 0 2px #b9d975; }.client-card { cursor: grab; transition: transform .16s ease, box-shadow .16s ease, opacity .16s ease; }.client-card:active, .client-card.dragging { cursor: grabbing; transform: rotate(1deg) scale(1.02); box-shadow: 0 10px 24px rgba(32, 40, 20, .13); opacity: .72; }.salesperson-report { margin-top: 14px; }.salesperson-head, .salesperson-row { grid-template-columns: 2fr repeat(4, 1fr); }.red-text { color: #c85d4e; }
-.reports-shell { min-height: 100vh; background: #fff; color: #101114; }.reports-nav { height: 55px; border-bottom: 1px solid #e6e7e9; display: flex; align-items: center; justify-content: space-between; padding: 0 60px; font-size: 14px; }.reports-nav nav { display: flex; align-items: center; gap: 10px; }.reports-nav button { border: 0; background: transparent; color: #777b84; padding: 8px 14px; border-radius: 22px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }.reports-nav button:hover, .reports-nav button.nav-active { background: #17181c; color: #fff; }.reports-nav .user-menu { margin-left: 12px; background: #17181c; color: #fff; font-size: 11px; }.reports-nav .user-menu span { display: none; }.reports-content { max-width: 1130px; margin: 0 auto; padding: 34px 0 70px; }.view-title { display: flex; justify-content: space-between; align-items: end; margin-bottom: 25px; }.view-title h1 { font-size: 30px; letter-spacing: -.8px; margin: 10px 0 4px; }.view-title p { color: #6f737b; font-size: 14px; margin: 0; }.crumb { display: flex; align-items: center; gap: 8px; color: #6f737b; font-size: 12px; }.date-button, .add-client { border: 1px solid #dfe1e5; background: #fff; border-radius: 6px; padding: 10px 13px; color: #2d3036; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }.metric-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }.metric-cards > div { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }.metric-cards span, .metric-cards small { display: block; color: #70747d; font-size: 11px; }.metric-cards strong { display: block; font-size: 25px; margin: 11px 0 5px; }.green { color: #249b58 !important; }.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }.white-panel { border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; }.chart-panel { padding: 18px 16px 10px; }.white-panel h3 { margin: 0 0 14px; font-size: 12px; font-weight: 600; }.report-table { overflow: hidden; }.report-table h3 { padding: 17px 16px 0; }.report-row { min-width: 700px; display: grid; grid-template-columns: 1fr 1.1fr 1.25fr .75fr .75fr .75fr 1fr; gap: 10px; align-items: center; min-height: 39px; padding: 0 16px; border-top: 1px solid #eef0f2; font-size: 11px; color: #24272c; }.report-head { color: #737781; font-size: 10px; }.dot { width: 8px; height: 8px; display: inline-block; border-radius: 50%; margin-right: 7px; }.clients-title { margin-bottom: 20px; }.title-actions { display: flex; align-items: center; gap: 10px; }.segmented { display: flex; padding: 3px; border: 1px solid #e3e5e8; border-radius: 22px; }.segmented button { border: 0; background: transparent; color: #777b84; padding: 8px 13px; border-radius: 18px; display: flex; align-items: center; gap: 7px; font-size: 12px; }.segmented button.selected { background: #17181c; color: white; }.add-client { background: #17181c; border-color: #17181c; color: #fff; font-weight: 600; }.filter-bar { display: grid; grid-template-columns: 1.2fr 1.2fr 1.2fr 1.2fr; gap: 12px; margin-bottom: 20px; }.filter-bar label, .filter-bar select, .date-filter input { height: 37px; border: 1px solid #dfe2e6; border-radius: 6px; background: white; display: flex; align-items: center; gap: 8px; padding: 0 11px; color: #737781; font-size: 12px; }.filter-bar input { border: 0; outline: 0; min-width: 0; flex: 1; font-size: 12px; }.filter-bar select { width: 100%; }.date-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; color: #777b84; font-size: 12px; }.date-filter input { padding: 0 10px; }.client-table { border: 1px solid #dde0e4; border-radius: 10px; overflow-x: auto; }.client-row { min-width: 1080px; display: grid; grid-template-columns: 1.4fr .95fr 1fr 1.15fr 1.15fr .9fr 1.3fr 1.05fr 1.05fr .9fr .5fr; gap: 12px; align-items: center; min-height: 58px; padding: 0 12px; border-top: 1px solid #e5e7ea; font-size: 11px; color: #20232a; }.client-head { min-height: 40px; border-top: 0; background: #fafafa; color: #646a74; font-size: 10px; }.client-person b, .client-person small { display: block; }.client-person small { color: #9a9da4; margin-top: 5px; }.status-select { border: 0; border-radius: 14px; padding: 7px 9px; font-size: 10px; width: fit-content; }.status-select.waiting { background: #fff0c7; color: #a46f00; }.status-select.won { background: #d7f7e4; color: #258e55; }.status-select.lost { background: #ffe2df; color: #ca594b; }.operation { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.muted { color: #8f949d; }.row-actions { display: flex; gap: 12px; color: #737780; }.kanban-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; overflow-x: auto; }.kanban-board > section { min-width: 250px; }.kanban-heading { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e5e7ea; padding: 0 0 13px; font-weight: 700; font-size: 12px; }.kanban-heading small { color: #9ba0a8; background: #f1f2f4; border-radius: 10px; padding: 2px 6px; }.kanban-dot { width: 9px; height: 9px; border-radius: 50%; }.kanban-dot.waiting { background: #f59e0b; }.kanban-dot.won { background: #22b45f; }.kanban-dot.lost { background: #ef6b61; }.client-card { border: 1px solid #e1e3e7; border-radius: 8px; padding: 14px 12px 11px; margin-top: 11px; box-shadow: 0 1px 2px rgba(20,30,40,.03); }.card-top { display: flex; justify-content: space-between; font-size: 12px; }.client-card p { color: #747982; font-size: 10px; margin: 10px 0 0; }.client-card p span { margin-left: 10px; }.client-card > strong { display: block; color: #5c6069; font-size: 10px; margin-top: 12px; }.client-card footer { display: flex; justify-content: space-between; color: #7f848d; font-size: 9px; margin-top: 13px; }.client-card select { margin-top: 10px; border: 1px solid #e3e5e8; border-radius: 5px; padding: 5px; font-size: 10px; width: 100%; }
+.reports-shell { min-height: 100vh; background: #fff; color: #101114; }.reports-nav { height: 55px; border-bottom: 1px solid #e6e7e9; display: flex; align-items: center; justify-content: space-between; padding: 0 60px; font-size: 14px; }.reports-nav nav { display: flex; align-items: center; gap: 10px; }.reports-nav button { border: 0; background: transparent; color: #777b84; padding: 8px 14px; border-radius: 22px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }.reports-nav button:hover, .reports-nav button.nav-active { background: #17181c; color: #fff; }.reports-nav .user-menu { margin-left: 12px; background: #17181c; color: #fff; font-size: 11px; }.reports-nav .user-menu span { display: none; }.reports-content { max-width: 1130px; margin: 0 auto; padding: 34px 0 70px; }.view-title { display: flex; justify-content: space-between; align-items: end; margin-bottom: 25px; }.view-title h1 { font-size: 30px; letter-spacing: -.8px; margin: 10px 0 4px; }.view-title p { color: #6f737b; font-size: 14px; margin: 0; }.crumb { display: flex; align-items: center; gap: 8px; color: #6f737b; font-size: 12px; }.date-button, .add-client { border: 1px solid #dfe1e5; background: #fff; border-radius: 6px; padding: 10px 13px; color: #2d3036; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }.metric-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }.metric-cards > div { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }.metric-cards span, .metric-cards small { display: block; color: #70747d; font-size: 11px; }.metric-cards strong { display: block; font-size: 25px; margin: 11px 0 5px; }.green { color: #249b58 !important; }.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }.white-panel { border: 1px solid #e5e7eb; border-radius: 9px; background: #fff; }.chart-panel { padding: 18px 16px 10px; }.white-panel h3 { margin: 0 0 14px; font-size: 12px; font-weight: 600; }.report-table { overflow: hidden; }.report-table h3 { padding: 17px 16px 0; }.report-row { min-width: 700px; display: grid; grid-template-columns: 1fr 1.1fr 1.25fr .75fr .75fr .75fr 1fr; gap: 10px; align-items: center; min-height: 39px; padding: 0 16px; border-top: 1px solid #eef0f2; font-size: 11px; color: #24272c; }.report-head { color: #737781; font-size: 10px; }.dot { width: 8px; height: 8px; display: inline-block; border-radius: 50%; margin-right: 7px; }.clients-title { margin-bottom: 20px; }.title-actions { display: flex; align-items: center; gap: 10px; }.segmented { display: flex; padding: 3px; border: 1px solid #e3e5e8; border-radius: 22px; }.segmented button { border: 0; background: transparent; color: #777b84; padding: 8px 13px; border-radius: 18px; display: flex; align-items: center; gap: 7px; font-size: 12px; }.segmented button.selected { background: #17181c; color: white; }.add-client { background: #17181c; border-color: #17181c; color: #fff; font-weight: 600; }.filter-bar { display: grid; grid-template-columns: 1.2fr 1.2fr 1.2fr 1.2fr; gap: 12px; margin-bottom: 20px; }.filter-bar label, .filter-bar select, .date-filter input { height: 37px; border: 1px solid #dfe2e6; border-radius: 6px; background: white; display: flex; align-items: center; gap: 8px; padding: 0 11px; color: #737781; font-size: 12px; }.filter-bar input { border: 0; outline: 0; min-width: 0; flex: 1; font-size: 12px; }.filter-bar select { width: 100%; }.date-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; color: #777b84; font-size: 12px; }.date-filter input { padding: 0 10px; }.client-table { border: 1px solid #dde0e4; border-radius: 10px; overflow-x: auto; }.client-row { min-width: 1080px; display: grid; grid-template-columns: 1.4fr .95fr 1fr 1.15fr 1.15fr .9fr 1.3fr 1.05fr 1.05fr .9fr .5fr; gap: 12px; align-items: center; min-height: 58px; padding: 0 12px; border-top: 1px solid #e5e7ea; font-size: 11px; color: var(--ink); }.client-head { min-height: 40px; border-top: 0; background: #fafafa; color: #646a74; font-size: 10px; }.client-person b, .client-person small { display: block; }.client-person small { color: #9a9da4; margin-top: 5px; }.status-select { border: 0; border-radius: 14px; padding: 7px 9px; font-size: 10px; width: fit-content; }.status-select.waiting { background: #fff0c7; color: #a46f00; }.status-select.won { background: #d7f7e4; color: #258e55; }.status-select.lost { background: #ffe2df; color: #ca594b; }.operation { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.muted { color: #8f949d; }.row-actions { display: flex; gap: 12px; color: #737780; }.kanban-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; overflow-x: auto; }.kanban-board > section { min-width: 250px; }.kanban-heading { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e5e7ea; padding: 0 0 13px; font-weight: 700; font-size: 12px; }.kanban-heading small { color: #9ba0a8; background: #f1f2f4; border-radius: 10px; padding: 2px 6px; }.kanban-dot { width: 9px; height: 9px; border-radius: 50%; }.kanban-dot.waiting { background: #f59e0b; }.kanban-dot.won { background: #22b45f; }.kanban-dot.lost { background: #ef6b61; }.client-card { border: 1px solid #e1e3e7; border-radius: 8px; padding: 14px 12px 11px; margin-top: 11px; box-shadow: 0 1px 2px rgba(20,30,40,.03); }.card-top { display: flex; justify-content: space-between; font-size: 12px; }.client-card p { color: #747982; font-size: 10px; margin: 10px 0 0; }.client-card p span { margin-left: 10px; }.client-card > strong { display: block; color: #5c6069; font-size: 10px; margin-top: 12px; }.client-card footer { display: flex; justify-content: space-between; color: #7f848d; font-size: 9px; margin-top: 13px; }.client-card select { margin-top: 10px; border: 1px solid #e3e5e8; border-radius: 5px; padding: 5px; font-size: 10px; width: 100%; }
 @media (max-width: 760px) { .reports-nav { padding: 0 16px; }.reports-nav nav { gap: 0; }.reports-nav button { padding: 8px; }.reports-nav .user-menu span { display: none; }.reports-content { padding: 25px 16px 50px; }.view-title { align-items: flex-start; flex-direction: column; gap: 17px; }.title-actions { width: 100%; justify-content: space-between; }.metric-cards { grid-template-columns: 1fr 1fr; }.dashboard-grid { grid-template-columns: 1fr; }.filter-bar { grid-template-columns: 1fr; }.date-filter { flex-wrap: wrap; }.date-filter input { flex: 1; }.kanban-board { grid-template-columns: repeat(3, minmax(250px, 1fr)); } }
 
 .shell{min-height:100vh;background:var(--paper);display:flex;flex-direction:column;transition:background .2s,color .2s}
@@ -121,7 +121,7 @@ button { cursor: pointer; }
 .date-bar{display:flex;align-items:center;gap:8px;margin-bottom:18px;color:#777b84;font-size:12px}
 .date-bar input{height:32px;border:1px solid #dfe2e6;border-radius:5px;padding:0 8px;font-size:12px}
 .client-table{border:1px solid #e2e5e9;border-radius:10px;overflow-x:auto;background:#fff}
-.client-row{min-width:1210px;display:grid;grid-template-columns:30px 42px 1.4fr .85fr .9fr 1fr 1fr .8fr 1.2fr .85fr .85fr .8fr .5fr;gap:10px;align-items:center;min-height:54px;padding:0 12px;border-top:1px solid #eef0f2;font-size:11px;color:#20232a}
+.client-row{min-width:1210px;display:grid;grid-template-columns:30px 42px 1.4fr .85fr .9fr 1fr 1fr .8fr 1.2fr .85fr .85fr .8fr .5fr;gap:10px;align-items:center;min-height:54px;padding:0 12px;border-top:1px solid #eef0f2;font-size:11px;color:var(--ink)}
 .id-cell{font:10px 'DM Mono',monospace;color:#9ca3af;text-align:center;white-space:nowrap}
 .client-row:not(.client-head) .id-cell{color:#6b7280;font-weight:600}
 [data-theme="dark"] .id-cell{color:#52525b}
@@ -163,9 +163,12 @@ button { cursor: pointer; }
 .delete-warning strong{display:block;font-size:14px;margin-bottom:4px}.delete-warning p{margin:0;font-size:13px;color:#6b7280}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #eef0f2;padding-top:16px}
 .table-head-row{display:grid;grid-template-columns:1.3fr .8fr .8fr .7fr .7fr;gap:10px;padding:0 18px;min-height:36px;border-bottom:1px solid #eef0f2;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;font-weight:600;align-items:center}
-.table-row{display:grid;grid-template-columns:1.3fr .8fr .8fr .7fr .7fr;gap:10px;padding:0 18px;min-height:42px;border-bottom:1px solid #f5f5f5;font-size:11px;color:#374151;align-items:center}
+.table-row{display:grid;grid-template-columns:1.3fr .8fr .8fr .7fr .7fr;gap:10px;padding:0 18px;min-height:42px;border-bottom:1px solid #f5f5f5;font-size:11px;color:var(--ink-soft);align-items:center}
 .table-row:last-child{border-bottom:none}
-.chan-cell{display:flex;align-items:center;gap:7px;font-weight:500;color:#111827}
+/* The channel name sets its own colour, so an inherited [data-theme="dark"]
+   colour on .table-row / .roi-row never reached it — which is why the Channel
+   Breakdown and Channel ROI labels went near-black on a dark surface. */
+.chan-cell{display:flex;align-items:center;gap:7px;font-weight:500;color:var(--ink)}
 .btn-primary{display:inline-flex;align-items:center;gap:6px;background:#17181c;color:#fff;border:0;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer}
 .btn-primary:hover{background:#2d2e34}
 .btn-outline{display:inline-flex;align-items:center;gap:6px;background:#fff;color:#444;border:1px solid #dde1e6;border-radius:7px;padding:8px 13px;font-size:12px;cursor:pointer}
@@ -200,9 +203,9 @@ button { cursor: pointer; }
 .meta-item { display: flex; flex-direction: column; gap: 4px; }
 .meta-item.full { grid-column: 1 / -1; }
 .meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #9ca3af; font-weight: 600; }
-.meta-value { font-size: 13px; color: #111827; overflow-wrap: anywhere; min-width: 0; }
+.meta-value { font-size: 13px; color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
 .meta-value.muted { color: #6b7280; font-size: 12px; }
-.op-value { font-size: 13px; color: #111827; font-weight: 500; }
+.op-value { font-size: 13px; color: var(--ink); font-weight: 500; }
 .notes-text { font-size: 13px; color: #4b5563; line-height: 1.6; background: #f9fafb; border-radius: 6px; padding: 10px 12px; }
 .detail-actions { display: flex; gap: 8px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
 .btn-danger-outline { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #dc2626; border: 1px solid #fecaca; border-radius: 7px; padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
@@ -211,7 +214,7 @@ button { cursor: pointer; }
 .card-name { font-size: 12px; }
 .card-name .id-cell { margin-inline-end: 5px; vertical-align: 1px; }
 .card-phone { color: #6b7280; font-size: 10px; margin: 6px 0 0; }
-.card-project { color: #374151; font-size: 11px; margin: 4px 0 0; font-weight: 500; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-project { color: var(--ink-soft); font-size: 11px; margin: 4px 0 0; font-weight: 500; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-location { color: #9ca3af; font-size: 10px; margin: 2px 0 0; }
 .card-notes { color: #6b7280; font-size: 10px; margin: 6px 0 0; display: flex; align-items: center; gap: 4px; }
 .card-op { display: block; color: #4f46e5; font-size: 10px; margin-top: 8px; font-weight: 600; }
@@ -235,7 +238,7 @@ button { cursor: pointer; }
 .detail-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .detail-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
-.detail-section h2 { margin: 0 0 18px; font-size: 14px; font-weight: 700; letter-spacing: -.2px; color: #111827; display: flex; align-items: center; gap: 7px; }
+.detail-section h2 { margin: 0 0 18px; font-size: 14px; font-weight: 700; letter-spacing: -.2px; color: var(--ink); display: flex; align-items: center; gap: 7px; }
 .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .status-waiting { background: #fef3c7; color: #92400e; }
 .status-won { background: #d1fae5; color: #065f46; }
@@ -246,7 +249,7 @@ button { cursor: pointer; }
 .info-row { display: flex; align-items: flex-start; gap: 10px; }
 .info-icon { width: 28px; height: 28px; display: grid; place-items: center; background: #f4f5f2; border-radius: 6px; color: #6b7280; flex-shrink: 0; }
 .info-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #9ca3af; font-weight: 600; min-width: 90px; padding-top: 4px; }
-.info-value { font-size: 13px; color: #111827; flex: 1; }
+.info-value { font-size: 13px; color: var(--ink); flex: 1; }
 .notes-display { font-size: 13px; color: #4b5563; line-height: 1.6; background: #f9fafb; border-radius: 6px; padding: 10px 12px; }
 /* timeline */
 .timeline { display: flex; flex-direction: column; gap: 0; max-height: 520px; overflow-y: auto; padding-right: 4px; }
@@ -255,7 +258,7 @@ button { cursor: pointer; }
 .timeline-dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; color: #fff; margin-top: 2px; }
 .timeline-content { flex: 1; min-width: 0; }
 .timeline-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.timeline-action { font-size: 12px; font-weight: 600; color: #111827; }
+.timeline-action { font-size: 12px; font-weight: 600; color: var(--ink); }
 .timeline-meta { font-size: 11px; color: #9ca3af; display: flex; gap: 4px; }
 .actor { color: #6b7280; font-weight: 500; }
 .timeline-field-change { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; flex-wrap: wrap; }
@@ -283,7 +286,7 @@ button { cursor: pointer; }
 /* stats row */
 .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .stat-card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px; text-align: center; }
-.stat-value { display: block; font-size: 28px; font-weight: 800; letter-spacing: -1px; color: #111827; }
+.stat-value { display: block; font-size: 28px; font-weight: 800; letter-spacing: -1px; color: var(--ink); }
 .stat-label { font-size: 11px; color: #9ca3af; margin-top: 4px; }
 .toast-single { position: fixed; bottom: 24px; right: 24px; background: #111827; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 200; animation: toastIn .2s ease; }
 .page-center { min-height: 60vh; display: grid; place-items: center; gap: 16px; text-align: center; }
@@ -309,7 +312,7 @@ button { cursor: pointer; }
 .channel-roi-panel { padding: 18px 20px; }
 .roi-table { display: flex; flex-direction: column; gap: 0; }
 .roi-head { display: grid; grid-template-columns: 1.3fr .8fr .6fr .8fr; gap: 8px; padding: 0 4px 8px; border-bottom: 1px solid #eef0f2; font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
-.roi-row { display: grid; grid-template-columns: 1.3fr .8fr .6fr .8fr; gap: 8px; padding: 9px 4px; border-bottom: 1px solid #f5f5f5; font-size: 11px; color: #374151; align-items: center; }
+.roi-row { display: grid; grid-template-columns: 1.3fr .8fr .6fr .8fr; gap: 8px; padding: 9px 4px; border-bottom: 1px solid #f5f5f5; font-size: 11px; color: var(--ink-soft); align-items: center; }
 .roi-row:last-child { border-bottom: none; }
 .good { color: #16a34a; font-weight: 600; }
 .bad { color: #ef4444; font-weight: 600; }
@@ -322,7 +325,7 @@ button { cursor: pointer; }
 .settings-header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
 .settings-header h1 { font-size: 24px; letter-spacing: -.8px; margin: 0; }
 .settings-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 24px; margin-bottom: 16px; }
-.settings-section h2 { margin: 0 0 16px; font-size: 14px; font-weight: 700; color: #111827; }
+.settings-section h2 { margin: 0 0 16px; font-size: 14px; font-weight: 700; color: var(--ink); }
 .settings-avatar { width: 64px; height: 64px; background: #e7ddff; color: #7664cf; border-radius: 50%; display: grid; place-items: center; font-size: 20px; font-weight: 800; margin-bottom: 16px; }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .form-field { display: grid; gap: 5px; }
@@ -343,7 +346,7 @@ button { cursor: pointer; }
 .user-dropdown { position: relative; }
 .dropdown-menu { display: none; position: absolute; inset-inline-end: 0; top: calc(100% + 8px); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-width: 180px; box-shadow: 0 8px 30px rgba(15,23,42,.12); z-index: 60; flex-direction: column; gap: 2px; }
 .dropdown-menu.open { display: flex; }
-.dropdown-menu button { border: 0; background: transparent; color: #374151; padding: 9px 12px; border-radius: 7px; display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; text-align: left; width: 100%; }
+.dropdown-menu button { border: 0; background: transparent; color: var(--ink-soft); padding: 9px 12px; border-radius: 7px; display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; text-align: left; width: 100%; }
 .dropdown-menu button:hover { background: #f3f4f6; }
 .dropdown-menu .dropdown-danger { color: #dc2626; }
 .dropdown-menu .dropdown-danger:hover { background: #fef2f2; }
@@ -358,18 +361,23 @@ button { cursor: pointer; }
 .kpi-row-4 { grid-template-columns: repeat(4, 1fr); }
 .chart-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
 .recent-panel h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; }
-.recent-row { display: grid; grid-template-columns: auto 1fr 1.2fr 0.9fr 1fr 1.5fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 12px; }
-.r-channel { font-weight: 600; color: #111827; }
-.r-period { color: #6b7280; }
+.recent-row { display: grid; grid-template-columns: auto 1.2fr 1fr 1.2fr 0.9fr 1fr 1.5fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 12px; }
+/* Campaign and Channel are separate columns now — the row used to show one or
+   the other under a single "Channel" heading, which mislabelled every named
+   campaign. */
+.r-campaign { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r-channel { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r-period { color: var(--ink-faint); }
 .r-spend { font-weight: 700; color: #4f46e5; }
-.r-reach { color: #374151; }
+[data-theme="dark"] .r-spend { color: #a5b4fc; }
+.r-reach { color: var(--ink-soft); }
 .form-panel { max-width: 680px; }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .form-errors { background: #fef2f2; color: #991b1b; padding: 10px 14px; border-radius: 7px; font-size: 13px; margin-top: 12px; }
 .month-picker { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .mn-btn { border: 1px solid var(--line); background: #fff; border-radius: 6px; width: 32px; height: 32px; display: grid; place-items: center; cursor: pointer; color: #6b7280; }
-.mn-label { font-size: 14px; font-weight: 600; color: #111827; }
+.mn-label { font-size: 14px; font-weight: 600; color: var(--ink); }
 .topbar-tab { background: #ede9fe; color: #5b21b6; padding: 5px 12px; border-radius: 14px; font-size: 12px; font-weight: 600; margin-left: 8px; }
 .nav-back { margin-right: 8px; }
 @media(max-width:900px){.kpi-row-4{grid-template-columns:repeat(2,1fr)}.chart-row-2{grid-template-columns:1fr}.form-grid-2{grid-template-columns:1fr}}
@@ -1253,7 +1261,16 @@ button { cursor: pointer; }
 .login-v2-admin-note svg { flex-shrink: 0; margin-top: 1px; color: #4f46e5; }
 [data-theme="dark"] .login-v2-admin-note { color: #a1a1aa; }
 [data-theme="dark"] .login-v2-admin-note svg { color: #a78bfa; }
-.login-v2-copyright { display: flex; align-items: center; justify-content: space-between; font: 500 10.5px 'DM Mono', monospace; color: #9ca3af; text-transform: uppercase; letter-spacing: .05em; }
+/* Wraps as a unit: the brand + year and the developer credit are independent
+   facts, and on a narrow card they no longer fit on one line. Without
+   flex-wrap the flex items shrink and the monospace text breaks mid-phrase. */
+.login-v2-copyright {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 3px 10px;
+  font: 500 10.5px 'DM Mono', monospace; color: #9ca3af;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.login-v2-copyright > span { white-space: nowrap; }
 [data-theme="dark"] .login-v2-copyright { color: #71717a; }
 
 @media (max-width: 640px) {
@@ -1302,5 +1319,206 @@ input.ltr-num { text-align: left; }
 .login-v2-logo-img { width: 30px; height: 30px; border-radius: 8px; }
 [data-theme="dark"] .brand-logo,
 [data-theme="dark"] .login-v2-logo-img { background: #f4f4f5; padding: 3px; }
+
+/* Large mark — the one centred above "Welcome back". The topbar badge stays at
+   30px; at heading size a corner-sized mark reads as an icon, not a brand.
+   Both the uploaded logo and the "R" fallback are scaled, so the card keeps
+   the same footprint whether or not a logo has been uploaded. */
+.login-v2-logo-img.is-lg { width: 64px; height: 64px; border-radius: 16px; }
+.login-v2-card-header .login-v2-logo.is-lg {
+  width: 64px; height: 64px; border-radius: 16px; font-size: 30px;
+}
+[data-theme="dark"] .login-v2-logo-img.is-lg { padding: 6px; }
+
+
+/* ── Client status panel + redesigned funnel ─────────────────────────────
+   The status panel sits above Sales performance / Channel ROI and gives one
+   row per pipeline stage, in the registry's order. Each row is a button: it
+   applies that stage as a status filter and jumps to the clients view. */
+
+.stage-panel { padding: 18px 20px; margin-bottom: 16px; }
+.stage-panel .panel-heading h3 { display: flex; align-items: baseline; gap: 8px; }
+.stage-panel .panel-heading h3 small { font-weight: 400; color: #a0a3ab; font-size: 11px; }
+
+.stage-total-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 10px 14px; margin-bottom: 12px;
+  background: var(--paper-2, #fafbfc); border: 1px solid var(--line); border-radius: 10px;
+}
+.stage-total-label { font-size: 12px; font-weight: 600; color: #6b7280; }
+.stage-total-value { font-size: 22px; font-weight: 800; letter-spacing: -.6px; color: var(--ink); }
+
+.stage-rows { display: flex; flex-direction: column; gap: 2px; }
+.stage-row {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) minmax(70px, 2fr) 44px 40px;
+  align-items: center; gap: 10px; width: 100%;
+  padding: 9px 12px; border: 0; border-radius: 8px;
+  background: transparent; cursor: pointer; text-align: start;
+  font-size: 12px; color: var(--ink);
+  transition: background .15s ease;
+}
+.stage-row:hover { background: var(--paper-2, #f6f7f9); }
+.stage-row-dot { width: 8px; height: 8px; border-radius: 50%; }
+.stage-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.stage-row-track { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.stage-row-fill { display: block; height: 100%; border-radius: 3px; transition: width .3s ease; }
+.stage-row-count { text-align: end; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stage-row-pct { text-align: end; font-size: 11px; color: #9ca3af; font-variant-numeric: tabular-nums; }
+
+/* Funnel: a horizontal pass-rate ladder over the active pipeline. The old
+   boxes (total → waiting → won/lost) are gone; "Final loss" is terminal and
+   excluded, which is why the ladder stops at "Contracted". */
+.funnel2 { display: flex; flex-direction: column; gap: 12px; }
+.funnel2-step { display: flex; flex-direction: column; gap: 5px; }
+.funnel2-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.funnel2-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.funnel2-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
+.funnel2-count { font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.funnel2-track { height: 10px; background: var(--paper-2, #f1f2f4); border-radius: 5px; overflow: hidden; }
+.funnel2-fill { display: block; height: 100%; border-radius: 5px; transition: width .3s ease; }
+.funnel2-rate { font-size: 10px; color: #9ca3af; padding-inline-start: 16px; font-variant-numeric: tabular-nums; }
+.funnel2-final {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 4px; padding: 10px 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--paper-2, #fafbfc);
+  font-size: 12px; color: #6b7280; font-weight: 600;
+}
+.funnel2-final strong { font-size: 18px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+[data-theme="dark"] .stage-total-row,
+[data-theme="dark"] .stage-row:hover,
+[data-theme="dark"] .funnel2-track,
+[data-theme="dark"] .funnel2-final { background: #1c1c1f; border-color: #27272a; }
+[data-theme="dark"] .stage-row-track { background: #27272a; }
+[data-theme="dark"] .stage-row-name,
+[data-theme="dark"] .stage-total-value,
+[data-theme="dark"] .funnel2-name,
+[data-theme="dark"] .funnel2-count,
+[data-theme="dark"] .funnel2-final strong { color: #fafafa; }
+[data-theme="dark"] .stage-total-label,
+[data-theme="dark"] .funnel2-final { color: #a1a1aa; }
+
+@media (max-width: 900px) {
+  .stage-row { grid-template-columns: 10px minmax(0, 1fr) 44px 40px; }
+  .stage-row-track { display: none; }
+}
+
+/* The login topbar bumps the "R" badge to 30px (see .login-v2-brand-badge
+   .brand-letter), so the uploaded logo has to match or the bar resizes when a
+   logo is added. */
+.login-v2-brand-badge .brand-logo { width: 30px; height: 30px; border-radius: 8px; }
+
+/* ── Reference-data removal in the filter dropdowns ────────────────────────
+   .ms-opt is now wrapped in a flex row so a remove control can sit beside the
+   label without disturbing the existing padding/hover rules. Only saved
+   (custom) values get the control; built-ins are code constants. */
+.ms-opt-row { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+.ms-opt-row:hover { background: #f3f4f6; }
+.ms-opt-row .ms-opt { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.ms-opt-count {
+  margin-inline-start: auto; font-size: 10px; color: #9ca3af;
+  font-variant-numeric: tabular-nums; padding-inline-start: 6px;
+}
+.ms-opt-del {
+  flex-shrink: 0; display: grid; place-items: center;
+  width: 24px; height: 24px; border: 0; border-radius: 5px;
+  background: transparent; color: #cbd5e1; cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.ms-opt-del:hover { background: #fee2e2; color: #dc2626; }
+[data-theme="dark"] .ms-opt-row:hover { background: #27272a; }
+[data-theme="dark"] .ms-opt-del { color: #52525b; }
+[data-theme="dark"] .ms-opt-del:hover { background: #3f1a1a; color: #fca5a5; }
+
+
+/* The add/edit modal's picker is the same widget as the filter dropdown, so it
+   needs the same full-width trigger. The form fields give it a grid column, and
+   .ms-wrap must fill it or the trigger collapses to its label width. */
+.field .ms-wrap { width: 100%; }
+.picker-trigger {
+  width: 100%; height: 36px; padding: 0 10px; font-size: 12px;
+  background: #fff; color: var(--ink);
+  border: 1px solid #dfe2e6; border-radius: 6px;
+  display: flex; align-items: center; gap: 8px; text-align: start; cursor: pointer;
+}
+.picker-trigger:hover { border-color: #c4b5fd; }
+.picker-trigger .ms-value {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Reporting period selector ────────────────────────────────────────────
+   Sits above the six KPI cards. Everything below it (spend, reach, won, lost,
+   in-progress and the derived CPA / win rate) describes this one window, so the
+   ratios are computed from a single period instead of mixing one week's spend
+   with all-time client counts. */
+.period-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 14px;
+}
+.period-tabs {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--paper-2, #f1f2f4); border-radius: 9px;
+}
+.period-tabs button {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 6px 12px; border-radius: 7px;
+  font-size: 12px; font-weight: 600; color: #6b7280;
+  transition: background .15s ease, color .15s ease;
+}
+.period-tabs button:hover { color: var(--ink); }
+.period-tabs button.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .1); }
+.period-custom { display: flex; align-items: center; gap: 6px; color: #9ca3af; font-size: 12px; }
+.period-custom input {
+  height: 32px; border: 1px solid #dfe2e6; border-radius: 6px;
+  padding: 0 8px; font-size: 12px; color: var(--ink); background: #fff;
+}
+.period-summary { font-size: 11.5px; color: #9ca3af; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+
+[data-theme="dark"] .period-tabs { background: #1c1c1f; }
+
+/* ── Per-field validation markers ────────────────────────────────────────
+   The marketing form's validation state has always been keyed by field, but it
+   was only rendered as an anonymous bullet list, so nothing pointed at the input
+   that needed fixing. These styles mark the offending control in place. */
+.field-invalid > span { color: #dc2626; }
+.field-invalid input,
+.field-invalid select,
+.field-invalid textarea {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, .12);
+}
+.field-error {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+
+/* Inline "add new" row inside RefPicker (shared by the clients and marketing
+   forms). Was an inline style object on the clients page; promoted to a class so
+   both forms get the same layout. */
+.ref-add-row { display: flex; gap: 6px; }
+.ref-add-row input {
+  flex: 1; min-width: 0; height: 36px;
+  border: 1px solid #dfe2e6; border-radius: 6px;
+  padding: 0 10px; font-size: 12px; outline: none; background: #fff; color: var(--ink);
+}
+.ref-add-row input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px #ede9fe; }
+[data-theme="dark"] .ref-add-row input { background: #18181b; border-color: #27272a; }
+
+  color: #dc2626;
+  line-height: 1.4;
+}
+[data-theme="dark"] .field-invalid > span { color: #fca5a5; }
+[data-theme="dark"] .field-invalid input,
+[data-theme="dark"] .field-invalid select,
+[data-theme="dark"] .field-invalid textarea { border-color: #f87171 !important; }
+[data-theme="dark"] .field-error { color: #fca5a5; }
+
+[data-theme="dark"] .period-tabs button { color: #a1a1aa; }
+[data-theme="dark"] .period-tabs button.active { background: #3f3f46; color: #fafafa; }
+[data-theme="dark"] .period-custom input { background: #18181b; border-color: #27272a; }
+[data-theme="dark"] .period-summary { color: #71717a; }
+
+.picker-trigger .ms-value:empty, .picker-trigger .ms-value:only-child { color: #9ca3af; }
+[data-theme="dark"] .picker-trigger { background: #18181b; border-color: #27272a; }
 
 
