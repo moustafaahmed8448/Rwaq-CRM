@@ -336,7 +336,7 @@ button { cursor: pointer; }
 
 /* ── User dropdown ─────────────────────────────────────── */
 .user-dropdown { position: relative; }
-.dropdown-menu { display: none; position: absolute; right: 0; top: calc(100% + 8px); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-width: 180px; box-shadow: 0 8px 30px rgba(15,23,42,.12); z-index: 60; flex-direction: column; gap: 2px; }
+.dropdown-menu { display: none; position: absolute; inset-inline-end: 0; top: calc(100% + 8px); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-width: 180px; box-shadow: 0 8px 30px rgba(15,23,42,.12); z-index: 60; flex-direction: column; gap: 2px; }
 .dropdown-menu.open { display: flex; }
 .dropdown-menu button { border: 0; background: transparent; color: #374151; padding: 9px 12px; border-radius: 7px; display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; text-align: left; width: 100%; }
 .dropdown-menu button:hover { background: #f3f4f6; }
@@ -694,6 +694,15 @@ button { cursor: pointer; }
 .avatar-upload:hover { background: #4f46e5; }
 .avatar-info { flex: 1; min-width: 0; }
 .avatar-hint { font-size: 12px; color: #9ca3af; margin: 0 0 6px; }
+
+/* ── Dashboard logo (admin setting) ── */
+.logo-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.logo-preview { width: 180px; height: 72px; border: 1px dashed var(--line); border-radius: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fafafa; }
+.logo-preview img { max-width: 100%; max-height: 100%; object-fit: contain; padding: 6px; }
+.logo-preview span { font-size: 11px; color: #9ca3af; }
+.logo-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.logo-upload-btn { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+[data-theme="dark"] .logo-preview { background: #18181b; }
 .btn-text-danger { border: 0; background: transparent; color: #dc2626; font-size: 11px; cursor: pointer; padding: 0; display: inline-flex; align-items: center; gap: 4px; }
 .btn-text-danger:hover { text-decoration: underline; }
 .saving-indicator { font-size: 11px; color: #4f46e5; }
@@ -708,13 +717,18 @@ button { cursor: pointer; }
 /* ── Dashboard extras ───────────────────────────── */
 .dashboard-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
 .dash-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* Recent clients sits on its own full-width row above locations + funnel. */
+.dashboard-page .recent-clients-panel { margin-bottom: 24px; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
 .recent-client-row { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid #f3f4f6; font-size: 12px; transition: background .1s; }
 .recent-client-row:hover { background: #f9fafb; }
 [data-theme="dark"] .recent-client-row { border-color: #27272a; }
 [data-theme="dark"] .recent-client-row:hover { background: #1e1e22; }
-.rc-kv { display: inline-flex; align-items: baseline; gap: 4px; margin-right: 10px; min-width: 0; overflow-wrap: anywhere; }
+.rc-kv { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-inline-end: 10px; min-width: 0; overflow-wrap: anywhere; vertical-align: top; }
 .rc-k { color: #7c3aed; font-weight: 800; font-size: 9px; text-transform: uppercase; letter-spacing: .5px; }
+/* Value stacks under its label; clamp per value so long text truncates
+   cleanly with an ellipsis instead of wrapping beside the label. */
+.rc-v { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 [data-theme="dark"] .rc-k { color: #b7a8ff; }
 .rc-avatar { width: 30px; height: 30px; background: #ede9fe; color: #7c3aed; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; flex-shrink: 0; }
 .rc-info { flex: 1; min-width: 0; }
@@ -933,6 +947,7 @@ button { cursor: pointer; }
   box-shadow: 0 0 0 55px #ffffff06, 0 0 0 110px #ffffff06, 0 0 0 165px #ffffff04;
 }
 .dashboard-eyebrow { display: block; color: #b9c8f6; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.hero-logo { display: block; max-height: 56px; max-width: 200px; object-fit: contain; margin-bottom: 14px; border-radius: 10px; }
 .dashboard-hero h1 { max-width: 580px; margin: 16px 0 12px; font-size: clamp(26px, 3vw, 40px); line-height: 1.2; letter-spacing: -1.3px; color: #fff; }
 .dashboard-hero p { margin: 0; color: #d0d8ee; font-size: 13px; line-height: 1.8; }
 .dashboard-hero-summary { min-width: 175px; padding-left: 28px; border-left: 1px solid #ffffff30; display: flex; flex-direction: column; align-items: flex-start; }
@@ -952,7 +967,9 @@ button { cursor: pointer; }
 .dashboard-page .rc-avatar { border-radius: 12px; background: #edeaff; color: #5a50ad; }
 .dashboard-page .rc-info { min-width: 0; }
 .dashboard-page .rc-info strong, .dashboard-page .rc-info small { overflow-wrap: anywhere; }
-.dashboard-page .rc-info small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Overflow is clamped per value (.rc-v); don't clamp the whole block or
+   stacked labels + values get chopped mid-content. */
+.dashboard-page .rc-info small { display: block; }
 .dashboard-page .table-row > span { min-width: 0; overflow-wrap: anywhere; }
 .dashboard-page .table-head-row { border-radius: 9px; background: #f3f5fb; }
 .dashboard-page .kpi-sub, .dashboard-page .kpi-label { color: #636c80; }

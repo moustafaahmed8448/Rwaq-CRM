@@ -31,6 +31,8 @@ export default function SettingsPage() {
   const [editForm, setEditForm] = useState({ name: "", username: "", email: "", role: "Sales" });
   const [savingUser, setSavingUser] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [logoUrl, setLogoUrl] = useState("");
+  const [logoErr, setLogoErr] = useState("");
 
   const loadUsers = async () => {
     const r = await fetch("/api/users");
@@ -47,6 +49,8 @@ export default function SettingsPage() {
       setEditEmail(d.user?.email ?? "");
       const stored = localStorage.getItem("rwaq-avatar");
       if (stored) setAvatarUrl(stored);
+      const storedLogo = localStorage.getItem("rwaq-logo");
+      if (storedLogo) setLogoUrl(storedLogo);
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadUsers();
@@ -82,6 +86,25 @@ export default function SettingsPage() {
     setAvatarUrl("");
     localStorage.removeItem("rwaq-avatar");
     setUser(u => u ? { ...u, avatar: undefined } : null);
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoErr("");
+    if (file.size > 2 * 1024 * 1024) { setLogoErr(t("settings.logoTooBig")); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const url = ev.target?.result as string;
+      setLogoUrl(url);
+      localStorage.setItem("rwaq-logo", url);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeLogo = () => {
+    setLogoUrl("");
+    localStorage.removeItem("rwaq-logo");
   };
 
   const saveProfile = async () => {
@@ -331,6 +354,33 @@ export default function SettingsPage() {
                   </div>
                 )
               ))}
+            </div>
+          </section>
+        )}
+
+        {/* ── Dashboard logo (admin only) ── */}
+        {user.role === "Admin" && (
+          <section className="settings-section">
+            <div className="section-header">
+              <h2>{t("settings.logoSection")}</h2>
+              <span className="section-sub">{t("settings.logoSubtitle")}</span>
+            </div>
+            <div className="logo-row">
+              <div className="logo-preview">
+                {logoUrl
+                  ? <img src={logoUrl} alt={t("settings.logoAlt")} />
+                  : <span>{t("settings.logoEmpty")}</span>
+                }
+              </div>
+              <div className="logo-actions">
+                <label className="btn-outline logo-upload-btn">
+                  <Camera size={14}/>{t("settings.logoUpload")}
+                  <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
+                </label>
+                {logoUrl && <button className="btn-text-danger" onClick={removeLogo}><Trash2 size={13}/>{t("settings.logoRemove")}</button>}
+                <p className="muted" style={{ fontSize: 11, margin: 0 }}>{t("settings.logoHint")}</p>
+                {logoErr && <div className="settings-error">{logoErr}</div>}
+              </div>
             </div>
           </section>
         )}

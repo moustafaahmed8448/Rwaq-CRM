@@ -102,7 +102,7 @@ export default function AppHeader({
 
         <nav className="topbar-nav">
           {visibleNav.map((item) => (
-            <button key={item.key} onClick={() => go(item.key)} className={active === item.key ? "active" : ""}>
+            <button key={item.key} onClick={() => go(item.key)} className={active === item.key ? "nav-active" : ""} aria-current={active === item.key ? "page" : undefined}>
               {item.icon}{t("nav." + item.key)}
             </button>
           ))}

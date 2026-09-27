@@ -63,6 +63,10 @@ export async function GET(request: NextRequest) {
     if (archivedOnly) rows = rows.filter((c) => c.archived);
     else if (!includeArchived) rows = rows.filter((c) => !c.archived);
 
+    // Every selected group must match (AND) — same semantics as
+    // matchesFilters() in src/app/page.tsx, so the exported Excel file shows
+    // exactly what the UI shows: Status=X + Channel=Y exports only clients
+    // that are both. Date range, free-text query, and explicit ids narrow too.
     if (statuses.length > 0)
       rows = rows.filter((c) => statuses.includes(String(c.status).toUpperCase()));
     if (channels.length > 0)

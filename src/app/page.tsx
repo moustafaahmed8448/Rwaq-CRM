@@ -61,6 +61,9 @@ function matchesFilters(client: Client, filters: Filters) {
   // formatting, e.g. "1018240912" finds "+20 101 824 0912".
   const norm = (s: string) => s.replace(/[\s\-().]/g, "").toLowerCase();
   const haystack = norm(`${client.name} ${client.phoneNumber} ${client.project} ${client.notes ?? ""}`);
+  // Every selected group must match (AND): Status=X + Channel=Y only lists
+  // clients that are both status X and channel Y.
+  // Keep in sync with src/app/api/export/clients/route.ts.
   return (filters.status.length === 0 || filters.status.includes(String(client.status))) &&
     (filters.channel.length === 0 || filters.channel.includes(client.acquisitionChannel)) &&
     (filters.location.length === 0 || filters.location.includes(client.location)) &&
@@ -687,11 +690,17 @@ function MultiSelect({ label, options, selected, onChange, render, t }: {
 function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, clients, salespeople, spStats, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; clients: Client[]; salespeople: string[]; spStats: SpStat[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
+  const [heroLogo, setHeroLogo] = useState("");
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHeroLogo(localStorage.getItem("rwaq-logo") ?? "");
+  }, []);
 
   return (
     <div className="page dashboard-page">
       <header className="dashboard-hero">
         <div>
+          {heroLogo && <img src={heroLogo} alt={t("settings.logoAlt")} className="hero-logo" />}
           <span className="dashboard-eyebrow">{t("dash.heroEyebrow")}</span>
           <h1>{t("dash.heroTitle")}</h1>
           <p>{t("dash.heroSubtitle")}</p>
@@ -752,27 +761,28 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
         </div>
       </section>
 
-      {/* Recent clients + Top locations */}
-      <div className="dashboard-grid-2">
-        <section className="panel">
-          <div className="panel-heading"><h3>{t("recent.title")}</h3><button className="btn-ghost" onClick={()=>onExport()} disabled={exporting} style={{fontSize:11}}>{t("common.export")}</button></div>
-          {recentClients.length === 0 && <div className="empty-state">{t("recent.empty")}</div>}
-          {recentClients.map(c => (
-            <div className="recent-client-row" key={c.id}>
-              <span className="rc-avatar">{c.name.slice(0,2).toUpperCase()}</span>
-              <div className="rc-info">
-                <strong>{c.name}</strong>
-                <small>
-                  <span className="rc-kv"><span className="rc-k">{t("recent.project")}</span>{c.project || "—"}</span>
-                  {c.location ? <span className="rc-kv"><span className="rc-k">{t("recent.location")}</span>{c.location}</span> : null}
-                </small>
-              </div>
-              <span className="chan-tag-inline" style={{ flexShrink: 0 }}><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
-              <span className={`status-pill status-${String(c.status).toLowerCase()}`} style={{ flexShrink: 0 }}>{statusLabel(t, c.status)}</span>
+      {/* Recent clients (full width) */}
+      <section className="panel recent-clients-panel">
+        <div className="panel-heading"><h3>{t("recent.title")}</h3><button className="btn-ghost" onClick={()=>onExport()} disabled={exporting} style={{fontSize:11}}>{t("common.export")}</button></div>
+        {recentClients.length === 0 && <div className="empty-state">{t("recent.empty")}</div>}
+        {recentClients.map(c => (
+          <div className="recent-client-row" key={c.id}>
+            <span className="rc-avatar">{c.name.slice(0,2).toUpperCase()}</span>
+            <div className="rc-info">
+              <strong>{c.name}</strong>
+              <small>
+                <span className="rc-kv"><span className="rc-k">{t("recent.project")}</span><span className="rc-v">{c.project || "—"}</span></span>
+                {c.location ? <span className="rc-kv"><span className="rc-k">{t("recent.location")}</span><span className="rc-v">{c.location}</span></span> : null}
+              </small>
             </div>
-          ))}
-        </section>
-        <div className="dash-stack">
+            <span className="chan-tag-inline" style={{ flexShrink: 0 }}><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
+            <span className={`status-pill status-${String(c.status).toLowerCase()}`} style={{ flexShrink: 0 }}>{statusLabel(t, c.status)}</span>
+          </div>
+        ))}
+      </section>
+
+      {/* Top locations + Conversion funnel underneath */}
+      <div className="dashboard-grid-2">
         <section className="panel">
           <div className="panel-heading"><h3>{t("loc.title")}</h3><span className="muted" style={{fontSize:11}}>{t("loc.clients", { n: clients.length })}</span></div>
           {topLocations.length === 0 && <div className="empty-state">{t("loc.noData")}</div>}
@@ -784,19 +794,18 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
               <span className="loc-count">{count}</span>
             </div>
           ))}
-          </section>
-          <section className="panel funnel-panel">
-            <h3>{t("funnel.title")}</h3>
-            <div className="funnel-stages">
-              <div className="funnel-stage stage-total"><span className="funnel-num">{clients.length}</span><span className="funnel-label">{t("funnel.total")}</span></div>
-              <div className="funnel-arrow">↓</div>
-              <div className="funnel-stage stage-waiting"><span className="funnel-num">{waiting}</span><span className="funnel-label">{t("funnel.waiting")}</span></div>
-              <div className="funnel-arrow">↓</div>
-              <div className="funnel-stage stage-won"><span className="funnel-num">{won}</span><span className="funnel-label">{t("funnel.won")}</span></div>
-              <div className="funnel-stage stage-lost"><span className="funnel-num">{lost}</span><span className="funnel-label">{t("funnel.lost")}</span></div>
-            </div>
-          </section>
-        </div>
+        </section>
+        <section className="panel funnel-panel">
+          <h3>{t("funnel.title")}</h3>
+          <div className="funnel-stages">
+            <div className="funnel-stage stage-total"><span className="funnel-num">{clients.length}</span><span className="funnel-label">{t("funnel.total")}</span></div>
+            <div className="funnel-arrow">↓</div>
+            <div className="funnel-stage stage-waiting"><span className="funnel-num">{waiting}</span><span className="funnel-label">{t("funnel.waiting")}</span></div>
+            <div className="funnel-arrow">↓</div>
+            <div className="funnel-stage stage-won"><span className="funnel-num">{won}</span><span className="funnel-label">{t("funnel.won")}</span></div>
+            <div className="funnel-stage stage-lost"><span className="funnel-num">{lost}</span><span className="funnel-label">{t("funnel.lost")}</span></div>
+          </div>
+        </section>
       </div>
 
       {/* Channel breakdown */}
