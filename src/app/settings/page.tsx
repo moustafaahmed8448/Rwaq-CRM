@@ -79,6 +79,8 @@ export default function SettingsPage() {
       setSavingAvatar(true);
       localStorage.setItem("rwaq-avatar", url);
       setUser(u => u ? { ...u, avatar: url } : null);
+      // Tell the header (and any other mounted chrome) to re-read it.
+      window.dispatchEvent(new Event("rwaq-avatar-changed"));
       setSavingAvatar(false);
     };
     reader.readAsDataURL(file);
@@ -88,6 +90,7 @@ export default function SettingsPage() {
     setAvatarUrl("");
     localStorage.removeItem("rwaq-avatar");
     setUser(u => u ? { ...u, avatar: undefined } : null);
+    window.dispatchEvent(new Event("rwaq-avatar-changed"));
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

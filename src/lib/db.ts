@@ -18,7 +18,7 @@ export class ConfigurationError extends Error {
 export function requireDatabase(): void {
   if (!process.env.DATABASE_URL) {
     throw new ConfigurationError(
-      "DATABASE_URL is not set. Copy .env.example to .env and point it at a PostgreSQL database, then run `npx prisma db push` and `npx prisma db seed`.",
+      "DATABASE_URL is not set. Copy .env.example to .env and point it at a PostgreSQL database (DATABASE_URL pooled, DATABASE_URL_UNPOOLED direct), then run `npx prisma db push` and `npx prisma db seed`.",
     );
   }
 }

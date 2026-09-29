@@ -143,9 +143,22 @@ export function stageFallback(status: string): string {
   return STAGE_BY_VALUE.get(normalizeStatus(status))?.fallback ?? status;
 }
 
-/** Accent colour for a status; custom statuses get a neutral grey. */
+/**
+ * Accents for user-defined statuses, cycled by a hash of the value so the same
+ * custom status keeps the same colour in the status panel, its pill and the
+ * kanban dot. A flat grey was unusable: the first pipeline stage is already
+ * grey, so a custom status and "Non-responsive" looked identical.
+ */
+const CUSTOM_STATUS_COLORS = ["#7c3aed", "#db2777", "#0d9488", "#ea580c", "#2563eb", "#65a30d"] as const;
+
+/** Accent colour for a status; custom statuses get a stable palette colour. */
 export function statusColor(status: string): string {
-  return STAGE_BY_VALUE.get(status)?.color ?? "#94a3b8";
+  const stage = STAGE_BY_VALUE.get(status);
+  if (stage) return stage.color;
+  const key = String(status ?? "");
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return CUSTOM_STATUS_COLORS[hash % CUSTOM_STATUS_COLORS.length];
 }
 
 /** Dictionary keys for the built-in channels / statuses (see src/lib/i18n.tsx). */

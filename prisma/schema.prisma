@@ -10,9 +10,17 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Prisma CLI work (db push / migrate / db pull) must bypass PgBouncer, so it
+  // uses the direct connection instead of the pooled one above.
+  //
+  // This deliberately reads DATABASE_URL_UNPOOLED rather than a custom name
+  // like DIRECT_URL: the Neon Vercel integration injects DATABASE_URL and
+  // DATABASE_URL_UNPOOLED but NOT a custom DIRECT_URL, so naming it this way
+  // is what lets `prisma generate` resolve this schema on Vercel with no
+  // manual environment setup. Keep the name in sync with .env.example.
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model MarketingMetric {
@@ -34,6 +42,7 @@ model MarketingMetric {
   @@unique([startDate, endDate, channel])
   @@index([startDate, endDate])
   @@index([channel])
+  @@index([name])
 }
 
 model Client {

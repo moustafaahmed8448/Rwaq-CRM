@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/lib/i18n";
 import { useLogo } from "@/lib/logo";
 import { dateLocale } from "@/lib/format";
@@ -40,7 +40,13 @@ export default function AppHeader({
   const { logo } = useLogo();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notif[]>([]);
+  // The uploaded profile photo is stored in localStorage by the settings page;
+  // the header only mirrors it, so an avatar now shows instead of initials.
+  const [avatar, setAvatar] = useState("");
+  const notifWrapRef = useRef<HTMLDivElement>(null);
+  const userWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch("/api/auth/me").then((r) => r.json()).then((d) => {
@@ -61,6 +67,31 @@ export default function AppHeader({
     return () => window.removeEventListener("rwaq-notifications-changed", onChange);
   }, []);
 
+  // Re-read the avatar when the settings page uploads or removes one.
+  useEffect(() => {
+    const readAvatar = () => {
+      try { setAvatar(localStorage.getItem("rwaq-avatar") ?? ""); } catch { setAvatar(""); }
+    };
+    readAvatar();
+    window.addEventListener("rwaq-avatar-changed", readAvatar);
+    return () => window.removeEventListener("rwaq-avatar-changed", readAvatar);
+  }, []);
+
+  // Both header popovers close on a click anywhere outside them — the same
+  // contract the filter menus keep. Without this they only ever closed on their
+  // own toggle button, so the window stayed open over the page beneath it.
+  useEffect(() => {
+    if (!notifOpen && !userMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (notifWrapRef.current?.contains(target) || userWrapRef.current?.contains(target)) return;
+      setNotifOpen(false);
+      setUserMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [notifOpen, userMenuOpen]);
+
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markAllRead = async () => {
@@ -74,6 +105,8 @@ export default function AppHeader({
   const visibleNav = NAV;
   const go = (tab: NavTab) => {
     setMobileMenuOpen(false);
+    setNotifOpen(false);
+    setUserMenuOpen(false);
     if (onNavigate) { onNavigate(tab); return; }
     if (tab === "dashboard") router.push("/");
     else if (tab === "clients") router.push("/?view=clients");
@@ -142,12 +175,12 @@ export default function AppHeader({
             {darkMode ? <Sun size={16} /> : <Moon size={16} />}
           </button>
 
-          <div className="user-dropdown">
+          <div className="user-dropdown" ref={notifWrapRef}>
             <button
               type="button"
               className="icon-btn"
               title={t("header.notifications")}
-              onClick={() => { setNotifOpen((o) => !o); if (!notifOpen) refreshNotifications(); }}
+              onClick={() => { setNotifOpen((o) => !o); setUserMenuOpen(false); if (!notifOpen) refreshNotifications(); }}
             >
               <Bell size={16} />{unreadCount > 0 && <i />}
             </button>
@@ -175,17 +208,19 @@ export default function AppHeader({
             </div>
           </div>
 
-          <div className="user-dropdown">
+          <div className="user-dropdown" ref={userWrapRef}>
             <button
               type="button"
               className="user-pill"
-              onClick={() => document.getElementById("app-user-menu")?.classList.toggle("open")}
+              onClick={() => { setUserMenuOpen((o) => !o); setNotifOpen(false); }}
             >
-              <span className="user-avatar">{user.initials}</span>
+              {avatar
+                ? <span className="user-avatar user-avatar-photo"><img src={avatar} alt="" /></span>
+                : <span className="user-avatar">{user.initials}</span>}
               <span>{user.name}</span>
               <ChevronDown size={14} className="chevron" />
             </button>
-            <div id="app-user-menu" className="dropdown-menu">
+            <div id="app-user-menu" className={`dropdown-menu ${userMenuOpen ? "open" : ""}`}>
               {user.role && (
                 <div className="menu-role"><span className={`role-badge ${user.role.toLowerCase()}`}>{user.role}</span></div>
               )}
@@ -220,7 +255,7 @@ export default function AppHeader({
           </div>
 
           <div className="mobile-user-card">
-            <div className="mobile-user-avatar">{user.initials}</div>
+            <div className="mobile-user-avatar">{avatar ? <img src={avatar} alt="" /> : user.initials}</div>
             <div className="mobile-user-info">
               <strong>{user.name}</strong>
               {user.role && <span className={`role-badge ${user.role.toLowerCase()}`}>{user.role}</span>}

@@ -4,6 +4,7 @@ import { assigneeScope, canWrite, getSessionUser, isAuthenticated, unauthorized 
 import { PREDEFINED_STATUSES, parseChannel, parseStatus } from "@/lib/reporting";
 import {
   addSettingValue,
+  countClients,
   createClient,
   databaseErrorMessage,
   deleteClient,
@@ -83,10 +84,20 @@ export async function GET(request: NextRequest) {
     // Sales/CRM only ever see their own book; Admin keeps the full view.
     const clients = await listClients({ ...filtered(request), assignee: assigneeScope(session) });
     const archivedCount = await prisma.client.count({ where: { archived: true } });
+    // Reference data for the filter bar. `usage` and `removable` are workspace-wide
+    // (matching /api/channels) rather than scoped to the viewer's book, so the delete
+    // flow never offers a status that clients elsewhere still depend on.
+    const [custom, allClients] = await Promise.all([
+      readSetting("statuses"),
+      listClients({ includeArchived: true }),
+    ]);
+    const known = await allStatuses();
     return NextResponse.json({
       source: "postgres",
       clients,
-      statuses: await allStatuses(),
+      statuses: known,
+      usage: Object.fromEntries(known.map((s) => [s, allClients.filter((c) => c.status === s).length])),
+      removable: custom,
       archivedCount,
       role: await roleOf(request),
     });
@@ -214,8 +225,34 @@ export async function PUT(request: NextRequest) {
     }
 
     if (action === "remove" && label) {
+      // Admin-only, matching channel and location removal: this rewrites shared
+      // reference data for the whole workspace.
+      if ((await roleOf(request)) !== "Admin") {
+        return NextResponse.json({ error: "Admin only" }, { status: 403 });
+      }
+      if (PREDEFINED_STATUSES.includes(label.toUpperCase())) {
+        return NextResponse.json({ error: "Cannot remove a built-in status" }, { status: 400 });
+      }
+      if (!current.includes(label)) {
+        return NextResponse.json({ error: "Status not found" }, { status: 404 });
+      }
+      // Enforced here as well as in the UI: a status still attached to clients
+      // must stay in the list, or those clients end up pointing at something that
+      // no longer exists anywhere in the app.
+      const inUse = await countClients({ status: label });
+      if (inUse > 0) {
+        return NextResponse.json(
+          { error: "Status is still used by existing clients", usage: inUse },
+          { status: 409 },
+        );
+      }
       await removeSettingValue("statuses", label);
-      return NextResponse.json({ ok: true });
+      const remaining = await readSetting("statuses");
+      return NextResponse.json({
+        ok: true,
+        statuses: [...PREDEFINED_STATUSES, ...remaining],
+        removable: remaining,
+      });
     }
 
     return NextResponse.json({ statuses: current });

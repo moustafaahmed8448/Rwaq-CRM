@@ -14,10 +14,8 @@
     "db:push": "prisma db push",
     "db:seed": "prisma db seed"
   },
-  "prisma": {
-    "seed": "node prisma/seed.mjs"
-  },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
@@ -31,7 +29,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@prisma/client": "^6.19.3",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",

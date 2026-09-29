@@ -104,8 +104,10 @@ export default function Home() {
   const [customLocations, setCustomLocations] = useState<string[]>([]);
   // Only saved (custom) values can be deleted; built-ins are code constants.
   // The usage maps let the UI warn before removing a value still in use.
+  const [removableStatuses, setRemovableStatuses] = useState<string[]>([]);
   const [removableChannels, setRemovableChannels] = useState<string[]>([]);
   const [removableLocations, setRemovableLocations] = useState<string[]>([]);
+  const [statusUsage, setStatusUsage] = useState<Record<string, number>>({});
   const [channelUsage, setChannelUsage] = useState<Record<string, number>>({});
   const [locationUsage, setLocationUsage] = useState<Record<string, number>>({});
   // Reporting window for the KPI figures. Defaults to the current week, as
@@ -174,7 +176,7 @@ export default function Home() {
         setUsers(usersData.users ?? []);
       })
       .catch(() => undefined);
-    fetch("/api/crm/clients").then(r => r.json()).then(d => setCustomStatuses(d.statuses ?? [])).catch(() => {});
+    fetch("/api/crm/clients").then(r => r.json()).then(d => { setCustomStatuses(d.statuses ?? []); setRemovableStatuses(d.removable ?? []); setStatusUsage(d.usage ?? {}); }).catch(() => {});
     fetch("/api/channels").then(r => r.json()).then(d => { setCustomChannels(d.channels ?? CHANNEL_VALUES); setRemovableChannels(d.removable ?? []); setChannelUsage(d.usage ?? {}); }).catch(() => {});
     fetch("/api/locations").then(r => r.json()).then(d => { setCustomLocations(d.locations ?? []); setRemovableLocations(d.removable ?? []); setLocationUsage(d.usage ?? {}); }).catch(() => {});
     fetch("/api/notifications").then(r => r.json()).then(d => setNotifications(d.notifications ?? [])).catch(() => {});
@@ -340,12 +342,35 @@ export default function Home() {
     addToast("success", t("refData.removedChannel", { value: label }));
   };
 
+  /**
+   * Deletes a saved status from the reference list, mirroring removeChannel.
+   * Admin-only, custom-only, and rejected while any client still uses it — the
+   * server answers 403/400/409 for those, so this only surfaces the message.
+   */
+  const removeStatus = async (label: string) => {
+    const res = await fetch("/api/crm/clients", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "remove", label }) }).catch(() => null);
+    if (!res || !res.ok) {
+      const err = res ? await res.json().catch(() => ({})) : null;
+      addToast("error", apiErrorMessage(t, err?.error));
+      return;
+    }
+    // Re-read the reference data instead of clearing it, so the usage counts
+    // shown beside the remaining statuses stay accurate.
+    const r = await fetch("/api/crm/clients").then(x => x.json()).catch(() => ({}));
+    setCustomStatuses(r.statuses ?? []);
+    setRemovableStatuses(r.removable ?? []);
+    setStatusUsage(r.usage ?? {});
+    addToast("success", t("refData.removedStatus", { value: label }));
+  };
+
   const addStatus = async (label: string): Promise<string> => {
     const key = label.trim().toUpperCase();
     if (!key) return label;
     await fetch("/api/crm/clients", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add", label: key }) }).catch(() => {});
     const r = await fetch("/api/crm/clients").then(x => x.json()).catch(() => ({}));
     setCustomStatuses(r.statuses ?? []);
+    setRemovableStatuses(r.removable ?? []);
+    setStatusUsage(r.usage ?? {});
     return key;
   };
 
@@ -599,9 +624,11 @@ export default function Home() {
             onBulkDelete={() => { if (selectedIds.size === 0) return; setConfirmDelete({ ids: [...selectedIds], names: filteredClients.filter(c => selectedIds.has(c.id)).map(c => c.name) }); }}
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             refData={{
+              onRemoveStatus: user.role === "Admin" ? removeStatus : undefined,
               onRemoveChannel: user.role === "Admin" ? removeChannel : undefined,
               onRemoveLocation: user.role === "Admin" ? removeLocation : undefined,
-              removableChannels, removableLocations, channelUsage, locationUsage,
+              removableStatuses, removableChannels, removableLocations,
+              statusUsage, channelUsage, locationUsage,
             }}
             customLocationInput={customLocationInput} setCustomLocationInput={setCustomLocationInput}
             customChannels={customChannels}
@@ -731,7 +758,7 @@ export default function Home() {
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
-function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations, onRemoveChannel, onRemoveLocation, removableChannels, removableLocations, channelUsage, locationUsage, t }: {
+function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations, onRemoveStatus, onRemoveChannel, onRemoveLocation, removableStatuses, removableChannels, removableLocations, statusUsage, channelUsage, locationUsage, t }: {
   filters: Filters;
   updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void;
   setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void;
@@ -745,10 +772,13 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
   allStatuses?: string[];
   allChannels?: string[];
   allLocations?: string[];
+  onRemoveStatus?: (value: string) => void;
   onRemoveChannel?: (value: string) => void;
   onRemoveLocation?: (value: string) => void;
+  removableStatuses?: string[];
   removableChannels?: string[];
   removableLocations?: string[];
+  statusUsage?: Record<string, number>;
   channelUsage?: Record<string, number>;
   locationUsage?: Record<string, number>;
   t: TFn;
@@ -767,7 +797,7 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
       )}
       <div className="filter-row">
         <div className="search-box"><Search size={15} /><input placeholder={t("filter.queryPh")} value={filters.query} onChange={e => updateFilter("query", e.target.value)} /></div>
-        <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} render={v => statusLabel(t, v)} t={t} />
+        <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} render={v => statusLabel(t, v)} onRemove={onRemoveStatus} removable={removableStatuses} removeUsage={statusUsage} t={t} />
         <MultiSelect label={t("filter.allChannels")} options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => channelLabel(t, v)} onRemove={onRemoveChannel} removable={removableChannels} removeUsage={channelUsage} t={t} />
         <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} render={v => locationLabel(t, v)} onRemove={onRemoveLocation} removable={removableLocations} removeUsage={locationUsage} t={t} />
         <MultiSelect label={t("filter.allSalespeople")} options={salespeople} selected={filters.salesperson} onChange={v => setMultiFilter("salesperson", v)} t={t} />
@@ -879,14 +909,24 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
   const { logo: heroLogo } = useLogo();
 
-  // Status panel: one row per pipeline stage, in registry order.
-  const stageCounts = useMemo(
-    () => PIPELINE_STAGES.map((stage) => ({
-      stage,
+  // Status panel: every pipeline stage in registry order, followed by the
+  // user-defined statuses created on the clients page. Without the second half,
+  // a status added there never appeared on the dashboard at all.
+  const stageCounts = useMemo(() => {
+    const stages = PIPELINE_STAGES.map((stage) => ({
+      value: stage.value,
+      color: stage.color,
       count: clients.filter((c) => c.status === stage.value).length,
-    })),
-    [clients],
-  );
+    }));
+    const custom = (allStatuses ?? [])
+      .filter((value) => !PREDEFINED_STATUSES.includes(value))
+      .map((value) => ({
+        value,
+        color: statusColor(value),
+        count: clients.filter((c) => c.status === value).length,
+      }));
+    return [...stages, ...custom];
+  }, [clients, allStatuses]);
 
   const inProgress = useMemo(
     () => clients.filter((c) => isInProgress(c.status)).length,
@@ -984,20 +1024,20 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
           <strong className="stage-total-value">{num(clients.length)}</strong>
         </div>
         <div className="stage-rows">
-          {stageCounts.map(({ stage, count }) => {
+          {stageCounts.map(({ value, color, count }) => {
             const pct = clients.length > 0 ? Math.round((count / clients.length) * 100) : 0;
             return (
               <button
                 type="button"
                 className="stage-row"
-                key={stage.value}
+                key={value}
                 title={t("stage.clickFilter")}
-                onClick={() => onToggleStageFilter(stage.value)}
+                onClick={() => onToggleStageFilter(value)}
               >
-                <span className="stage-row-dot" style={{ background: stage.color }} />
-                <span className="stage-row-name">{statusLabel(t, stage.value)}</span>
+                <span className="stage-row-dot" style={{ background: color }} />
+                <span className="stage-row-name">{statusLabel(t, value)}</span>
                 <span className="stage-row-track">
-                  <span className="stage-row-fill" style={{ width: `${pct}%`, background: stage.color }} />
+                  <span className="stage-row-fill" style={{ width: `${pct}%`, background: color }} />
                 </span>
                 <span className="stage-row-count">{num(count)}</span>
                 <span className="stage-row-pct">{pct}%</span>
@@ -1137,7 +1177,7 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableChannels?: string[]; removableLocations?: string[]; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   return (
     <div className="page">
       <div className="page-header">
@@ -1156,7 +1196,7 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>{t("clients.exportAll")}</button>
         </div>
       </div>
-      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
+      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveStatus={refData.onRemoveStatus} removableStatuses={refData.removableStatuses} statusUsage={refData.statusUsage} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
       <div className="result-note">{t("clients.showing",{n:clients.length,total:allClients.length})} · {t("clients.selected",{n:selectedIds.size})}</div>
       {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
     </div>
