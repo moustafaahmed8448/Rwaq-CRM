@@ -396,7 +396,7 @@ export const endOfMonth = (date = new Date()) => {
   return value;
 };
 
-export type PeriodKind = "week" | "month" | "custom";
+export type PeriodKind = "week" | "month" | "all" | "custom";
 
 export interface ResolvedPeriod {
   kind: PeriodKind;
@@ -406,6 +406,15 @@ export interface ResolvedPeriod {
   fromStr: string;
   toStr: string;
 }
+
+/**
+ * Start of the "all time" window.
+ *
+ * A fixed epoch rather than a wide-open range, because the query layer takes
+ * concrete bounds. 1970-01-01 predates any client this app can hold, so every
+ * row falls inside it.
+ */
+const EPOCH = new Date(1970, 0, 1);
 
 /**
  * YYYY-MM-DD in the viewer's own calendar.
@@ -445,6 +454,17 @@ export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now 
       return { kind, from: a, to: inclusiveEnd, fromStr: dayKey(a), toStr: dayKey(inclusiveEnd) };
     }
   }
+  // "all" spans epoch → tomorrow. Tomorrow rather than today because the upper
+  // bound is EXCLUSIVE everywhere it is consumed (`createdAt: { lt }` in
+  // clientWhere), so `today` would drop clients registered earlier the same day.
+  if (kind === "all") {
+    const to = new Date(now);
+    to.setDate(to.getDate() + 1);
+    to.setHours(0, 0, 0, 0);
+    const from = new Date(EPOCH);
+    return { kind: "all", from, to, fromStr: dayKey(from), toStr: dayKey(to) };
+  }
+
   const fromDate = kind === "month" ? startOfMonth(now) : startOfWeek(now);
   const toDate = kind === "month" ? endOfMonth(now) : endOfWeek(now);
   return { kind: kind === "month" ? "month" : "week", from: fromDate, to: toDate, fromStr: dayKey(fromDate), toStr: dayKey(toDate) };
@@ -452,5 +472,5 @@ export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now 
 
 /** Parses a `?period=` query value, defaulting to week. */
 export function parsePeriodKind(value: string | null | undefined): PeriodKind {
-  return value === "month" || value === "custom" ? value : "week";
+  return value === "month" || value === "all" || value === "custom" ? value : "week";
 }

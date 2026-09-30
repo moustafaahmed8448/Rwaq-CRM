@@ -48,7 +48,11 @@ export async function GET(request: NextRequest) {
       (c) => parseChannel(c) ?? c.toUpperCase(),
     );
     const locations = list(q.get("locations") ?? q.get("location")).map((l) => l.toLowerCase());
-    const salespeople = list(q.get("salespeople") ?? q.get("salesperson")).map((s) => s.toLowerCase());
+    // 1st and 2nd contact are separate, AND-ed filters, matching the clients
+    // view and clientWhere(). Kept in step deliberately: the exported file has
+    // to describe exactly the rows the user is looking at.
+    const firstContacts = list(q.get("firstContacts") ?? q.get("firstContact"));
+    const secondContacts = list(q.get("secondContacts") ?? q.get("secondContact"));
     const ids = list(q.get("ids"));
     const query = (q.get("q") ?? "").trim().toLowerCase();
     const from = day(q.get("from") ?? undefined);
@@ -77,12 +81,10 @@ export async function GET(request: NextRequest) {
       rows = rows.filter((c) => channels.includes(String(c.acquisitionChannel).toUpperCase()));
     if (locations.length > 0)
       rows = rows.filter((c) => locations.includes(c.location.toLowerCase()));
-    if (salespeople.length > 0)
-      rows = rows.filter(
-        (c) =>
-          salespeople.includes(c.firstContactPerson.toLowerCase()) ||
-          salespeople.includes(c.secondContactPerson.toLowerCase()),
-      );
+    if (firstContacts.length > 0)
+      rows = rows.filter((c) => firstContacts.some((n) => n.toLowerCase() === c.firstContactPerson.toLowerCase()));
+    if (secondContacts.length > 0)
+      rows = rows.filter((c) => secondContacts.some((n) => n.toLowerCase() === c.secondContactPerson.toLowerCase()));
     if (from) rows = rows.filter((c) => day(c.createdAt) >= from);
     if (to) rows = rows.filter((c) => day(c.createdAt) <= to);
     if (query) {

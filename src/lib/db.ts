@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { type ActivityEntry, type ClientData, type MarketingMetric, makeActivityEntry } from "./types";
 import { normalizeStatus } from "./reporting";
+import { identityKey } from "./import-clients";
 
 /**
  * Postgres is the single source of truth. Every read and write in the app goes
@@ -136,7 +137,14 @@ export type ClientFilters = {
   channel?: string;
   status?: string;
   location?: string;
-  salesperson?: string;
+  /**
+   * Restrict to clients whose FIRST contact matches. Composes with
+   * `secondContact` as AND, so `first=A&second=B` narrows to the pairing rather
+   * than the union.
+   */
+  firstContact?: string;
+  /** Restrict to clients whose SECOND contact matches. See `firstContact`. */
+  secondContact?: string;
   /**
    * Restrict to clients where this person is the 1st or 2nd contact. Used to
    * scope Sales/CRM users to their own book. Matched with `equals` rather than
@@ -160,11 +168,15 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
   if (filters.channel) where.acquisitionChannel = filters.channel;
   if (filters.status && filters.status !== "ALL") where.status = filters.status;
   if (filters.location) where.location = { contains: filters.location, mode: "insensitive" };
-  if (filters.salesperson) {
-    where.OR = [
-      { firstContactPerson: { contains: filters.salesperson, mode: "insensitive" } },
-      { secondContactPerson: { contains: filters.salesperson, mode: "insensitive" } },
-    ];
+  // 1st and 2nd contact are separate filters that AND together, so selecting a
+  // 1st and a 2nd contact narrows to clients held by that exact pairing. The
+  // UI dropdowns pass whole names, so this uses `equals` rather than the
+  // `contains` a free-typed search would need.
+  if (filters.firstContact) {
+    where.firstContactPerson = { equals: filters.firstContact, mode: "insensitive" };
+  }
+  if (filters.secondContact) {
+    where.secondContactPerson = { equals: filters.secondContact, mode: "insensitive" };
   }
   if (filters.assignee) {
     // AND, not OR: this has to compose with an explicit salesperson filter
@@ -292,6 +304,149 @@ export async function createClient(input: NewClientInput, actor: string): Promis
   }
 
   return toClientRow(row);
+}
+
+/* ── Bulk import ──────────────────────────────────────────────────────────── */
+
+export type BulkClientInput = {
+  name: string;
+  phoneNumber: string;
+  status: string;
+  project: string;
+  location: string;
+  acquisitionChannel: string;
+  operationToTake: string;
+  firstContactPerson: string;
+  secondContactPerson: string;
+  /** تاريخ التسجيل from the source sheet; falls back to "now" when absent. */
+  createdAt: Date;
+};
+
+export type BulkImportResult = { imported: number; firstId: string; lastId: string };
+
+/** Rows per INSERT. Large enough to be quick, small enough for one statement. */
+const BULK_CHUNK = 100;
+
+/**
+ * Inserts many clients in one pass.
+ *
+ * Deliberately does NOT loop `createClient`. That helper re-reads every id in
+ * the table to compute the next one, so 344 rows would mean 344 full scans, and
+ * it fires up to two "you were assigned a client" notifications per row — 688
+ * rows against a 300-row notification table, which would silently delete the
+ * workspace's existing notifications. Here the starting id is computed once,
+ * the numbers are handed out from a counter, and each row gets a single CREATED
+ * activity entry so the client timeline still explains where the row came from.
+ *
+ * Ids are reserved in a transaction up front and the whole insert is a second
+ * transaction, so a failure part-way cannot leave the counter and the rows
+ * disagreeing about what already exists.
+ */
+export async function bulkImportClients(
+  rows: BulkClientInput[],
+  actor: string,
+): Promise<BulkImportResult> {
+  if (rows.length === 0) return { imported: 0, firstId: "", lastId: "" };
+
+  const [first, imported] = await prisma.$transaction(async (tx) => {
+    // Mirrors nextClientId(): highest numeric id + 1, ignoring legacy uuid rows.
+    const existing = await tx.client.findMany({ select: { id: true } });
+    let max = 0;
+    for (const row of existing) {
+      if (/^\d+$/.test(row.id)) {
+        const n = Number(row.id);
+        if (Number.isSafeInteger(n) && n > max) max = n;
+      }
+    }
+
+    const start = max + 1;
+    const data = rows.map((row, index) => ({
+      id: String(start + index),
+      name: row.name,
+      phoneNumber: row.phoneNumber,
+      status: row.status,
+      project: row.project,
+      location: row.location,
+      acquisitionChannel: row.acquisitionChannel,
+      operationToTake: row.operationToTake,
+      firstContactPerson: row.firstContactPerson,
+      secondContactPerson: row.secondContactPerson,
+      notes: null,
+      createdAt: row.createdAt,
+      // Same entry createClient writes, so the timeline reads identically.
+      activityLog: [makeActivityEntry("CREATED", actor)] as unknown as Prisma.InputJsonValue,
+    }));
+
+    for (let i = 0; i < data.length; i += BULK_CHUNK) {
+      await tx.client.createMany({ data: data.slice(i, i + BULK_CHUNK) });
+    }
+    return [start, data.length] as const;
+  });
+
+  return {
+    imported,
+    firstId: String(first),
+    lastId: String(first + imported - 1),
+  };
+}
+
+/**
+ * Registers reference values discovered by an import.
+ *
+ * `addSettingValue` is called per value rather than rewriting the whole array:
+ * each call re-reads the row, so a concurrent edit from the settings screen
+ * cannot be clobbered by a stale in-memory copy.
+ */
+export async function addSettingValues(key: SettingKey, values: string[]): Promise<void> {
+  for (const value of values) await addSettingValue(key, value);
+}
+
+/**
+ * Records an import run in the SyncRun table.
+ *
+ * Failures are swallowed: the log is diagnostic, and a missing audit row must
+ * never turn a successful import into an error for the user.
+ */
+export async function recordSyncRun(input: {
+  provider: string;
+  status: string;
+  recordsRead: number;
+  recordsWritten: number;
+  error?: string;
+}): Promise<void> {
+  try {
+    await prisma.syncRun.create({
+      data: {
+        provider: input.provider,
+        direction: "import",
+        status: input.status,
+        recordsRead: input.recordsRead,
+        recordsWritten: input.recordsWritten,
+        error: input.error ?? null,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+      },
+    });
+  } catch {
+    // Non-fatal, as above.
+  }
+}
+
+/**
+ * Identity keys for every stored client, so a re-run of the import is a no-op
+ * instead of duplicating the sheet.
+ *
+ * Uses the SAME `identityKey` the planner uses, which matters for the rows whose
+ * phone column holds prose instead of a number: keying on the phone alone
+ * returns nothing for those, and they were re-imported on every single run.
+ */
+export async function existingClientKeys(): Promise<string[]> {
+  const rows = await prisma.client.findMany({
+    select: { phoneNumber: true, name: true, project: true },
+  });
+  return rows
+    .map((r) => identityKey({ phone: r.phoneNumber, name: r.name, project: r.project }))
+    .filter(Boolean);
 }
 
 export type ClientPatch = Partial<NewClientInput> & { archived?: boolean };

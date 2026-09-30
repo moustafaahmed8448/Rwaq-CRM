@@ -5,7 +5,7 @@ import { ResponsiveContainer } from "recharts";
 import {
   ArrowUpRight, ChevronDown, Download, Grid2X2,
   LayoutDashboard, Pencil, Plus, Search, Trash2, UsersRound, X as XIcon,
-  Check, AlertCircle, MessageSquare, Filter, Archive,
+  Check, AlertCircle, MessageSquare, Filter, Archive, Upload,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
@@ -30,6 +30,7 @@ import { num, sar, dateLocale } from "@/lib/format";
 import { useLogo } from "@/lib/logo";
 import StatusPill, { StatusDot } from "@/components/StatusPill";
 import RefPicker from "@/components/RefPicker";
+import ImportClientsModal from "@/components/ImportClientsModal";
 
 type Client = {
   id: string; name: string; phoneNumber: string;
@@ -40,26 +41,72 @@ type Client = {
 };
 type Metric = { channel: string; platform: string; spend: number; reach: number; totalClients: number; won: number; lost: number; waiting: number; cpa: number };
 type User = { name: string; initials: string; role: string };
-type Filters = { query: string; status: string[]; channel: string[]; location: string[]; salesperson: string[]; startDate: string; endDate: string };
+type Filters = { query: string; status: string[]; channel: string[]; location: string[]; firstContact: string[]; secondContact: string[]; startDate: string; endDate: string };
 type EditDraft = Partial<Client> & { id: string };
 type ConfirmDelete = { ids: string[]; names: string[] };
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type DatePreset = { label: string; startDate?: string; endDate?: string };
 type SpStat = { name: string; won: number; lost: number; waiting: number; total: number; winRate: string };
+/** Which client date the table is ordered by. */
+type SortField = "recent" | "oldest" | "registered" | "registeredOldest";
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const CH_COLORS: Record<string, string> = { FACEBOOK: "#4f46e5", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed", GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2" };
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
 
 
-// `label` holds a dictionary key so the preset keeps a stable identity while
-// the rendered text follows the selected language (see FilterBar).
-const DATE_PRESETS: DatePreset[] = [
-  { label: "date.today", startDate: new Date().toISOString().slice(0, 10) },
-  { label: "date.week", startDate: (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10); })() },
-  { label: "date.last7", startDate: (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10); })() },
-  { label: "date.month", startDate: (() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); })() },
-];
+/**
+ * YYYY-MM-DD in the LOCAL calendar.
+ *
+ * Deliberately not `toISOString()`, which converts to UTC and is a day off
+ * east of Greenwich — the same trap documented on `dayKey` in reporting.ts.
+ */
+const localDay = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const daysAgo = (n: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return localDay(d);
+};
+
+/**
+ * Recent-date presets.
+ *
+ * A FACTORY, not a module constant: the old version computed these once at
+ * import, so a tab left open overnight kept offering yesterday's dates.
+ *
+ * "This week" starts Monday, matching `startOfWeek` in reporting.ts. It used to
+ * use `getDay()` (Sunday), so the same label produced a different range on the
+ * clients page than on the dashboard.
+ */
+const buildDatePresets = (): DatePreset[] => {
+  // Monday of the current week, matching startOfWeek() in reporting.ts. The old
+  // preset used getDay() (Sunday), so "This week" covered a different range on
+  // the clients page than on the dashboard.
+  const monday = (() => {
+    const d = new Date();
+    const day = d.getDay();
+    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+    return d;
+  })();
+  const firstOfMonth = new Date();
+  firstOfMonth.setDate(1);
+  const firstOfYear = new Date();
+  firstOfYear.setMonth(0, 1);
+
+  return [
+    { label: "date.today", startDate: localDay(new Date()) },
+    { label: "date.thisWeek", startDate: localDay(monday) },
+    { label: "date.last3", startDate: daysAgo(3) },
+    { label: "date.last7", startDate: daysAgo(7) },
+    { label: "date.last14", startDate: daysAgo(14) },
+    { label: "date.last30", startDate: daysAgo(30) },
+    { label: "date.last90", startDate: daysAgo(90) },
+    { label: "date.thisMonth", startDate: localDay(firstOfMonth) },
+    { label: "date.thisYear", startDate: localDay(firstOfYear) },
+  ];
+};
 
 // Field key -> dictionary key, used by the "field updated" toast.
 const FIELD_KEYS: Record<string, string> = {
@@ -68,7 +115,7 @@ const FIELD_KEYS: Record<string, string> = {
   secondContactPerson: "form.secondContact", operationToTake: "form.operation", notes: "form.notes",
 };
 
-const initialFilters: Filters = { query: "", status: [], channel: [], location: [], salesperson: [], startDate: "", endDate: "" };
+const initialFilters: Filters = { query: "", status: [], channel: [], location: [], firstContact: [], secondContact: [], startDate: "", endDate: "" };
 
 function matchesFilters(client: Client, filters: Filters) {
   const date = (client.createdAt || "").slice(0, 10);
@@ -82,12 +129,43 @@ function matchesFilters(client: Client, filters: Filters) {
   return (filters.status.length === 0 || filters.status.includes(String(client.status))) &&
     (filters.channel.length === 0 || filters.channel.includes(client.acquisitionChannel)) &&
     (filters.location.length === 0 || filters.location.includes(client.location)) &&
-    (filters.salesperson.length === 0 || filters.salesperson.includes(client.firstContactPerson) || filters.salesperson.includes(client.secondContactPerson)) &&
+    // 1st and 2nd contact are SEPARATE filters that AND together: picking a 1st
+    // and a 2nd contact narrows to clients held by that exact pairing, rather
+    // than the union of "is either contact".
+    (filters.firstContact.length === 0 || filters.firstContact.includes(client.firstContactPerson)) &&
+    (filters.secondContact.length === 0 || filters.secondContact.includes(client.secondContactPerson)) &&
     (!filters.startDate || date >= filters.startDate) && (!filters.endDate || date <= filters.endDate) &&
     haystack.includes(norm(filters.query));
 }
 
 let toastId = 0;
+
+/**
+ * Orders the client table.
+ *
+ * Two different dates are in play and they are not interchangeable: `createdAt`
+ * is the sheet's تاريخ التسجيل (when the lead arrived), while `lastUpdateDate`
+ * is touched by every edit. "Recent" is ambiguous between them, so both are
+ * offered. The default matches the order the API already returns, leaving the
+ * initial view unchanged.
+ *
+ * Numeric ids are compared as numbers so id 9 sorts before id 10.
+ */
+function sortClients(clients: Client[], sort: SortField): Client[] {
+  const byDate = (key: "createdAt" | "lastUpdateDate") => (a: Client, b: Client) =>
+    String(b[key] ?? "").localeCompare(String(a[key] ?? ""));
+  const byId = (a: Client, b: Client) => Number(b.id) - Number(a.id);
+
+  switch (sort) {
+    case "oldest": return [...clients].sort((a, b) => -byDate("lastUpdateDate")(a, b));
+    case "registered": return [...clients].sort(byDate("createdAt"));
+    case "registeredOldest": return [...clients].sort((a, b) => -byDate("createdAt")(a, b));
+    // "recent": last update, newest first, with the id as a tie-breaker so rows
+    // saved in the same batch keep a stable, predictable order.
+    case "recent":
+    default: return [...clients].sort((a, b) => byDate("lastUpdateDate")(a, b) || byId(a, b));
+  }
+}
 
 export default function Home() {
   const router = useRouter();
@@ -111,7 +189,7 @@ export default function Home() {
   const [channelUsage, setChannelUsage] = useState<Record<string, number>>({});
   const [locationUsage, setLocationUsage] = useState<Record<string, number>>({});
   // Reporting window for the KPI figures. Defaults to the current week, as
-  // requested; month and a custom range are also supported.
+  // requested; month, all-time and a custom range are also supported.
   const [periodKind, setPeriodKind] = useState<PeriodKind>("week");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -128,6 +206,30 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeDatePreset, setActiveDatePreset] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  // Table order. Defaults to most-recently-updated, which is the order the API
+  // already returns, so the initial view is unchanged.
+  const [sortBy, setSortBy] = useState<SortField>("recent");
+
+  /**
+   * Re-reads the client list and the reference data after an import.
+   *
+   * The import creates clients AND appends to the shared status/channel/location
+   * lists, so all four endpoints are refreshed; leaving the pickers stale would
+   * hide values that are now in use.
+   */
+  const refreshAfterImport = (imported: number) => {
+    addToast(imported > 0 ? "success" : "info", t(imported > 0 ? "importer.done" : "importer.doneNone", { n: imported }));
+    fetch("/api/crm/clients").then(r => r.json()).then(d => {
+      setClients(d.clients ?? []);
+      setCustomStatuses(d.statuses ?? []);
+      setRemovableStatuses(d.removable ?? []);
+      setStatusUsage(d.usage ?? {});
+    }).catch(() => undefined);
+    fetch("/api/channels").then(r => r.json()).then(d => { setCustomChannels(d.channels ?? []); setRemovableChannels(d.removable ?? []); setChannelUsage(d.usage ?? {}); }).catch(() => undefined);
+    fetch("/api/locations").then(r => r.json()).then(d => { setCustomLocations(d.locations ?? []); setRemovableLocations(d.removable ?? []); setLocationUsage(d.usage ?? {}); }).catch(() => undefined);
+    refreshNotifications();
+  };
   const [notifications, setNotifications] = useState<{ id: string; message: string; read: boolean; clientName?: string; createdAt: string; type: string }[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [newClient] = useState<Partial<Client>>({
@@ -224,8 +326,22 @@ export default function Home() {
     return () => el.removeEventListener("scroll", check);
   }, []);
 
-  const filteredClients = useMemo(() => clients.filter(c => matchesFilters(c, filters)), [clients, filters]);
-  const salespeople = useMemo(() => [...new Set(clients.flatMap(c => [c.firstContactPerson, c.secondContactPerson].filter(Boolean)))], [clients]);
+  const filteredClients = useMemo(() => sortClients(clients.filter(c => matchesFilters(c, filters)), sortBy), [clients, filters, sortBy]);
+  // The two contact roles are listed separately, because they are separate
+  // filters: a merged list could not tell you who is the 1st and who the 2nd.
+  const firstContacts = useMemo(
+    () => [...new Set(clients.map(c => c.firstContactPerson).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ar")),
+    [clients],
+  );
+  const secondContacts = useMemo(
+    () => [...new Set(clients.map(c => c.secondContactPerson).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ar")),
+    [clients],
+  );
+  /** Everyone in either role — used by the dashboard's salesperson panels. */
+  const salespeople = useMemo(
+    () => [...new Set(clients.flatMap(c => [c.firstContactPerson, c.secondContactPerson].filter(Boolean)))],
+    [clients],
+  );
   const totalSpend = metrics.reduce((s, m) => s + m.spend, 0);
   const totalReach = metrics.reduce((s, m) => s + m.reach, 0);
   // Registry-driven so a new pipeline stage is counted correctly without
@@ -258,7 +374,7 @@ export default function Home() {
     if (key !== "query") setActiveDatePreset(null);
   };
 
-  const setMultiFilter = (key: "status" | "channel" | "location" | "salesperson", values: string[]) => {
+  const setMultiFilter = (key: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => {
     setFilters(cur => ({ ...cur, [key]: values }));
   };
 
@@ -280,7 +396,8 @@ export default function Home() {
   };
 
   const activeFilterCount =
-    filters.status.length + filters.channel.length + filters.location.length + filters.salesperson.length +
+    filters.status.length + filters.channel.length + filters.location.length +
+    filters.firstContact.length + filters.secondContact.length +
     (filters.startDate ? 1 : 0) + (filters.endDate ? 1 : 0) + (filters.query ? 1 : 0);
 
   const allStatuses = [...PREDEFINED_STATUSES, ...customStatuses.filter(s => !PREDEFINED_STATUSES.includes(s))];
@@ -537,7 +654,8 @@ export default function Home() {
         statuses: filters.status.join(","),
         channels: filters.channel.join(","),
         locations: filters.location.join(","),
-        salespeople: filters.salesperson.join(","),
+        firstContacts: filters.firstContact.join(","),
+        secondContacts: filters.secondContact.join(","),
         q: filters.query,
         from: filters.startDate,
         to: filters.endDate,
@@ -610,10 +728,12 @@ export default function Home() {
             clients={filteredClients} allClients={clients} mode={mode} setMode={setMode}
             filters={filters} updateFilter={updateFilter}
             setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters}
-            salespeople={salespeople} updateStatus={updateStatus} updateClientField={updateClientField}
+            updateStatus={updateStatus} updateClientField={updateClientField}
+            firstContacts={firstContacts} secondContacts={secondContacts}
+            sortBy={sortBy} setSortBy={setSortBy}
             onAssigned={refreshNotifications}
             selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
-            onOpenEdit={openEdit} onOpenCreate={openCreate} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
+            onOpenEdit={openEdit} onOpenCreate={openCreate} onOpenImport={() => setImporting(true)} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
             onOpenDetail={openDetail}
             exportExcel={exportExcel} exportSelected={exportSelected}
             bulkCount={selectedIds.size}
@@ -636,7 +756,7 @@ export default function Home() {
             onAddStatus={addStatus} onAddChannel={addChannel} onAddLocation={addLocation}
             activeDatePreset={activeDatePreset}
             applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset}
-            datePresets={DATE_PRESETS}
+            datePresets={buildDatePresets()}
             filterCount={activeFilterCount}
             t={t}
           />
@@ -681,6 +801,15 @@ export default function Home() {
             <div className="modal-footer"><button className="btn-ghost" onClick={closeEdit}>{t("common.cancel")}</button><button className="btn-primary" onClick={saveEdit}><Check size={15} />{editDraft.id ? t("clients.saveBtn") : t("clients.createBtn")}</button></div>
           </div>
         </div>
+      )}
+
+      {/* Google Sheet import — admin only, preview gated inside the modal. */}
+      {importing && (
+        <ImportClientsModal
+          onClose={() => setImporting(false)}
+          onImported={refreshAfterImport}
+          t={t}
+        />
       )}
 
       {/* Delete Confirmation */}
@@ -758,16 +887,20 @@ export default function Home() {
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
-function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, filterCount, allStatuses, allChannels, allLocations, onRemoveStatus, onRemoveChannel, onRemoveLocation, removableStatuses, removableChannels, removableLocations, statusUsage, channelUsage, locationUsage, t }: {
+function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, firstContacts, secondContacts, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, sortBy, setSortBy, filterCount, allStatuses, allChannels, allLocations, onRemoveStatus, onRemoveChannel, onRemoveLocation, removableStatuses, removableChannels, removableLocations, statusUsage, channelUsage, locationUsage, t }: {
   filters: Filters;
   updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void;
-  setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void;
+  setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void;
   clearAllFilters: () => void;
-  salespeople: string[];
+  /** Distinct names per contact role, filtered independently. */
+  firstContacts: string[];
+  secondContacts: string[];
   datePresets?: DatePreset[];
   activeDatePreset?: string | null;
   applyDatePreset?: (p: DatePreset) => void;
   clearDatePreset?: () => void;
+  sortBy?: SortField;
+  setSortBy?: (s: SortField) => void;
   filterCount?: number;
   allStatuses?: string[];
   allChannels?: string[];
@@ -800,16 +933,33 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, sal
         <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} render={v => statusLabel(t, v)} onRemove={onRemoveStatus} removable={removableStatuses} removeUsage={statusUsage} t={t} />
         <MultiSelect label={t("filter.allChannels")} options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => channelLabel(t, v)} onRemove={onRemoveChannel} removable={removableChannels} removeUsage={channelUsage} t={t} />
         <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} render={v => locationLabel(t, v)} onRemove={onRemoveLocation} removable={removableLocations} removeUsage={locationUsage} t={t} />
-        <MultiSelect label={t("filter.allSalespeople")} options={salespeople} selected={filters.salesperson} onChange={v => setMultiFilter("salesperson", v)} t={t} />
+        {/* 1st and 2nd contact are separate dropdowns, and they AND together:
+            picking one of each narrows to that exact pairing. */}
+        <MultiSelect label={t("filter.firstContact")} options={firstContacts} selected={filters.firstContact} onChange={v => setMultiFilter("firstContact", v)} t={t} />
+        <MultiSelect label={t("filter.secondContact")} options={secondContacts} selected={filters.secondContact} onChange={v => setMultiFilter("secondContact", v)} t={t} />
       </div>
-      <div className="date-bar"><Filter size={13} /><span>{t("th.date")}</span><input type="date" value={filters.startDate} onChange={e => updateFilter("startDate", e.target.value)} /><span>–</span><input type="date" value={filters.endDate} onChange={e => updateFilter("endDate", e.target.value)} /></div>
+      <div className="date-bar">
+        <Filter size={13} /><span>{t("th.date")}</span><input type="date" value={filters.startDate} onChange={e => updateFilter("startDate", e.target.value)} /><span>–</span><input type="date" value={filters.endDate} onChange={e => updateFilter("endDate", e.target.value)} />
+        {setSortBy && (
+          <label className="sort-picker">
+            <span>{t("clients.sortBy")}</span>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value as SortField)}>
+              <option value="recent">{t("clients.sortRecent")}</option>
+              <option value="oldest">{t("clients.sortOldest")}</option>
+              <option value="registered">{t("clients.sortRegistered")}</option>
+              <option value="registeredOldest">{t("clients.sortRegisteredOldest")}</option>
+            </select>
+          </label>
+        )}
+      </div>
       {(filterCount ?? 0) > 0 && (
         <div className="filter-chips">
           {filters.query && <span className="filter-chip">&ldquo;{filters.query.slice(0, 24)}&rdquo;<button title={t("common.clear")} onClick={() => updateFilter("query", "")}>×</button></span>}
           {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{statusLabel(t, s)}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
           {filters.channel.map(c => <span key={`ch-${c}`} className="filter-chip">{channelLabel(t, c)}<button onClick={() => setMultiFilter("channel", filters.channel.filter(x => x !== c))}>×</button></span>)}
           {filters.location.map(l => <span key={`lo-${l}`} className="filter-chip">{l}<button onClick={() => setMultiFilter("location", filters.location.filter(x => x !== l))}>×</button></span>)}
-          {filters.salesperson.map(p => <span key={`sp-${p}`} className="filter-chip">{p}<button onClick={() => setMultiFilter("salesperson", filters.salesperson.filter(x => x !== p))}>×</button></span>)}
+          {filters.firstContact.map(p => <span key={`fc-${p}`} className="filter-chip">{t("filter.firstContact")}: {p}<button onClick={() => setMultiFilter("firstContact", filters.firstContact.filter(x => x !== p))}>×</button></span>)}
+          {filters.secondContact.map(p => <span key={`sc-${p}`} className="filter-chip">{t("filter.secondContact")}: {p}<button onClick={() => setMultiFilter("secondContact", filters.secondContact.filter(x => x !== p))}>×</button></span>)}
           {filters.startDate && <span className="filter-chip">{t("common.from")} {filters.startDate}<button onClick={() => updateFilter("startDate", "")}>×</button></span>}
           {filters.endDate && <span className="filter-chip">{t("common.to")} {filters.endDate}<button onClick={() => updateFilter("endDate", "")}>×</button></span>}
           <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>{t("filter.clear")} ×</button>
@@ -976,7 +1126,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
       {/* Reporting period — scopes the six cards below. Defaults to this week. */}
       <div className="period-bar">
         <div className="period-tabs" role="group" aria-label={t("period.label")}>
-          {(["week", "month", "custom"] as PeriodKind[]).map(k => (
+          {(["week", "month", "all", "custom"] as PeriodKind[]).map(k => (
             <button
               key={k}
               type="button"
@@ -1173,11 +1323,11 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
 function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub: string; accent: string }) {
   return (<div className="kpi-card" style={{borderTopColor:accent}}><div className="kpi-label"><span>{label}</span><span className="kpi-dot" style={{background:accent}}/></div><div className="kpi-value">{value}</div><div className="kpi-sub">{sub}</div></div>);}
 
-function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, salespeople, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
-  selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenDelete, onOpenDetail,
+function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, firstContacts, secondContacts, sortBy, setSortBy, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
+  selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "salesperson", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; salespeople: string[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   return (
     <div className="page">
       <div className="page-header">
@@ -1192,11 +1342,12 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
             <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>{t("clients.kanban")}</button>
           </div>
           {canEdit && <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>{t("clients.newClient")}</button>}
+          {isAdmin && <button className="btn-outline" onClick={onOpenImport}><Upload size={15}/>{t("importer.btn")}</button>}
           <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>{t("clients.exportSelected",{n:bulkCount})}</button>
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>{t("clients.exportAll")}</button>
         </div>
       </div>
-      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} salespeople={salespeople} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveStatus={refData.onRemoveStatus} removableStatuses={refData.removableStatuses} statusUsage={refData.statusUsage} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
+      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} firstContacts={firstContacts} secondContacts={secondContacts} sortBy={sortBy} setSortBy={setSortBy} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveStatus={refData.onRemoveStatus} removableStatuses={refData.removableStatuses} statusUsage={refData.statusUsage} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
       <div className="result-note">{t("clients.showing",{n:clients.length,total:allClients.length})} · {t("clients.selected",{n:selectedIds.size})}</div>
       {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
     </div>

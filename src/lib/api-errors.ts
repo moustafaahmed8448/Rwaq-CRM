@@ -57,6 +57,10 @@ const MESSAGES: Record<string, string> = {
   "Cannot remove a built-in channel": "errors.builtinChannel",
   "Location is still used by existing clients": "errors.locationInUse",
   "Channel is still used by existing clients": "errors.channelInUse",
+  "Only admins can import clients": "errors.importAdminOnly",
+  "Could not reach Google Sheets": "errors.sheetUnreachable",
+  "The sheet is not publicly readable": "errors.sheetNotPublic",
+  "Could not read the sheet response": "errors.sheetBadResponse",
 };
 
 /** Raw database / configuration noise that must never be shown to a user. */

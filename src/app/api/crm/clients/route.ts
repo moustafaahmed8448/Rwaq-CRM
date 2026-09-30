@@ -70,7 +70,8 @@ function filtered(request: NextRequest) {
     channel: parseChannel(q.get("channel")),
     status: parseStatus(q.get("status")),
     location: q.get("location")?.toLowerCase() || undefined,
-    salesperson: q.get("salesperson")?.toLowerCase() || undefined,
+    firstContact: q.get("firstContact")?.trim() || undefined,
+    secondContact: q.get("secondContact")?.trim() || undefined,
     archived: q.get("archived") === "1",
     includeArchived: q.get("includeArchived") === "1",
   };
