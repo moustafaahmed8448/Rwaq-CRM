@@ -126,16 +126,38 @@ export function pipelineStage(status: string): PipelineStage | undefined {
   return STAGE_BY_VALUE.get(normalizeStatus(status));
 }
 
+/**
+ * How a client counts towards the outcome totals.
+ *
+ * `other` is the bucket that was silently missing. `isWon`/`isLost`/
+ * `isInProgress` each test the BUILT-IN pipeline, so a user-defined status
+ * returned false for all three and simply disappeared from the KPI cards, the
+ * ROI table and the salesperson rows — the three figures summed to less than
+ * the client count with nothing to indicate why. In this workspace that was 94
+ * of 339 clients (79 «غير مناسب» + 15 «مطلوب تواصل»), created as customs by the
+ * sheet import.
+ *
+ * They are reported, never reassigned: silently filing a custom status into
+ * "lost" or "in progress" would invent a judgement the user never made.
+ */
+export type StatusOutcome = "won" | "lost" | "progress" | "other";
+
+/** The single definition of the four buckets; everything else derives from it. */
+export function classifyStatus(status: string): StatusOutcome {
+  const outcome = pipelineStage(status)?.outcome;
+  return outcome === "won" || outcome === "lost" || outcome === "progress" ? outcome : "other";
+}
+
 /** True when the status is a terminal outcome (contracted / lost). */
 export function isWon(status: string): boolean {
-  return pipelineStage(status)?.outcome === "won";
+  return classifyStatus(status) === "won";
 }
 export function isLost(status: string): boolean {
-  return pipelineStage(status)?.outcome === "lost";
+  return classifyStatus(status) === "lost";
 }
 /** True while the client is still moving through the pipeline. */
 export function isInProgress(status: string): boolean {
-  return pipelineStage(status)?.outcome === "progress";
+  return classifyStatus(status) === "progress";
 }
 
 /** English stage name, for server-side output such as the Excel export. */

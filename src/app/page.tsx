@@ -46,7 +46,8 @@ type EditDraft = Partial<Client> & { id: string };
 type ConfirmDelete = { ids: string[]; names: string[] };
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 type DatePreset = { label: string; startDate?: string; endDate?: string };
-type SpStat = { name: string; won: number; lost: number; waiting: number; total: number; winRate: string };
+/** One salesperson's outcome breakdown for a single contact role. */
+type SpRow = { name: string; won: number; lost: number; waiting: number; other: number; total: number; winRate: number | null };
 /** Which client date the table is ordered by. */
 type SortField = "recent" | "oldest" | "registered" | "registeredOldest";
 
@@ -194,7 +195,13 @@ export default function Home() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [periodLoading, setPeriodLoading] = useState(false);
-  const [periodInfo, setPeriodInfo] = useState({ from: "", to: "", campaignCount: 0, campaignNames: [] as string[], totals: { total: 0, won: 0, lost: 0, waiting: 0 } });
+  // `other` counts clients whose status sits outside the built-in pipeline
+  // (a user-defined status). Without it the three outcome cards silently
+  // summed to less than the client count.
+  const [periodInfo, setPeriodInfo] = useState({ from: "", to: "", campaignCount: 0, campaignNames: [] as string[], totals: { total: 0, won: 0, lost: 0, waiting: 0, other: 0 } });
+  // Per-salesperson outcome report, split by contact role. Server-computed and
+  // period-scoped, so it agrees with the KPI cards above it.
+  const [spReports, setSpReports] = useState<{ first: SpRow[]; second: SpRow[] }>({ first: [], second: [] });
   const [users, setUsers] = useState<{ username: string; name: string; role: string }[]>([]);
   const [adding, setAdding] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState("");
@@ -306,7 +313,13 @@ export default function Home() {
           to: d.period?.to ?? "",
           campaignCount: d.campaignCount ?? 0,
           campaignNames: d.campaignNames ?? [],
-          totals: d.totals ?? { total: 0, won: 0, lost: 0, waiting: 0 },
+          totals: d.totals ?? { total: 0, won: 0, lost: 0, waiting: 0, other: 0 },
+        });
+        // Same response carries the per-salesperson breakdown, so the sales
+        // performance panel is always the selected period rather than all time.
+        setSpReports({
+          first: d.firstSalespersonReport ?? [],
+          second: d.secondSalespersonReport ?? [],
         });
       })
       .catch(() => undefined)
@@ -353,6 +366,7 @@ export default function Home() {
   const won = periodInfo.totals.won;
   const lost = periodInfo.totals.lost;
   const waiting = periodInfo.totals.waiting;
+  const unclassified = periodInfo.totals.other;
 
   // Non-admins see only their own book; the server already scopes the query, so
   // this just tells the UI which message to show.
@@ -491,25 +505,13 @@ export default function Home() {
     return key;
   };
 
-  const spStats = useMemo(() => {
-    const m = new Map<string, { won: number; lost: number; waiting: number; total: number }>();
-    for (const cl of clients) {
-      // Attribute each client once per unique salesperson (avoid double counting
-      // when the same person is both 1st and 2nd contact).
-      const people = [...new Set([cl.firstContactPerson, cl.secondContactPerson].filter(Boolean))];
-      for (const key of people) {
-        const s = m.get(key) ?? { won: 0, lost: 0, waiting: 0, total: 0 };
-        if (isWon(cl.status)) s.won++;
-        else if (isLost(cl.status)) s.lost++;
-        else s.waiting++;
-        s.total++;
-        m.set(key, s);
-      }
-    }
-    return [...m.entries()].sort((a,b) => b[1].won - a[1].won || b[1].total - a[1].total).slice(0, 8).map(([name, s]) => ({
-      name, ...s, winRate: s.total > 0 ? Math.round(s.won / s.total * 100) + "%" : "—"
-    }));
-  }, [clients]);
+  // Sales performance rows come from the API, not from the client list.
+  //
+  // It used to be computed here from `clients`, which (a) merged the 1st and 2nd
+  // contact into one list, so a rep's own book could not be separated from
+  // clients they were 2nd contact on, and (b) ignored the reporting period, so
+  // the panel showed every client while the KPI cards above it showed one week.
+  // It was also capped at 8 rows, hiding 5 of the 13 users.
 
     const visibleMetrics = useMemo(() => metrics.map(metric => ({
     // Keep the API's period-scoped won/lost/waiting/cpa. This used to recompute
@@ -704,10 +706,10 @@ export default function Home() {
         {view === "dashboard" ? (
           <Dashboard
             metrics={visibleMetrics} totalSpend={totalSpend} totalReach={totalReach}
-            won={won} lost={lost} waiting={waiting}
+            won={won} lost={lost} waiting={waiting} unclassified={unclassified}
             clients={filteredClients}
             salespeople={salespeople}
-            spStats={spStats}
+            spReports={spReports}
             updateStatus={updateStatus} updateClientField={updateClientField}
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             onAddStatus={addStatus} onAddChannel={addChannel} onAddLocation={addLocation}
@@ -1054,9 +1056,15 @@ function MultiSelect({ label, options, selected, onChange, render, onRemove, rem
   );
 }
 
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, clients, salespeople, spStats, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; clients: Client[]; salespeople: string[]; spStats: SpStat[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number } }; onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } }; onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
+
+  // Which contact role the sales performance panel is reporting on. Defaults to
+  // the 2nd contact: that is the number most reps could not previously see at
+  // all, since the panel used to merge both roles into one list.
+  const [spRole, setSpRole] = useState<"first" | "second">("second");
+  const spRows = spReports[spRole];
   const { logo: heroLogo } = useLogo();
 
   // Status panel: every pipeline stage in registry order, followed by the
@@ -1154,13 +1162,16 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
         </span>
       </div>
 
-      {/* KPI strip */}
-      <section className="kpi-row kpi-row-6">
+      {/* KPI strip — the four outcome cards (won / lost / in progress / other)
+          plus spend, reach and CPA. `other` is what makes the outcome cards sum
+          to the period total instead of quietly under-reporting. */}
+      <section className="kpi-row kpi-row-7">
         <KpiCard label={t("kpi.totalSpend")} value={sar(totalSpend)} sub={t("kpi.weeklyInvestment")} accent="#4f46e5"/>
         <KpiCard label={t("kpi.totalReach")} value={MONEY.format(totalReach)} sub={t("kpi.acrossChannels")} accent="#0891b2"/>
         <KpiCard label={t("kpi.won")} value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% ${t("kpi.winRate")}`} accent="#22c55e"/>
         <KpiCard label={t("stage.lost")} value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% ${t("kpi.ofTotal")}`} accent="#ef4444"/>
         <KpiCard label={t("funnel.inProgress")} value={String(waiting)} sub={t("kpi.awaiting")} accent="#f59e0b"/>
+        <KpiCard label={t("kpi.otherStatus")} value={String(unclassified)} sub={t("kpi.otherStatusSub")} accent="#94a3b8"/>
         <KpiCard label={t("kpi.avgCpa")} value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"} sub={won>0?t("kpi.customersWon",{n:won}):t("kpi.noWins")} accent="#7c3aed"/>
       </section>
 
@@ -1200,14 +1211,35 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
       {/* Funnel + ROI */}
       <section className="funnel-row">
         <div className="panel sp-perf-panel">
-          <h3>{t("sp.title")}</h3>
+          <div className="sp-perf-head">
+            <h3>{t("sp.title")}</h3>
+            <div className="sp-role-toggle" role="group" aria-label={t("sp.roleLabel")}>
+              <button
+                type="button"
+                className={spRole === "first" ? "active" : ""}
+                aria-pressed={spRole === "first"}
+                onClick={() => setSpRole("first")}
+              >{t("sp.roleFirst")}</button>
+              <button
+                type="button"
+                className={spRole === "second" ? "active" : ""}
+                aria-pressed={spRole === "second"}
+                onClick={() => setSpRole("second")}
+              >{t("sp.roleSecond")}</button>
+            </div>
+          </div>
+          <p className="sp-role-hint">
+            {t(spRole === "first" ? "sp.roleFirstHint" : "sp.roleSecondHint")}
+          </p>
           <div className="sp-perf-legend">
             <span className="sp-won">{statusLabel(t, "WON")}</span>
             <span className="sp-lost">{statusLabel(t, "LOST")}</span>
             <span className="sp-wait">{t("funnel.inProgress")}</span>
+            <span className="sp-other">{t("kpi.otherStatus")}</span>
+            <span className="sp-total">{t("sp.total")}</span>
           </div>
-          {spStats.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>{t("sp.noData")}</div>}
-          {spStats.map(sp => (
+          {spRows.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>{t("sp.noData")}</div>}
+          {spRows.map(sp => (
             <div className="sp-perf-row" key={sp.name}>
               <div className="sp-perf-avatar">{sp.name.slice(0,2).toUpperCase()}</div>
               <div className="sp-perf-name">{sp.name}</div>
@@ -1215,9 +1247,11 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, client
                 <span className="sp-won">{sp.won}</span>
                 <span className="sp-lost">{sp.lost}</span>
                 <span className="sp-wait">{sp.waiting}</span>
+                <span className="sp-other">{sp.other}</span>
+                <span className="sp-total">{sp.total}</span>
               </div>
-              <div className="sp-perf-bar"><div className="sp-perf-fill" style={{width: String(Math.round(sp.total>0?sp.won/sp.total*100:0)) + "%"}}/></div>
-              <span className="sp-winrate">{sp.winRate}</span>
+              <div className="sp-perf-bar"><div className="sp-perf-fill" style={{width: String(sp.winRate ?? 0) + "%"}}/></div>
+              <span className="sp-winrate">{sp.winRate === null ? "—" : sp.winRate + "%"}</span>
             </div>
           ))}
         </div>

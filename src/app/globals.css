@@ -295,6 +295,10 @@ button { cursor: pointer; }
 
 /* ── Enhanced dashboard ─────────────────────────────────── */
 .kpi-row-6 { grid-template-columns: repeat(6, 1fr); }
+/* Seven cards: the four outcome buckets (won / lost / in progress / other) plus
+   spend, reach and CPA. The old 6-up row could not hold the "other" card, and
+   widening the shared rule would have reflowed the marketing page too. */
+.kpi-row-7 { grid-template-columns: repeat(7, 1fr); }
 .funnel-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; margin-bottom: 16px; }
 .funnel-panel { padding: 18px 20px; }
 .funnel-stages { display: flex; align-items: center; justify-content: center; gap: 0; padding: 10px 0; }
@@ -319,6 +323,9 @@ button { cursor: pointer; }
 .bad { color: #ef4444; font-weight: 600; }
 @media(max-width:900px){.kpi-row-6{grid-template-columns:repeat(3,1fr)}.funnel-row{grid-template-columns:1fr}.funnel-stages{flex-wrap:wrap;gap:8px}}
 @media(max-width:600px){.kpi-row-6{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1100px){.kpi-row-7{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:700px){.kpi-row-7{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:420px){.kpi-row-7{grid-template-columns:1fr}}
 
 /* ── Settings page ─────────────────────────────────────── */
 .settings-page { min-height: 100vh; background: var(--paper); }
@@ -778,6 +785,10 @@ button { cursor: pointer; }
 .sp-won { background: #d1fae5; color: #065f46; }
 .sp-lost { background: #fee2e2; color: #991b1b; }
 .sp-wait { background: #fef3c7; color: #92400e; }
+/* "Other" is deliberately neutral grey: it is neither a win nor a loss, and
+   reusing a coloured outcome chip would imply a judgement that was never made. */
+.sp-other { background: #e5e7eb; color: #4b5563; }
+.sp-total { background: #eef2ff; color: #3730a3; }
 .sp-perf-bar { width: 60px; height: 5px; background: #f3f4f6; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
 [data-theme="dark"] .sp-perf-bar { background: #27272a; }
 .sp-perf-fill { height: 100%; background: #22c55e; border-radius: 3px; transition: width .3s ease; }
@@ -1492,6 +1503,23 @@ input.ltr-num { text-align: left; }
 .sort-picker select:focus{border-color:#a5b884;box-shadow:0 0 0 3px #eaf4d7}
 [data-theme="dark"] .sort-picker select{background:#18181b;color:var(--ink);border-color:#2b2b30}
 @media (max-width:640px){.sort-picker{margin-inline-start:0;width:100%;justify-content:space-between}}
+
+/* Sales performance: role toggle + hint, so it is always clear which contact
+   role the numbers describe. Without it the two lists look identical.
+   No padding here — `.dashboard-page .panel` already provides it, and adding
+   more would inset the header relative to the rows below. */
+.sp-perf-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.sp-perf-head h3{margin:0}
+.sp-role-toggle{display:inline-flex;background:#f3f4f6;border-radius:8px;padding:3px;gap:2px}
+.sp-role-toggle button{border:0;background:transparent;border-radius:6px;padding:5px 10px;font-size:11px;color:#6b7280;cursor:pointer;white-space:nowrap;font-weight:600}
+.sp-role-toggle button:hover{color:#374151}
+.sp-role-toggle button.active{background:#fff;color:#17181c;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.sp-role-hint{margin:0 0 12px;font-size:11px;color:#9ca3af;line-height:1.5}
+[data-theme="dark"] .sp-role-toggle{background:#22232a}
+[data-theme="dark"] .sp-role-toggle button{color:#8b8fa3}
+[data-theme="dark"] .sp-role-toggle button.active{background:#18181b;color:var(--ink)}
+[data-theme="dark"] .sp-other{background:#2b2b30;color:#c9cbd4}
+[data-theme="dark"] .sp-total{background:#22233a;color:#c7cbf5}
 
 /* The add/edit modal's picker is the same widget as the filter dropdown, so it
    needs the same full-width trigger. The form fields give it a grid column, and

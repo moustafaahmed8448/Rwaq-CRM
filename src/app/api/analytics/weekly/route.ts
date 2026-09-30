@@ -3,9 +3,8 @@ import { assigneeScope, getSessionUser, isAuthenticated, unauthorized } from "@/
 import { databaseErrorMessage, listClients, listMetrics, readSetting } from "@/lib/db";
 import {
   channelLabels,
+  classifyStatus,
   isInProgress,
-  isLost,
-  isWon,
   parsePeriodKind,
   resolvePeriod,
 } from "@/lib/reporting";
@@ -55,14 +54,28 @@ export async function GET(request: NextRequest) {
       ...metrics.map((m) => m.channel),
     ]);
 
+    // One bucketing pass, reused by every figure below. Classifying per client
+    // here (rather than three separate filter passes) keeps the four buckets
+    // mutually exclusive and exhaustive, so the cards always sum to the total.
+    const bucket = (list: typeof periodClients) => {
+      const counts = { won: 0, lost: 0, waiting: 0, other: 0 };
+      for (const client of list) {
+        switch (classifyStatus(client.status)) {
+          case "won": counts.won += 1; break;
+          case "lost": counts.lost += 1; break;
+          case "progress": counts.waiting += 1; break;
+          default: counts.other += 1;
+        }
+      }
+      return counts;
+    };
+
     const rows = [...channelSet].map((channel) => {
       const metric = metrics.find((m) => m.channel === channel);
       const channelClients = periodClients.filter((c) => c.acquisitionChannel === channel);
-      // Registry-driven so a new pipeline stage is picked up automatically
-      // instead of silently landing in "waiting".
-      const won = channelClients.filter((c) => isWon(c.status)).length;
-      const lost = channelClients.filter((c) => isLost(c.status)).length;
-      const waiting = channelClients.filter((c) => isInProgress(c.status)).length;
+      // Registry-driven, so a new pipeline stage is picked up automatically
+      // instead of silently landing in "other".
+      const { won, lost, waiting, other } = bucket(channelClients);
       const spend = Number(metric?.spend ?? 0);
       const platform = channelLabels[channel] ?? channel;
       return {
@@ -76,6 +89,7 @@ export async function GET(request: NextRequest) {
         won,
         lost,
         waiting,
+        other,
         cpa: won ? spend / won : 0,
       };
     });
@@ -85,12 +99,8 @@ export async function GET(request: NextRequest) {
 
     // Period totals for the KPI cards. The client used to recompute these from
     // the full client list, which silently reverted them to all-time numbers.
-    const totals = {
-      total: periodClients.length,
-      won: periodClients.filter((c) => isWon(c.status)).length,
-      lost: periodClients.filter((c) => isLost(c.status)).length,
-      waiting: periodClients.filter((c) => isInProgress(c.status)).length,
-    };
+    // `other` is what makes won + lost + waiting reconcile to `total`.
+    const totals = { total: periodClients.length, ...bucket(periodClients) };
 
     const workload = new Map<string, number>();
     periodClients
@@ -104,17 +114,45 @@ export async function GET(request: NextRequest) {
       .filter((entry) => Boolean(entry.name))
       .sort((a, b) => b.activeClients - a.activeClients);
 
-    const secondSalespersonReport = new Map<string, { won: number; lost: number; waiting: number; total: number }>();
-    periodClients.forEach((client) => {
-      const key = client.secondContactPerson;
-      if (!key) return;
-      const current = secondSalespersonReport.get(key) ?? { won: 0, lost: 0, waiting: 0, total: 0 };
-      current.total += 1;
-      if (isWon(client.status)) current.won += 1;
-      if (isLost(client.status)) current.lost += 1;
-      if (isInProgress(client.status)) current.waiting += 1;
-      secondSalespersonReport.set(key, current);
-    });
+    /**
+     * Per-salesperson outcome breakdown, per contact ROLE.
+     *
+     * These two reports used to be merged into one list in the client, which
+     * credited a person for a client whether they were the 1st or the 2nd
+     * contact — so "your book" and "supporting someone else's" were
+     * indistinguishable. Reported separately, a rep's own pipeline and their
+     * 2nd-contact support are each readable, and the counts reconcile:
+     * won + lost + waiting + other === total for every person.
+     */
+    const roleReport = (pick: (client: typeof periodClients[number]) => string) => {
+      const map = new Map<string, { won: number; lost: number; waiting: number; other: number; total: number }>();
+      for (const client of periodClients) {
+        const key = pick(client);
+        if (!key) continue;
+        const row = map.get(key) ?? { won: 0, lost: 0, waiting: 0, other: 0, total: 0 };
+        row.total += 1;
+        switch (classifyStatus(client.status)) {
+          case "won": row.won += 1; break;
+          case "lost": row.lost += 1; break;
+          case "progress": row.waiting += 1; break;
+          default: row.other += 1;
+        }
+        map.set(key, row);
+      }
+      // Busiest book first, so the people carrying the most clients are on top.
+      return [...map.entries()]
+        .map(([name, values]) => ({
+          name,
+          ...values,
+          winRate: values.won + values.lost > 0
+            ? Math.round((values.won / (values.won + values.lost)) * 100)
+            : null,
+        }))
+        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "ar"));
+    };
+
+    const firstSalespersonReport = roleReport((c) => c.firstContactPerson);
+    const secondSalespersonReport = roleReport((c) => c.secondContactPerson);
 
     return NextResponse.json({
       source: "postgres",
@@ -123,7 +161,8 @@ export async function GET(request: NextRequest) {
       to: period.to,
       rows,
       salespersonLeaderboard,
-      secondSalespersonReport: [...secondSalespersonReport.entries()].map(([name, values]) => ({ name, ...values })),
+      firstSalespersonReport,
+      secondSalespersonReport,
       totalClients: periodClients.length,
       totals,
       campaignNames,
