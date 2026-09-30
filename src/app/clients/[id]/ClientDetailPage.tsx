@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Clock, Edit3, Plus, Tag, Trash2, UserRound, AlertCircle, Check, MessageSquare, TrendingUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import RefPicker from "@/components/RefPicker";
 import { useLang } from "@/lib/i18n";
 import { dateLocale } from "@/lib/format";
 import { canWrite } from "@/lib/auth";
@@ -184,13 +185,13 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
                 <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={draft.phoneNumber ?? ""} onChange={(e) => setDraft({ ...draft, phoneNumber: e.target.value })} /></Field>
                 <Field label={t("form.project")} wide><textarea rows={3} value={draft.project ?? ""} onChange={(e) => setDraft({ ...draft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
                 <Field label={t("form.location")}>
-                  <AddNewSelect value={draft.location ?? ""} options={locations} onAdd={addLocation} onChange={(v) => setDraft({ ...draft, location: v })} placeholder={t("form.locationPh")} t={t} />
+                  <RefPicker value={draft.location ?? ""} options={locations} onAdd={addLocation} onChange={(v) => setDraft({ ...draft, location: v })} placeholder={t("form.locationPh")} t={t} />
                 </Field>
                 <Field label={t("form.channel")}>
-                  <AddNewSelect value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} render={(v) => channelLabel(t, v)} placeholder={t("form.channelPh")} t={t} />
+                  <RefPicker value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} render={(v) => channelLabel(t, v)} placeholder={t("form.channelPh")} t={t} />
                 </Field>
                 <Field label={t("form.status")}>
-                  <AddNewSelect value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} render={(v) => localizeStatus(t, v)} placeholder={t("form.statusPh")} t={t} />
+                  <RefPicker value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} render={(v) => localizeStatus(t, v)} placeholder={t("form.statusPh")} t={t} />
                 </Field>
                 <Field label={t("form.firstContact")}><input value={draft.firstContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, firstContactPerson: e.target.value })} /></Field>
                 <Field label={t("form.secondContact")}><input value={draft.secondContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, secondContactPerson: e.target.value })} /></Field>
@@ -292,54 +293,5 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <span className="stat-value">{value}</span>
       <span className="stat-label">{label}</span>
     </div>
-  );
-}
-
-function AddNewSelect({ value, options, onChange, onAdd, render, placeholder, t }: {
-  value: string; options: string[];
-  onChange: (v: string) => void;
-  onAdd?: (v: string) => Promise<string | void>;
-  render?: (v: string) => string;
-  placeholder?: string;
-  t: (key: string, vars?: Record<string, string | number>) => string;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [text, setText] = useState("");
-
-  const confirmAdd = async () => {
-    const val = text.trim();
-    if (!val) { setAdding(false); return; }
-    const res = onAdd ? await onAdd(val) : val;
-    const final = typeof res === "string" && res ? res : val;
-    onChange(final);
-    setAdding(false); setText("");
-  };
-
-  if (adding) {
-    return (
-      <div style={{ display: "flex", gap: 6 }}>
-        <input
-          autoFocus
-          value={text}
-          placeholder={placeholder ?? t("form.newValuePh")}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") confirmAdd(); else if (e.key === "Escape") { setAdding(false); setText(""); } }}
-          style={{ flex: 1, height: 36, border: "1px solid #dfe2e6", borderRadius: 6, padding: "0 10px", fontSize: 12, outline: "none" }}
-        />
-        <button type="button" className="btn-sm" onClick={confirmAdd}><Check size={14} />{t("form.addBtn")}</button>
-        <button type="button" className="btn-ghost" onClick={() => { setAdding(false); setText(""); }}>{t("common.cancel")}</button>
-      </div>
-    );
-  }
-
-  return (
-    <select
-      value={value}
-      onChange={(e) => { if (e.target.value === "__NEW__") { setAdding(true); } else { onChange(e.target.value); } }}
-    >
-      <option value="" disabled>{placeholder ?? t("form.statusPh")}</option>
-      {options.map((o) => <option key={o} value={o}>{render ? render(o) : o}</option>)}
-      <option value="__NEW__">{t("form.addNewOpt")}</option>
-    </select>
   );
 }

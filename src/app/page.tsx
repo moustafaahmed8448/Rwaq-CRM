@@ -29,6 +29,8 @@ import { num, sar, dateLocale } from "@/lib/format";
 import { useLogo } from "@/lib/logo";
 import StatusPill, { StatusDot } from "@/components/StatusPill";
 import RefPicker from "@/components/RefPicker";
+import Select from "@/components/Select";
+import { useCombobox } from "@/lib/use-combobox";
 import ImportClientsModal from "@/components/ImportClientsModal";
 import DashboardCharts, { type ChartView, type TrendPoint } from "@/components/DashboardCharts";
 import ColumnPicker from "@/components/ColumnPicker";
@@ -55,6 +57,14 @@ type DatePreset = { label: string; startDate?: string; endDate?: string };
 type SpRow = { name: string; won: number; lost: number; waiting: number; other: number; total: number; winRate: number | null };
 /** Which client date the table is ordered by. */
 type SortField = "recent" | "oldest" | "registered" | "registeredOldest";
+
+/** Sort options are a closed set, so the label key can be looked up by value. */
+const SORT_LABELS: Record<string, string> = {
+  recent: "clients.sortRecent",
+  oldest: "clients.sortOldest",
+  registered: "clients.sortRegistered",
+  registeredOldest: "clients.sortRegisteredOldest",
+};
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const CH_COLORS: Record<string, string> = { FACEBOOK: "#1877f2", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed", GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2" };
@@ -196,7 +206,9 @@ export default function Home() {
   const [locationUsage, setLocationUsage] = useState<Record<string, number>>({});
   // Reporting window for the KPI figures. Defaults to the current week, as
   // requested; month, all-time and a custom range are also supported.
-  const [periodKind, setPeriodKind] = useState<PeriodKind>("week");
+  // "all" by default: the dashboard should open on the whole history rather
+  // than silently showing one week.
+  const [periodKind, setPeriodKind] = useState<PeriodKind>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [periodLoading, setPeriodLoading] = useState(false);
@@ -281,8 +293,13 @@ export default function Home() {
    * lists, so all four endpoints are refreshed; leaving the pickers stale would
    * hide values that are now in use.
    */
-  const refreshAfterImport = (imported: number) => {
-    addToast(imported > 0 ? "success" : "info", t(imported > 0 ? "importer.done" : "importer.doneNone", { n: imported }));
+  const refreshAfterImport = (result: { imported: number; updated: number }) => {
+    const { imported, updated } = result;
+    const total = imported + updated;
+    addToast(
+      total > 0 ? "success" : "info",
+      t(total > 0 ? "importer.doneMixed" : "importer.doneNone", { a: imported, b: updated }),
+    );
     fetch("/api/crm/clients").then(r => r.json()).then(d => {
       setClients(d.clients ?? []);
       setCustomStatuses(d.statuses ?? []);
@@ -852,16 +869,25 @@ export default function Home() {
                   <RefPicker value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} render={v => statusLabel(t, v)} placeholder={t("form.statusPh")} t={t} />
                 </Field>
                 <Field label={t("form.firstContact")}>
-                  <select value={editDraft.firstContactPerson ?? ""} onChange={e => setEditDraft({ ...editDraft, firstContactPerson: e.target.value })}>
-                    <option value="">{t("form.unassigned")}</option>
-                    {users.map(u => <option key={u.username} value={u.name}>{u.name}</option>)}
-                  </select>
+                  <Select
+                    value={editDraft.firstContactPerson ?? ""}
+                    /* "" stays in the list so an assigned contact can be
+                       un-assigned again — a trigger-only placeholder would
+                       offer no way back once a name was picked. */
+                    options={["", ...users.map(u => u.name)]}
+                    onChange={v => setEditDraft({ ...editDraft, firstContactPerson: v })}
+                    render={v => (v === "" ? t("form.unassigned") : v)}
+                    t={t}
+                  />
                 </Field>
                 <Field label={t("form.secondContact")}>
-                  <select value={editDraft.secondContactPerson ?? ""} onChange={e => setEditDraft({ ...editDraft, secondContactPerson: e.target.value })}>
-                    <option value="">{t("form.noneOption")}</option>
-                    {users.map(u => <option key={u.username} value={u.name}>{u.name}</option>)}
-                  </select>
+                  <Select
+                    value={editDraft.secondContactPerson ?? ""}
+                    options={["", ...users.map(u => u.name)]}
+                    onChange={v => setEditDraft({ ...editDraft, secondContactPerson: v })}
+                    render={v => (v === "" ? t("form.noneOption") : v)}
+                    t={t}
+                  />
                 </Field>
                 <Field label={t("form.operation")} wide><input value={editDraft.operationToTake ?? ""} onChange={e => setEditDraft({ ...editDraft, operationToTake: e.target.value })} placeholder={t("form.operationPh")} /></Field>
                 <Field label={t("form.notes")} wide><textarea value={editDraft.notes ?? ""} onChange={e => setEditDraft({ ...editDraft, notes: e.target.value })} rows={3} placeholder={t("form.notesPh")} /></Field>
@@ -910,14 +936,16 @@ export default function Home() {
                     // Coloured from the registry, not a per-status CSS class:
                     // .status-select.waiting never matched `status-no_response`,
                     // so every new stage rendered as a bare unstyled select.
-                    <select
-                      className="status-select"
+                    <Select
                       value={detailClient.status}
-                      onChange={e => updateStatus(detailClient.id, e.target.value)}
+                      options={allStatuses}
+                      onChange={v => updateStatus(detailClient.id, v)}
+                      render={v => statusLabel(t, v)}
+                      className="status-select"
                       style={{ background: statusColor(detailClient.status) + "1f", color: statusColor(detailClient.status) }}
-                    >
-                      {allStatuses.map(s => <option key={s} value={s}>{statusLabel(t, s)}</option>)}
-                    </select>
+                      t={t}
+                      ariaLabel={t("form.status")}
+                    />
                   ) : (
                     <StatusPill status={detailClient.status} t={t} />
                   )}
@@ -1009,15 +1037,17 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, fir
       </div>
       <div className="date-bar">
         <Filter size={13} /><span>{t("th.date")}</span><input type="date" value={filters.startDate} onChange={e => updateFilter("startDate", e.target.value)} /><span>–</span><input type="date" value={filters.endDate} onChange={e => updateFilter("endDate", e.target.value)} />
-        {setSortBy && (
+        {setSortBy && sortBy && (
           <label className="sort-picker">
             <span>{t("clients.sortBy")}</span>
-            <select value={sortBy} onChange={e => setSortBy(e.target.value as SortField)}>
-              <option value="recent">{t("clients.sortRecent")}</option>
-              <option value="oldest">{t("clients.sortOldest")}</option>
-              <option value="registered">{t("clients.sortRegistered")}</option>
-              <option value="registeredOldest">{t("clients.sortRegisteredOldest")}</option>
-            </select>
+            <Select
+              value={sortBy}
+              options={Object.keys(SORT_LABELS)}
+              onChange={v => setSortBy!(v as SortField)}
+              render={v => t(SORT_LABELS[v] ?? v)}
+              searchable={false}
+              t={t}
+            />
           </label>
         )}
       </div>
@@ -1049,26 +1079,28 @@ function MultiSelect({ label, options, selected, onChange, render, onRemove, rem
   removeUsage?: Record<string, number>;
   t: TFn;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
   const lab = (v: string) => (render ? render(v) : v);
   const toggleValue = (v: string) => {
     onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
   };
 
+  const cb = useCombobox({
+    options, labelOf: lab, selected, onSelect: toggleValue, closeOnSelect: false,
+    // Backspace on an empty search removes the most recent pick, so a
+    // mis-filtered multi-select can be corrected without reaching for a mouse.
+    onRemoveLast: () => { if (selected.length) onChange(selected.slice(0, -1)); },
+  });
+
   return (
-    <div className="ms-wrap" ref={wrapRef}>
-      <button type="button" className={`ms-trigger ${selected.length > 0 ? "ms-active" : ""}`} onClick={() => setOpen(o => !o)}>
+    <div className="ms-wrap cbx" data-cbx-root={cb.rootId}>
+      <button
+        id={cb.triggerId}
+        type="button"
+        className={`ms-trigger ${selected.length > 0 ? "ms-active" : ""}`}
+        aria-haspopup="listbox"
+        aria-expanded={cb.open}
+        onClick={cb.toggle}
+      >
         <span className="ms-value">
           {selected.length === 0 ? label
             : selected.length === 1 ? lab(selected[0])
@@ -1076,47 +1108,82 @@ function MultiSelect({ label, options, selected, onChange, render, onRemove, rem
         </span>
         <ChevronDown size={12} />
       </button>
-      {open && (
+      {cb.open && (
         <div className="ms-menu">
-          {options.length === 0 && <div className="ms-empty">{t("common.noData")}</div>}
-          {options.map(o => {
-            // Only saved (custom) values, and only while nothing references them.
-            // A value still attached to clients cannot be removed: deleting it from
-            // the list would leave those clients pointing at a value that no longer
-            // exists anywhere in the UI. The count on the row explains why.
-            const used = removeUsage?.[o] ?? 0;
-            const canRemove = Boolean(onRemove && removable?.includes(o) && used === 0);
-            return (
-              <div key={o} className={`ms-opt-row ${selected.includes(o) ? "ms-opt-on" : ""}`}>
-                <button type="button" className="ms-opt" onClick={() => toggleValue(o)}>
-                  <span className="ms-check">{selected.includes(o) && <Check size={11} />}</span>
-                  {lab(o)}
-                  {used > 0 && <span className="ms-opt-count">{num(used)}</span>}
-                </button>
-                {canRemove && (
+          <div className="ms-search-row">
+            <input
+              id={cb.inputId}
+              className="ms-search"
+              role="combobox"
+              aria-expanded
+              aria-controls={cb.menuId}
+              aria-autocomplete="list"
+              aria-activedescendant={cb.filtered[cb.active] ? cb.optionId(cb.active) : undefined}
+              value={cb.query}
+              placeholder={t("common.search")}
+              onChange={e => cb.setQuery(e.target.value)}
+              onKeyDown={cb.onKeyDown}
+            />
+          </div>
+          {/* The listbox role sits here, not on .ms-menu: the options are direct
+              children of this element, which is what the role requires. */}
+          <div className="ms-list" id={cb.menuId} role="listbox">
+            {cb.filtered.length === 0 && <div className="ms-empty">{t("common.noMatches")}</div>}
+            {cb.filtered.map((o, i) => {
+              // Only saved (custom) values, and only while nothing references them.
+              // A value still attached to clients cannot be removed: deleting it from
+              // the list would leave those clients pointing at a value that no longer
+              // exists anywhere in the UI. The count on the row explains why.
+              const used = removeUsage?.[o] ?? 0;
+              const canRemove = Boolean(onRemove && removable?.includes(o) && used === 0);
+              return (
+                <div
+                  key={o}
+                  /* role="none" keeps this wrapper out of the a11y tree so the
+                     option is a direct child of the listbox; a role="option"
+                     here would wrap a nested button, which is invalid ARIA. */
+                  role="none"
+                  className={`ms-opt-row ${selected.includes(o) ? "ms-opt-on" : ""} ${i === cb.active ? "ms-opt-active" : ""}`}
+                  onMouseEnter={() => cb.setActive(i)}
+                >
                   <button
+                    id={cb.optionId(i)}
                     type="button"
-                    className="ms-opt-del"
-                    title={t("refData.removeTitle")}
-                    aria-label={t("refData.removeAria", { value: lab(o) })}
-                    onClick={() => {
-                      // Removing the value from the saved list does NOT touch
-                      // clients already using it, so say so before doing it.
-                      const msg = used > 0
-                        ? t("refData.removeUsedConfirm", { value: lab(o), n: used })
-                        : t("refData.removeConfirm", { value: lab(o) });
-                      if (!confirm(msg)) return;
-                      onChange(selected.filter(x => x !== o));
-                      onRemove?.(o);
-                    }}
+                    role="option"
+                    aria-selected={selected.includes(o)}
+                    className="ms-opt"
+                    tabIndex={-1}
+                    onClick={() => toggleValue(o)}
                   >
-                    <Trash2 size={12} />
+                    <span className="ms-check">{selected.includes(o) && <Check size={11} />}</span>
+                    <span className="ms-opt-label">{lab(o)}</span>
+                    {used > 0 && <span className="ms-opt-count">{num(used)}</span>}
                   </button>
-                )}
-              </div>
-            );
-          })}
-          {selected.length > 0 && <button type="button" className="ms-clear" onClick={() => { onChange([]); setOpen(false); }}>{t("clients.clearSelection")}</button>}
+                  {canRemove && (
+                    <button
+                      type="button"
+                      className="ms-opt-del"
+                      title={t("refData.removeTitle")}
+                      aria-label={t("refData.removeAria", { value: lab(o) })}
+                      onClick={() => {
+                        // Removing the value from the saved list does NOT touch
+                        // clients already using it, so say so before doing it.
+                        const msg = used > 0
+                          ? t("refData.removeUsedConfirm", { value: lab(o), n: used })
+                          : t("refData.removeConfirm", { value: lab(o) });
+                        if (!confirm(msg)) return;
+                        onChange(selected.filter(x => x !== o));
+                        onRemove?.(o);
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {selected.length > 0 && <button type="button" className="ms-clear" onClick={() => onChange([])}>{t("clients.clearSelection")}</button>}
         </div>
       )}
     </div>

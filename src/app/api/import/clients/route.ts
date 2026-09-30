@@ -4,12 +4,13 @@ import {
   addSettingValues,
   bulkImportClients,
   databaseErrorMessage,
-  existingClientKeys,
+  listImportBaseline,
   readSetting,
   recordSyncRun,
+  updateClient,
 } from "@/lib/db";
 import { fetchSheetRows, sheetUrl, SheetError } from "@/lib/google-sheet";
-import { buildImportPlan } from "@/lib/import-clients";
+import { applySelection, buildImportPlan, type RowSelection } from "@/lib/import-clients";
 
 /**
  * Imports client leads from the public Google Sheet.
@@ -37,29 +38,32 @@ function errorResponse(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-/** Reference values + existing client keys, all read in one round trip. */
+/** Reference values + stored clients, all read in one round trip. */
 async function loadContext() {
-  const [statuses, channels, locations, existingKeys] = await Promise.all([
+  const [statuses, channels, locations, baseline] = await Promise.all([
     readSetting("statuses"),
     readSetting("channels"),
     readSetting("locations"),
-    existingClientKeys(),
+    listImportBaseline(),
   ]);
-  return { refs: { statuses, channels, locations }, existingKeys };
+  return { refs: { statuses, channels, locations }, baseline };
 }
 
 /** The preview payload, shared by both modes so the UI renders one shape. */
 function summarize(plan: ReturnType<typeof buildImportPlan>, mode: "preview" | "commit") {
+  const count = (kind: string): number => plan.diff.filter((r) => r.kind === kind).length;
   return {
     mode,
     source: sheetUrl(),
     toCreate: plan.drafts.length,
+    toUpdate: count("changed"),
+    identical: count("identical"),
     skipped: plan.skipped.length,
     skippedByReason: plan.skipped.reduce<Record<string, number>>((acc, row) => {
       acc[row.reason] = (acc[row.reason] ?? 0) + 1;
       return acc;
     }, {}),
-    // 56 rows have no تاريخ التسجيل; they are imported with today's date.
+    // Only creates carry a date, so this counts the new rows that have none.
     dateAssumed: plan.drafts.filter((d) => d.dateAssumed).length,
     newStatuses: plan.newStatuses,
     newChannels: plan.newChannels,
@@ -69,6 +73,8 @@ function summarize(plan: ReturnType<typeof buildImportPlan>, mode: "preview" | "
     // Capped so a 300-row skip list cannot bloat the response; the counts above
     // stay exact. The first entries are shown so the user can spot a pattern.
     skippedSample: plan.skipped.slice(0, 25),
+    diff: plan.diff,
+    dbOnly: plan.dbOnly,
   };
 }
 
@@ -83,53 +89,89 @@ export async function POST(request: NextRequest) {
 
   try {
     const rows = await fetchSheetRows();
-    const { refs, existingKeys } = await loadContext();
-    const plan = buildImportPlan(rows, refs, existingKeys);
+    const { refs, baseline } = await loadContext();
+    const plan = buildImportPlan(rows, refs, baseline);
 
     if (mode === "preview") {
       return NextResponse.json(summarize(plan, "preview"));
     }
 
-    if (plan.drafts.length === 0) {
+    // The browser sends only WHICH rows to act on and which fields to keep. The
+    // plan is rebuilt here from a fresh sheet read, so the client can never name
+    // a client id to overwrite, and a sheet that changed since the preview is
+    // re-diffed rather than applied blind. `keep` is filtered against
+    // SYNCABLE_FIELDS inside applySelection.
+    const selection: RowSelection[] = Array.isArray(body.rows)
+      ? body.rows.filter(
+          (r: unknown): r is RowSelection =>
+            typeof r === "object" && r !== null && typeof (r as RowSelection).rowNumber === "number",
+        )
+      : [];
+
+    const { creates, updates, newStatuses, newChannels, newLocations } =
+      applySelection(plan, selection, refs);
+
+    if (creates.length === 0 && updates.length === 0) {
       await recordSyncRun({ provider: PROVIDER, status: "noop", recordsRead: rows.length, recordsWritten: 0 });
-      return NextResponse.json({ ...summarize(plan, "commit"), imported: 0 });
+      return NextResponse.json({ ...summarize(plan, "commit"), imported: 0, updated: 0 });
     }
 
-    const result = await bulkImportClients(
-      plan.drafts.map((d) => ({
-        name: d.name,
-        phoneNumber: d.phoneNumber,
-        status: d.status,
-        project: d.project,
-        location: d.location,
-        acquisitionChannel: d.acquisitionChannel,
-        operationToTake: d.operationToTake,
-        firstContactPerson: d.firstContactPerson,
-        secondContactPerson: d.secondContactPerson,
-        createdAt: d.createdAt,
-      })),
-      session.name,
-    );
+    let imported = 0;
+    let firstId = "";
+    let lastId = "";
+    if (creates.length > 0) {
+      const result = await bulkImportClients(
+        creates.map((d) => ({
+          name: d.name,
+          phoneNumber: d.phoneNumber,
+          status: d.status,
+          project: d.project,
+          location: d.location,
+          acquisitionChannel: d.acquisitionChannel,
+          operationToTake: d.operationToTake,
+          firstContactPerson: d.firstContactPerson,
+          secondContactPerson: d.secondContactPerson,
+          createdAt: d.createdAt,
+        })),
+        session.name,
+      );
+      imported = result.imported;
+      firstId = result.firstId;
+      lastId = result.lastId;
+    }
+
+    // updateClient writes the same activity-log entries a manual edit does, so
+    // the timeline explains where the change came from. Notifications are off:
+    // reassigning a contact across a whole sheet would notify people who never
+    // made the change.
+    let updated = 0;
+    for (const item of updates) {
+      const res = await updateClient(item.clientId, item.patch, session.name, { notify: false });
+      if (res.outcome === "updated") updated += 1;
+    }
 
     // Reference values are registered only AFTER the rows landed, so a failure
     // here leaves unused labels in the picker rather than clients pointing at a
-    // status that was never created.
-    await addSettingValues("statuses", plan.newStatuses);
-    await addSettingValues("channels", plan.newChannels);
-    await addSettingValues("locations", plan.newLocations);
+    // status that was never created. Scoped to the selected rows, so
+    // deselecting every row that mentions a channel does not add that channel.
+    await addSettingValues("statuses", newStatuses);
+    await addSettingValues("channels", newChannels);
+    await addSettingValues("locations", newLocations);
 
     await recordSyncRun({
       provider: PROVIDER,
       status: "ok",
       recordsRead: rows.length,
-      recordsWritten: result.imported,
+      // Created plus updated: this is the only counter the table carries.
+      recordsWritten: imported + updated,
     });
 
     return NextResponse.json({
       ...summarize(plan, "commit"),
-      imported: result.imported,
-      firstId: result.firstId,
-      lastId: result.lastId,
+      imported,
+      updated,
+      firstId,
+      lastId,
     });
   } catch (error) {
     if (error instanceof SheetError) {

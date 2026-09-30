@@ -113,7 +113,9 @@ export interface ImportClientDraft {
   dateAssumed: boolean;
 }
 
-export type SkipReason = "no_name" | "no_phone" | "duplicate_in_sheet" | "already_in_db";
+/** `already_in_db` is gone: a row that matches a stored client is now reported as
+ *  a `changed` or `identical` diff row, not as a skip. */
+export type SkipReason = "no_name" | "no_phone" | "duplicate_in_sheet";
 
 export interface SkippedRow {
   rowNumber: number;
@@ -133,6 +135,221 @@ export interface ImportPlan {
   statusMapping: Array<{ from: string; to: string; count: number }>;
   /** Rows whose sheet value had damaged characters removed. */
   repairedRows: Array<{ rowNumber: number; fields: string[] }>;
+  /** Every sheet row, classified. Drives the per-row import UI. */
+  diff: DiffRow[];
+  /**
+   * CRM clients with no counterpart row in the sheet. Read-only: absence from a
+   * spreadsheet is not evidence a client should be removed, so nothing here can
+   * be actioned from the import screen.
+   */
+  dbOnly: BaselineClient[];
+}
+
+/**
+ * Fields the sheet is allowed to write.
+ *
+ * `createdAt` is deliberately excluded: it is the database's record of when the
+ * row landed, and the first import already took the sheet's registration date.
+ * Re-syncing it would rewrite history on every run. `archived` and `notes` are
+ * excluded because the sheet carries neither — an import must never un-archive a
+ * client or clobber a note someone typed in the app.
+ */
+export const SYNCABLE_FIELDS = [
+  "name",
+  "phoneNumber",
+  "status",
+  "project",
+  "location",
+  "acquisitionChannel",
+  "operationToTake",
+  "firstContactPerson",
+  "secondContactPerson",
+] as const;
+
+export type SyncableField = (typeof SYNCABLE_FIELDS)[number];
+
+export const isSyncableField = (value: string): value is SyncableField =>
+  (SYNCABLE_FIELDS as readonly string[]).includes(value);
+
+/** A client as the importer needs to see it, to diff against a sheet row. */
+export interface BaselineClient {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  /** Already run through normalizeStatus, so it compares against a mapped value. */
+  status: string;
+  project: string;
+  location: string;
+  acquisitionChannel: string;
+  operationToTake: string;
+  firstContactPerson: string;
+  secondContactPerson: string;
+  archived: boolean;
+}
+
+/**
+ * YYYY-MM-DD in UTC. Both sides of a date comparison use this, so a timezone
+ * offset can never make two equal calendar dates read as different.
+ */
+export function dateOnly(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+export type DiffKind = "new" | "changed" | "identical" | "skipped" | "db_only";
+
+/** One field where the sheet and the CRM disagree. */
+export interface FieldChange {
+  field: SyncableField;
+  /** Current value in the CRM. */
+  db: string;
+  /** Value the sheet would write. */
+  sheet: string;
+}
+
+export interface DiffRow {
+  kind: DiffKind;
+  /** 1-based sheet row. Null for db_only, which has no source row. */
+  rowNumber: number | null;
+  /** The matched CRM client. Null for new and skipped. */
+  clientId: string | null;
+  name: string;
+  phone: string;
+  status: string;
+  channel: string;
+  location: string;
+  /** Why this row was skipped. */
+  reason?: SkipReason;
+  /** Fields the sheet and the CRM disagree on. Empty unless kind is "changed". */
+  changes: FieldChange[];
+  /** The matched client is archived, so an update would not surface in the list. */
+  archived: boolean;
+}
+
+/** One row the user chose to act on, and the fields they kept from the CRM. */
+export interface RowSelection {
+  rowNumber: number;
+  /** Fields to leave at their current CRM value. */
+  keep?: string[];
+}
+
+export interface ResolvedSelection {
+  creates: ImportClientDraft[];
+  updates: Array<{ clientId: string; patch: Record<string, string>; archived: boolean }>;
+  newStatuses: string[];
+  newChannels: string[];
+  newLocations: string[];
+}
+
+/** The values a row would be written with, after status/channel normalisation. */
+function draftFromRow(row: SheetRow, now: Date): ImportClientDraft {
+  return {
+    rowNumber: row.rowNumber,
+    name: row.name,
+    phoneNumber: tidyPhone(row.phone),
+    status: STATUS_MAP[row.status] ?? row.status,
+    project: row.project,
+    location: row.location,
+    acquisitionChannel: resolveChannel(row.channel),
+    operationToTake: row.operation,
+    firstContactPerson: row.firstContact,
+    secondContactPerson: row.secondContact,
+    // 56 of the 344 rows have no تاريخ التسجيل. They are imported with the
+    // import time and flagged, because dropping a real lead over a missing date
+    // would lose the client entirely.
+    createdAt: row.registeredAt ?? now,
+    dateAssumed: !row.registeredAt,
+  };
+}
+
+/** Every syncable field where the sheet and the stored client disagree. */
+function diffFields(client: BaselineClient, draft: ImportClientDraft): FieldChange[] {
+  const out: FieldChange[] = [];
+  const cmp = (field: SyncableField, db: string, sheet: string): void => {
+    const a = db ?? "";
+    const b = sheet ?? "";
+    if (a !== b) out.push({ field, db: a, sheet: b });
+  };
+  cmp("name", client.name, draft.name);
+  cmp("phoneNumber", client.phoneNumber, draft.phoneNumber);
+  cmp("status", client.status, draft.status);
+  cmp("project", client.project, draft.project);
+  cmp("location", client.location, draft.location);
+  cmp("acquisitionChannel", client.acquisitionChannel, draft.acquisitionChannel);
+  cmp("operationToTake", client.operationToTake, draft.operationToTake);
+  cmp("firstContactPerson", client.firstContactPerson, draft.firstContactPerson);
+  cmp("secondContactPerson", client.secondContactPerson, draft.secondContactPerson);
+  return out;
+}
+
+/**
+ * Applies the user's per-row choices to a plan.
+ *
+ * Pure, and deliberately separate from buildImportPlan: the plan describes what
+ * the sheet says, this decides what we do about it. Only SELECTED rows
+ * contribute reference values, so deselecting every row that mentions a channel
+ * means that channel is never added to the shared list.
+ */
+export function applySelection(
+  plan: ImportPlan,
+  selection: RowSelection[],
+  refs: { statuses: string[]; channels: string[]; locations: string[] },
+): ResolvedSelection {
+  const keepByRow = new Map<number, Set<string>>();
+  for (const sel of selection) {
+    if (!Number.isInteger(sel.rowNumber)) continue;
+    // `keep` is filtered through the allowlist: the browser must not be able to
+    // name a field outside the syncable set.
+    keepByRow.set(sel.rowNumber, new Set((sel.keep ?? []).filter(isSyncableField)));
+  }
+
+  const creates: ImportClientDraft[] = [];
+  const updates: ResolvedSelection["updates"] = [];
+  const newStatuses: string[] = [];
+  const newChannels: string[] = [];
+  const newLocations: string[] = [];
+
+  const knownStatuses = [...PREDEFINED_STATUSES, ...refs.statuses];
+  const knownChannels = [...channelValues, ...refs.channels];
+  const knownLocations = [...BUILTIN_LOCATION_KEYS, ...refs.locations];
+  const addRef = (list: string[], knownList: string[], value: string): void => {
+    if (!value || known(knownList, value) || known(list, value)) return;
+    list.push(value);
+    knownList.push(value);
+  };
+
+  for (const row of plan.diff) {
+    if (row.rowNumber === null) continue;
+    // A row absent from the selection is not actioned at all — this is what
+    // makes an unselected "changed" row a skip.
+    const keep = keepByRow.get(row.rowNumber);
+    if (!keep) continue;
+
+    if (row.kind === "new") {
+      const draft = plan.drafts.find((d) => d.rowNumber === row.rowNumber);
+      if (!draft) continue;
+      creates.push(draft);
+      addRef(newStatuses, knownStatuses, draft.status);
+      addRef(newChannels, knownChannels, draft.acquisitionChannel);
+      addRef(newLocations, knownLocations, draft.location);
+      continue;
+    }
+
+    if (row.kind === "changed" && row.clientId) {
+      const patch: Record<string, string> = {};
+      for (const change of row.changes) {
+        if (keep.has(change.field)) continue;
+        patch[change.field] = change.sheet;
+      }
+      // Every differing field was kept, so there is nothing to write.
+      if (Object.keys(patch).length === 0) continue;
+      if (patch.status) addRef(newStatuses, knownStatuses, patch.status);
+      if (patch.acquisitionChannel) addRef(newChannels, knownChannels, patch.acquisitionChannel);
+      if (patch.location) addRef(newLocations, knownLocations, patch.location);
+      updates.push({ clientId: row.clientId, patch, archived: row.archived });
+    }
+  }
+
+  return { creates, updates, newStatuses, newChannels, newLocations };
 }
 
 /**
@@ -167,14 +384,14 @@ function resolveChannel(raw: string): string {
 /**
  * Builds the plan.
  *
- * `existingKeys` are the identity keys (see identityKey) of clients ALREADY in
- * the database, so a second run of the import is a no-op instead of a duplicate
- * of the whole sheet.
+ * `baseline` are the clients ALREADY in the database. A sheet row that matches
+ * one is reported as a difference to review instead of being imported as a
+ * duplicate, and a row that matches nothing is a new client.
  */
 export function buildImportPlan(
   rows: SheetRow[],
   refs: KnownReferences,
-  existingKeys: Iterable<string> = [],
+  baseline: BaselineClient[] = [],
 ): ImportPlan {
   const now = new Date();
   // Seeded with the built-ins so one is never proposed as a new custom value.
@@ -187,11 +404,21 @@ export function buildImportPlan(
   const knownChannels = [...channelValues, ...refs.channels];
   const knownLocations = [...BUILTIN_LOCATION_KEYS, ...refs.locations];
 
-  // Two sets, not one: a row matching the DATABASE is reported differently from
-  // one repeating an earlier row of the same sheet, and a single set could not
-  // tell them apart once a sheet key had been added to it.
-  const dbKeys = new Set<string>([...existingKeys]);
+  // Identity key -> the stored client. Archived clients are deliberately INCLUDED:
+  // leaving them out would make a sheet row matching an archived client look new,
+  // and the import would create a duplicate of a record someone deliberately
+  // archived. They are flagged on the diff row instead.
+  const dbByKey = new Map<string, BaselineClient>();
+  for (const client of baseline) {
+    const key = identityKey({ phone: client.phoneNumber, name: client.name, project: client.project });
+    // First writer wins, so two clients collapsing to the same key cannot make the
+    // result depend on the order the database returned them in.
+    if (key && !dbByKey.has(key)) dbByKey.set(key, client);
+  }
+  const matchedIds = new Set<string>();
+
   const sheetKeys = new Set<string>();
+  const diff: DiffRow[] = [];
   const drafts: ImportClientDraft[] = [];
   const skipped: SkippedRow[] = [];
   const newStatuses: string[] = [];
@@ -209,10 +436,29 @@ export function buildImportPlan(
   for (const row of rows) {
     if (row.repaired.length > 0) repairedRows.push({ rowNumber: row.rowNumber, fields: row.repaired });
 
+    const draft = draftFromRow(row, now);
+
+    const note = (kind: DiffKind, extra: Partial<DiffRow> = {}): void => {
+      diff.push({
+        kind,
+        rowNumber: row.rowNumber,
+        clientId: null,
+        name: draft.name,
+        phone: draft.phoneNumber,
+        status: draft.status,
+        channel: draft.acquisitionChannel,
+        location: draft.location,
+        changes: [],
+        archived: false,
+        ...extra,
+      });
+    };
+
     // A row with no name cannot be identified or searched for later, so it is
     // dropped rather than imported as an unlabelled record.
     if (!row.name) {
       skipped.push({ rowNumber: row.rowNumber, name: "", phone: row.phone, reason: "no_name" });
+      note("skipped", { phone: row.phone, reason: "no_name" });
       continue;
     }
 
@@ -220,58 +466,58 @@ export function buildImportPlan(
     // own create form requires one, so a row without it is held back.
     if (!row.phone) {
       skipped.push({ rowNumber: row.rowNumber, name: row.name, phone: "", reason: "no_phone" });
+      note("skipped", { reason: "no_phone" });
       continue;
     }
+
+    const mapped = statusCounts.get(row.status);
+    if (mapped) mapped.count += 1;
+    else statusCounts.set(row.status, { from: row.status, to: draft.status, count: 1 });
 
     // Phone is the primary identity; rows whose phone column holds prose fall
     // back to name+project (see identityKey) so a re-run cannot duplicate them.
     const key = identityKey({ phone: row.phone, name: row.name, project: row.project });
-    if (key && (dbKeys.has(key) || sheetKeys.has(key))) {
-      skipped.push({
-        rowNumber: row.rowNumber,
-        name: row.name,
-        phone: row.phone,
-        reason: dbKeys.has(key) ? "already_in_db" : "duplicate_in_sheet",
-      });
+
+    if (key && sheetKeys.has(key)) {
+      skipped.push({ rowNumber: row.rowNumber, name: row.name, phone: row.phone, reason: "duplicate_in_sheet" });
+      note("skipped", { reason: "duplicate_in_sheet" });
       continue;
     }
     if (key) sheetKeys.add(key);
 
-    const status = STATUS_MAP[row.status] ?? row.status;
-    const channel = resolveChannel(row.channel);
-    const location = row.location;
+    const matched = key ? dbByKey.get(key) : undefined;
 
-    // addRef is a no-op for anything already known, and the known lists are
-    // seeded with the built-ins above — so a mapped stage or a built-in channel
-    // is never proposed as new.
-    addRef(newStatuses, knownStatuses, status);
-    addRef(newChannels, knownChannels, channel);
-    addRef(newLocations, knownLocations, location);
+    if (matched) {
+      matchedIds.add(matched.id);
+      const changes = diffFields(matched, draft);
+      // The preview lists reference values for every row that would write
+      // something, not just the new ones: an update can introduce a status the
+      // database has never seen, and under-warning here would surprise the user.
+      for (const change of changes) {
+        if (change.field === "status") addRef(newStatuses, knownStatuses, change.sheet);
+        if (change.field === "acquisitionChannel") addRef(newChannels, knownChannels, change.sheet);
+        if (change.field === "location") addRef(newLocations, knownLocations, change.sheet);
+      }
+      note(changes.length > 0 ? "changed" : "identical", {
+        clientId: matched.id,
+        changes,
+        archived: matched.archived,
+      });
+      continue;
+    }
 
-    const mapped = statusCounts.get(row.status);
-    if (mapped) mapped.count += 1;
-    else statusCounts.set(row.status, { from: row.status, to: status, count: 1 });
+    addRef(newStatuses, knownStatuses, draft.status);
+    addRef(newChannels, knownChannels, draft.acquisitionChannel);
+    addRef(newLocations, knownLocations, draft.location);
 
-    drafts.push({
-      rowNumber: row.rowNumber,
-      name: row.name,
-      phoneNumber: tidyPhone(row.phone),
-      status,
-      // The CRM requires these; an empty cell becomes an empty string rather
-      // than a placeholder string the user would later have to clean up.
-      project: row.project,
-      location,
-      acquisitionChannel: channel,
-      operationToTake: row.operation,
-      firstContactPerson: row.firstContact,
-      secondContactPerson: row.secondContact,
-      // 56 of the 344 rows have no تاريخ التسجيل. They are imported with the
-      // import time and flagged, because dropping a real lead over a missing
-      // date would lose the client entirely.
-      createdAt: row.registeredAt ?? now,
-      dateAssumed: !row.registeredAt,
-    });
+    drafts.push(draft);
+    note("new");
   }
+
+  // Anything the sheet never mentioned. Archived clients are left out: they are
+  // expected to be absent from a lead sheet, and listing them would bury the
+  // active ones under noise.
+  const dbOnly = baseline.filter((c) => !matchedIds.has(c.id) && !c.archived);
 
   return {
     drafts,
@@ -281,6 +527,8 @@ export function buildImportPlan(
     newLocations,
     statusMapping: [...statusCounts.values()].sort((a, b) => b.count - a.count),
     repairedRows,
+    diff,
+    dbOnly,
   };
 }
 

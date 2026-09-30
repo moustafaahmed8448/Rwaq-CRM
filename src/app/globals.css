@@ -1959,3 +1959,155 @@ input.ltr-num { text-align: left; }
 .col-picker-foot { display: flex; gap: 6px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); }
 .col-picker-foot button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--alu-line); background: transparent; border-radius: 7px; padding: 6px 8px; font-size: 11px; color: var(--ink-soft); cursor: pointer; }
 .col-picker-foot button:hover { border-color: var(--azure-300); color: var(--azure-600); background: rgba(6, 157, 227, .07); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Combobox — search box, pinned Add, keyboard highlight
+   The listbox is now a flex column: the menu itself stops scrolling and only
+   .ms-list does, so the search field stays put while results move under it.
+   ══════════════════════════════════════════════════════════════════════════ */
+.ms-menu { overflow: hidden; }
+.ms-search-row { flex: 0 0 auto; padding: 1px 1px 6px; }
+/* Selector needs two classes: `.field input` is (0,1,1) and would otherwise win
+   over a bare `.ms-search` (0,1,0) and restyle the filter box as a form field. */
+.ms-menu .ms-search {
+  width: 100%; height: 30px; padding: 0 9px; font-size: 12px;
+  color: var(--ink); background: #fff;
+  border: 1px solid var(--alu-line); border-radius: 6px; outline: none;
+}
+.ms-menu .ms-search:focus { border-color: var(--azure); box-shadow: 0 0 0 3px rgba(6, 157, 227, .15); }
+.ms-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+
+.ms-opt-row { cursor: pointer; }
+.ms-opt-row.ms-opt-active { background: rgba(6, 157, 227, .13); }
+.ms-opt-row.ms-opt-on.ms-opt-active { background: var(--azure-100); }
+.ms-opt-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-tick { width: 12px; flex-shrink: 0; display: inline-flex; color: var(--azure-600); }
+
+/* The create row sits under the scrolling list, so it stays reachable however
+   many rows the filter matched. */
+.ms-create-row {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+  width: 100%; border: 0; border-top: 1px solid var(--alu-line);
+  background: transparent; cursor: pointer; text-align: start;
+  padding: 8px 9px; font-size: 12px; color: var(--azure-600); font-weight: 600;
+}
+.ms-create-row:hover { background: rgba(6, 157, 227, .1); }
+.ms-create-row:disabled { opacity: .6; cursor: progress; }
+.ms-create-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* With no search box the listbox itself holds focus and shows no ring until the
+   user actually presses a key. */
+.ms-list:focus { outline: none; }
+.ms-list:focus-visible { outline: 2px solid var(--azure); outline-offset: -2px; }
+
+/* The sort control is label + value, so it must not inherit the 128px trigger floor. */
+.sort-picker .ms-trigger { min-width: 0; max-width: none; width: auto; }
+.status-select.ms-trigger { min-width: 0; max-width: none; }
+
+[data-theme="dark"] .ms-menu .ms-search { background: #18181b; border-color: #2c2c31; color: #e4e4e7; }
+[data-theme="dark"] .ms-create-row { color: var(--azure-300); }
+[data-theme="dark"] .ms-create-row:hover { background: rgba(6, 157, 227, .2); }
+[data-theme="dark"] .ms-opt-row.ms-opt-active { background: rgba(6, 157, 227, .22); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Import diff — per-row review of sheet vs CRM
+   ══════════════════════════════════════════════════════════════════════════ */
+.imp-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 9px; }
+.imp-tab {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--alu-line); background: transparent; cursor: pointer;
+  border-radius: 7px; padding: 5px 9px; font-size: 11.5px; color: var(--ink-soft);
+}
+.imp-tab:hover { border-color: var(--azure-300); color: var(--azure-600); }
+.imp-tab.active { background: var(--azure); border-color: var(--azure); color: #fff; font-weight: 600; }
+.imp-tab.active .imp-tab-n { background: rgba(255, 255, 255, .26); color: #fff; }
+.imp-tab-n {
+  min-width: 18px; text-align: center; font: 10px 'DM Mono', monospace;
+  background: var(--alu-paper); color: var(--ink-faint); border-radius: 9px; padding: 1px 5px;
+}
+
+.imp-diff-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; flex-wrap: wrap; }
+.imp-mini { padding: 3px 8px; font-size: 11px; border-radius: 6px; }
+.imp-diff-hint { font-size: 11px; color: var(--ink-faint); margin-inline-start: auto; }
+
+.imp-rows {
+  max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px;
+  border: 1px solid var(--alu-line); border-radius: 8px; padding: 7px;
+  background: rgba(255, 255, 255, .45);
+}
+.imp-rows-static { max-height: 190px; }
+.imp-row {
+  display: flex; gap: 8px; align-items: flex-start;
+  border: 1px solid transparent; border-radius: 7px; padding: 7px 8px; background: var(--glass-bg);
+}
+.imp-row-new { border-inline-start: 3px solid var(--azure); }
+.imp-row-changed { border-inline-start: 3px solid #d97706; background: rgba(217, 119, 6, .06); }
+.imp-row-identical { opacity: .72; }
+.imp-row-skipped { opacity: .6; }
+.imp-row-db_only { opacity: .7; }
+.imp-row-check { flex-shrink: 0; padding-top: 1px; cursor: pointer; }
+.imp-row-check input { width: 14px; height: 14px; cursor: pointer; accent-color: var(--azure); }
+.imp-row-main { min-width: 0; flex: 1; }
+.imp-row-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.imp-row-name { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.imp-row-phone { font: 11px 'DM Mono', monospace; color: var(--ink-faint); }
+.imp-row-src { font-size: 10px; color: var(--ink-faint); background: var(--alu-paper); border-radius: 4px; padding: 1px 5px; }
+.imp-flag { font-size: 10px; color: #b45309; background: rgba(217, 119, 6, .14); border-radius: 4px; padding: 1px 5px; }
+.imp-row-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--ink-faint); margin-top: 3px; }
+
+.imp-fields { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.imp-fields li {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 11.5px; border-radius: 5px; padding: 3px 5px; background: rgba(255, 255, 255, .55);
+}
+.imp-fields li.kept { background: rgba(107, 114, 128, .1); }
+.imp-field-name { min-width: 96px; color: var(--ink-soft); font-weight: 600; }
+.imp-field-pair { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.imp-field-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
+.imp-field-val.old { color: #b91c1c; text-decoration: line-through; text-decoration-thickness: 1px; }
+.imp-field-val.new { color: #15803d; font-weight: 600; }
+.imp-field-arrow { color: var(--ink-faint); }
+.imp-field-toggle {
+  flex-shrink: 0; border: 1px solid var(--alu-line); background: var(--glass-bg); cursor: pointer;
+  border-radius: 5px; padding: 2px 7px; font-size: 10.5px; color: var(--azure-600);
+}
+.imp-field-toggle:hover:not(:disabled) { background: rgba(6, 157, 227, .14); border-color: var(--azure-300); }
+.imp-field-toggle:disabled { opacity: .45; cursor: not-allowed; }
+.imp-empty { font-size: 11.5px; color: var(--ink-faint); text-align: center; padding: 14px 8px; }
+
+[data-theme="dark"] .imp-row { background: rgba(255, 255, 255, .04); }
+[data-theme="dark"] .imp-rows { background: rgba(0, 0, 0, .18); }
+[data-theme="dark"] .imp-fields li { background: rgba(255, 255, 255, .05); }
+[data-theme="dark"] .imp-field-val.old { color: #fca5a5; }
+[data-theme="dark"] .imp-field-val.new { color: #86efac; }
+[data-theme="dark"] .imp-flag { color: #fcd34d; background: rgba(217, 119, 6, .22); }
+[data-theme="dark"] .imp-row-changed { background: rgba(217, 119, 6, .12); }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Brand — azure for identity
+   .nav-active still carried `#17181c !important`; that important outranked the
+   glass override, so the active nav pill stayed black on an otherwise blue app.
+   .btn-danger is deliberately left red: delete is a danger action, not a
+   positive one, and recolouring it would lose that meaning.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nav-active { background: linear-gradient(135deg, var(--azure) 0%, var(--azure-600) 100%) !important; color: #fff !important; }
+.login-submit { background: linear-gradient(135deg, var(--azure) 0%, var(--azure-600) 100%); color: #fff; }
+.btn-primary { background: linear-gradient(135deg, var(--azure) 0%, var(--azure-600) 100%); color: #fff; }
+.btn-primary:hover { background: linear-gradient(135deg, var(--azure-600) 0%, var(--navy-500) 100%); }
+.btn-sm { background: var(--azure); color: #fff; }
+.btn-sm:hover { background: var(--azure-600); }
+.date-preset-btn.active { background: var(--azure); border-color: var(--azure); color: #fff; }
+
+/* Dropdown accents were still the retired purple, which read as a second brand
+   next to the azure buttons. */
+.ms-trigger:hover { border-color: var(--azure-300); color: var(--ink); }
+.ms-trigger.ms-active { border-color: var(--azure); color: var(--navy-700); background: var(--azure-100); }
+.picker-trigger:hover { border-color: var(--azure-300); }
+.ms-opt-row.ms-opt-on { background: var(--azure-100); }
+.ms-opt-row.ms-opt-on .ms-opt { color: var(--navy-700); }
+.ms-opt-row.ms-opt-on .ms-check { background: var(--azure); border-color: var(--azure); }
+.ms-opt-row.ms-opt-on .ms-opt-count { color: var(--azure-600); }
+.ref-add-row input:focus { border-color: var(--azure); box-shadow: 0 0 0 3px rgba(6, 157, 227, .15); }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--azure); box-shadow: 0 0 0 3px rgba(6, 157, 227, .15); }
+

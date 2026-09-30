@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { type ActivityEntry, type ClientData, type MarketingMetric, makeActivityEntry } from "./types";
 import { normalizeStatus } from "./reporting";
-import { identityKey } from "./import-clients";
+import { identityKey, type BaselineClient } from "./import-clients";
 import { sanitizePrefs, type ColumnPrefs } from "./client-columns";
 
 /**
@@ -450,6 +450,42 @@ export async function existingClientKeys(): Promise<string[]> {
     .filter(Boolean);
 }
 
+/**
+ * Every client, shaped for the sheet importer to diff against.
+ *
+ * `existingClientKeys` answers only "is this person already here?", which is
+ * enough to avoid duplicates but cannot show a before/after. This returns the
+ * stored values so the import screen can show which fields actually disagree.
+ *
+ * Archived clients are included: a sheet row matching one must be recognised as
+ * the same person, or the import would create a duplicate of a record the user
+ * deliberately archived. The planner flags them instead of hiding them.
+ */
+export async function listImportBaseline(): Promise<BaselineClient[]> {
+  const rows = await prisma.client.findMany({
+    select: {
+      id: true, name: true, phoneNumber: true, status: true, project: true,
+      location: true, acquisitionChannel: true, operationToTake: true,
+      firstContactPerson: true, secondContactPerson: true, archived: true,
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    phoneNumber: r.phoneNumber,
+    // Normalised so it compares against an already-mapped sheet status; the
+    // stored value can be a legacy spelling of the same stage.
+    status: normalizeStatus(r.status),
+    project: r.project,
+    location: r.location,
+    acquisitionChannel: r.acquisitionChannel,
+    operationToTake: r.operationToTake,
+    firstContactPerson: r.firstContactPerson,
+    secondContactPerson: r.secondContactPerson,
+    archived: Boolean(r.archived),
+  }));
+}
+
 export type ClientPatch = Partial<NewClientInput> & { archived?: boolean };
 
 export type UpdateClientResult =
@@ -457,10 +493,20 @@ export type UpdateClientResult =
   | { outcome: "not_found" }
   | { outcome: "no_changes" };
 
+export type UpdateClientOptions = {
+  /**
+   * Set false for machine-driven writes. A sheet sync that reassigns the 1st/2nd
+   * contact on fifty clients would otherwise fire fifty notifications at people
+   * who never made the change.
+   */
+  notify?: boolean;
+};
+
 export async function updateClient(
   id: string,
   patch: ClientPatch,
   actor: string,
+  options: UpdateClientOptions = {},
 ): Promise<UpdateClientResult> {
   const existing = await prisma.client.findUnique({ where: { id } });
   if (!existing) return { outcome: "not_found" };
@@ -516,8 +562,9 @@ export async function updateClient(
     data: { ...updates, activityLog: nextLog as unknown as Prisma.InputJsonValue },
   });
 
-  for (const item of notify) {
-    if (!item.newVal) continue;
+  if (options.notify !== false) {
+    for (const item of notify) {
+      if (!item.newVal) continue;
     await createNotification({
       recipient: item.newVal,
       // The contact role rides along in the type so the message can be
@@ -527,7 +574,8 @@ export async function updateClient(
       message: `You were assigned \u201c${existing.name}\u201d`,
       clientId: id,
       clientName: existing.name,
-    });
+      });
+    }
   }
 
   return { outcome: "updated", client: toClientRow(row) };

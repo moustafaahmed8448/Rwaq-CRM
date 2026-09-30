@@ -12,6 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import RefPicker from "@/components/RefPicker";
+import Select from "@/components/Select";
 import { useLang } from "@/lib/i18n";
 import type { MarketingMetric } from "@/lib/types";
 import { num, sar, dateLocale } from "@/lib/format";
@@ -311,10 +312,15 @@ export default function MarketingPage() {
               </div>
               <div className="mkt-filter-field">
                 <label>{t("form.channel")}</label>
-                <select value={channelFilter} onChange={e => setChannelFilter(e.target.value)}>
-                  <option value="ALL">{t("ch.all")}</option>
-                  {allChannels.map(ch => <option key={ch} value={ch}>{channelLabel(t, ch)}</option>)}
-                </select>
+                <Select
+                  value={channelFilter}
+                  /* "ALL" stays selectable so the filter can be widened back
+                     out without reaching for the separate clear button. */
+                  options={["ALL", ...allChannels]}
+                  onChange={setChannelFilter}
+                  render={v => (v === "ALL" ? t("ch.all") : channelLabel(t, v))}
+                  t={t}
+                />
               </div>
               {(fromDate || toDate || channelFilter !== "ALL") && (
                 <button className="btn-ghost mkt-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setChannelFilter("ALL"); }}>{t("dash.clearFilters")}</button>

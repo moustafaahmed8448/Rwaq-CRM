@@ -7,6 +7,10 @@ import { apiErrorMessage } from "@/lib/api-errors";
 import { readLogoFile, useLogo } from "@/lib/logo";
 import { roleLabel } from "@/lib/reporting";
 import AppHeader from "@/components/AppHeader";
+import Select from "@/components/Select";
+
+/** Assignable roles, shared by the add-user and edit-user forms. */
+const ROLES = ["Admin", "Sales", "CRM", "Visitor"];
 
 type User = { name: string; initials: string; role: string; email?: string; avatar?: string };
 type ManagedUser = { username: string; name: string; email?: string; role: string };
@@ -339,12 +343,7 @@ export default function SettingsPage() {
                   <Field label={t("settings.field.email")}><input type="email" value={newUser.email} onChange={e=>setNewUser(u=>({...u,email:e.target.value}))} placeholder={t("settings.emailPh")}/></Field>
                   <Field label={t("settings.field.password")}><input type="password" value={newUser.password} onChange={e=>setNewUser(u=>({...u,password:e.target.value}))} placeholder={t("settings.passwordMinPh")}/></Field>
                   <Field label={t("settings.field.role")}>
-                    <select value={newUser.role} onChange={e=>setNewUser(u=>({...u,role:e.target.value}))} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 10px",fontSize:12,outline:"none"}}>
-                      <option value="Admin">{roleLabel(t, "Admin")}</option>
-                      <option value="Sales">{roleLabel(t, "Sales")}</option>
-                      <option value="CRM">{roleLabel(t, "CRM")}</option>
-                      <option value="Visitor">{roleLabel(t, "Visitor")}</option>
-                    </select>
+                    <Select value={newUser.role} options={ROLES} onChange={v => setNewUser(u => ({ ...u, role: v }))} render={v => roleLabel(t, v)} t={t} />
                   </Field>
                 </div>
                 {userErr && <div className="settings-error" style={{marginTop:8}}>{userErr}</div>}
@@ -362,12 +361,7 @@ export default function SettingsPage() {
                       <Field label={t("settings.field.username")}><input value={editForm.username} onChange={e=>setEditForm(f=>({...f,username:e.target.value.toLowerCase()}))}/></Field>
                       <Field label={t("settings.field.email")}><input type="email" value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} placeholder={t("settings.emailPh")}/></Field>
                       <Field label={t("settings.field.role")}>
-                        <select value={editForm.role} onChange={e=>setEditForm(f=>({...f,role:e.target.value}))} style={{height:36,border:"1px solid #dfe2e6",borderRadius:6,padding:"0 10px",fontSize:12,outline:"none"}}>
-                          <option value="Admin">{roleLabel(t, "Admin")}</option>
-                          <option value="Sales">{roleLabel(t, "Sales")}</option>
-                          <option value="CRM">{roleLabel(t, "CRM")}</option>
-                          <option value="Visitor">{roleLabel(t, "Visitor")}</option>
-                        </select>
+                        <Select value={editForm.role} options={ROLES} onChange={v => setEditForm(f => ({ ...f, role: v }))} render={v => roleLabel(t, v)} t={t} />
                       </Field>
                     </div>
                     {userErr && <div className="settings-error" style={{marginTop:8}}>{userErr}</div>}
