@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ResponsiveContainer } from "recharts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight, ChevronDown, Download, Grid2X2,
   LayoutDashboard, Pencil, Plus, Search, Trash2, UsersRound, X as XIcon,
@@ -31,6 +30,12 @@ import { useLogo } from "@/lib/logo";
 import StatusPill, { StatusDot } from "@/components/StatusPill";
 import RefPicker from "@/components/RefPicker";
 import ImportClientsModal from "@/components/ImportClientsModal";
+import DashboardCharts, { type ChartView, type TrendPoint } from "@/components/DashboardCharts";
+import ColumnPicker from "@/components/ColumnPicker";
+import {
+  CLIENT_COLUMNS, resolveColumns, gridTemplate,
+  type ColumnKey, type ResolvedColumn,
+} from "@/lib/client-columns";
 
 type Client = {
   id: string; name: string; phoneNumber: string;
@@ -52,7 +57,7 @@ type SpRow = { name: string; won: number; lost: number; waiting: number; other: 
 type SortField = "recent" | "oldest" | "registered" | "registeredOldest";
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const CH_COLORS: Record<string, string> = { FACEBOOK: "#4f46e5", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed", GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2" };
+const CH_COLORS: Record<string, string> = { FACEBOOK: "#1877f2", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed", GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2" };
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
 
 
@@ -202,6 +207,11 @@ export default function Home() {
   // Per-salesperson outcome report, split by contact role. Server-computed and
   // period-scoped, so it agrees with the KPI cards above it.
   const [spReports, setSpReports] = useState<{ first: SpRow[]; second: SpRow[] }>({ first: [], second: [] });
+  // Outcome-split time series for the dashboard chart, from the same response.
+  const [timeline, setTimeline] = useState<TrendPoint[]>([]);
+  // Which chart the dashboard shows. Lifted here so the choice survives the
+  // dashboard remounting when the period changes.
+  const [chartView, setChartView] = useState<ChartView>("trend");
   const [users, setUsers] = useState<{ username: string; name: string; role: string }[]>([]);
   const [adding, setAdding] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState("");
@@ -217,6 +227,52 @@ export default function Home() {
   // Table order. Defaults to most-recently-updated, which is the order the API
   // already returns, so the initial view is unchanged.
   const [sortBy, setSortBy] = useState<SortField>("recent");
+  // Clients-table layout: column widths + visibility, saved to the user's own
+  // row (see PATCH /api/auth/me). Defaults come from the registry until the
+  // signed-in user's layout arrives.
+  const [columns, setColumns] = useState<ResolvedColumn[]>(() => resolveColumns(null));
+  const [savingLayout, setSavingLayout] = useState(false);
+  const rtl = typeof document !== "undefined" && document.documentElement.dir === "rtl";
+
+  /**
+   * Persists the layout. Debounced through the caller's `savingLayout` flag so a
+   * drag (which fires on every pointer move) results in one request at the end,
+   * not one per pixel.
+   */
+  const commitColumns = useCallback((next: ResolvedColumn[]) => {
+    setColumns(next);
+    setSavingLayout(true);
+  }, []);
+
+  useEffect(() => {
+    if (!savingLayout) return;
+    const id = setTimeout(async () => {
+      try {
+        await fetch("/api/auth/me", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            // Sparse: only the columns that differ from the defaults, so a column
+            // added later still picks up its own default.
+            clientColumns: Object.fromEntries(
+              columns
+                .filter((c) => {
+                  const def = CLIENT_COLUMNS.find((d) => d.key === c.key)!;
+                  return c.w !== def.w || c.hidden;
+                })
+                .map((c) => [c.key, { w: c.w, hidden: c.hidden }]),
+            ),
+          }),
+        });
+      } catch {
+        // A failed save is not worth interrupting the user over; the layout still
+        // applies for this session.
+      } finally {
+        setSavingLayout(false);
+      }
+    }, 400);
+    return () => clearTimeout(id);
+  }, [columns, savingLayout]);
 
   /**
    * Re-reads the client list and the reference data after an import.
@@ -253,7 +309,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetch("/api/auth/me").then(async r => { if (!r.ok) { router.replace("/login"); return null; } return r.json(); }).then(d => d?.user && setUser(d.user));
+    fetch("/api/auth/me").then(async r => { if (!r.ok) { router.replace("/login"); return null; } return r.json(); }).then(d => {
+      if (!d?.user) return;
+      setUser(d.user);
+      // Adopt the signed-in user's saved column layout. The demo session has no
+      // row, so it keeps the registry defaults.
+      if (d.user.clientColumns) setColumns(resolveColumns(d.user.clientColumns));
+    });
   }, [router]);
 
   useEffect(() => {
@@ -321,6 +383,7 @@ export default function Home() {
           first: d.firstSalespersonReport ?? [],
           second: d.secondSalespersonReport ?? [],
         });
+        setTimeline(d.timeline ?? []);
       })
       .catch(() => undefined)
       .finally(() => setPeriodLoading(false));
@@ -710,6 +773,9 @@ export default function Home() {
             clients={filteredClients}
             salespeople={salespeople}
             spReports={spReports}
+            timeline={timeline}
+            chartView={chartView}
+            onChartViewChange={setChartView}
             updateStatus={updateStatus} updateClientField={updateClientField}
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             onAddStatus={addStatus} onAddChannel={addChannel} onAddLocation={addLocation}
@@ -733,6 +799,7 @@ export default function Home() {
             updateStatus={updateStatus} updateClientField={updateClientField}
             firstContacts={firstContacts} secondContacts={secondContacts}
             sortBy={sortBy} setSortBy={setSortBy}
+            columns={columns} onColumnsChange={commitColumns} rtl={rtl}
             onAssigned={refreshNotifications}
             selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
             onOpenEdit={openEdit} onOpenCreate={openCreate} onOpenImport={() => setImporting(true)} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
@@ -1056,7 +1123,7 @@ function MultiSelect({ label, options, selected, onChange, render, onRemove, rem
   );
 }
 
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } }; onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } }; onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
 
@@ -1166,7 +1233,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           plus spend, reach and CPA. `other` is what makes the outcome cards sum
           to the period total instead of quietly under-reporting. */}
       <section className="kpi-row kpi-row-7">
-        <KpiCard label={t("kpi.totalSpend")} value={sar(totalSpend)} sub={t("kpi.weeklyInvestment")} accent="#4f46e5"/>
+        <KpiCard label={t("kpi.totalSpend")} value={sar(totalSpend)} sub={t("kpi.weeklyInvestment")} accent="#069de3"/>
         <KpiCard label={t("kpi.totalReach")} value={MONEY.format(totalReach)} sub={t("kpi.acrossChannels")} accent="#0891b2"/>
         <KpiCard label={t("kpi.won")} value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% ${t("kpi.winRate")}`} accent="#22c55e"/>
         <KpiCard label={t("stage.lost")} value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% ${t("kpi.ofTotal")}`} accent="#ef4444"/>
@@ -1174,6 +1241,24 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         <KpiCard label={t("kpi.otherStatus")} value={String(unclassified)} sub={t("kpi.otherStatusSub")} accent="#94a3b8"/>
         <KpiCard label={t("kpi.avgCpa")} value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"} sub={won>0?t("kpi.customersWon",{n:won}):t("kpi.noWins")} accent="#7c3aed"/>
       </section>
+
+      {/* Charts. Full width directly under the cards, so the trend has room to
+          breathe and the y-axis is not squeezed into a half-column. */}
+      <DashboardCharts
+        view={chartView}
+        onViewChange={onChartViewChange}
+        timeline={timeline}
+        channels={metrics.map((m) => ({
+          channel: m.channel,
+          platform: m.platform,
+          totalClients: m.totalClients,
+          won: m.won,
+          lost: m.lost,
+          spend: m.spend,
+        }))}
+        sales={spRows}
+        t={t}
+      />
 
       {/* Client status — above Sales performance and Channel ROI */}
       <section className="panel stage-panel">
@@ -1298,7 +1383,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           {topLocations.map(([loc, count], i) => (
             <div className="loc-bar-row" key={loc}>
               <span className="loc-rank">#{i+1}</span>
-              <div className="loc-bar-track"><div className="loc-bar-fill" style={{width: `${Math.round(count/clients.length*100)}%`, background: ["#4f46e5","#0891b2","#f59e0b","#22c55e","#7c3aed"][i]}}/></div>
+              <div className="loc-bar-track"><div className="loc-bar-fill" style={{width: `${Math.round(count/clients.length*100)}%`, background: ["#069de3","#0891b2","#f59e0b","#22c55e","#7c3aed"][i]}}/></div>
               <span className="loc-name">{loc}</span>
               <span className="loc-count">{count}</span>
             </div>
@@ -1357,11 +1442,11 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
 function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub: string; accent: string }) {
   return (<div className="kpi-card" style={{borderTopColor:accent}}><div className="kpi-label"><span>{label}</span><span className="kpi-dot" style={{background:accent}}/></div><div className="kpi-value">{value}</div><div className="kpi-sub">{sub}</div></div>);}
 
-function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, firstContacts, secondContacts, sortBy, setSortBy, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
+function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; columns: ResolvedColumn[]; onColumnsChange: (c: ResolvedColumn[]) => void; rtl: boolean; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   return (
     <div className="page">
       <div className="page-header">
@@ -1377,63 +1462,227 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
           </div>
           {canEdit && <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>{t("clients.newClient")}</button>}
           {isAdmin && <button className="btn-outline" onClick={onOpenImport}><Upload size={15}/>{t("importer.btn")}</button>}
+          <ColumnPicker columns={columns} onChange={onColumnsChange} t={t} />
           <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>{t("clients.exportSelected",{n:bulkCount})}</button>
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>{t("clients.exportAll")}</button>
         </div>
       </div>
       <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} firstContacts={firstContacts} secondContacts={secondContacts} sortBy={sortBy} setSortBy={setSortBy} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveStatus={refData.onRemoveStatus} removableStatuses={refData.removableStatuses} statusUsage={refData.statusUsage} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
       <div className="result-note">{t("clients.showing",{n:clients.length,total:allClients.length})} · {t("clients.selected",{n:selectedIds.size})}</div>
-      {mode==="table"? <ClientTable clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
+      {mode==="table"? <ClientTable clients={clients} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} columns={columns} onColumnsChange={onColumnsChange} rtl={rtl} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} columns={columns} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
     </div>
   );
 }
 
-function ClientTable({ clients, updateStatus, updateClientField, onAssigned, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; canEdit?: boolean; onArchive?: (id: string) => void | Promise<void>; tableRef?: React.RefObject<HTMLDivElement> | null; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
-  const allSelected = clients.length>0&&clients.every(c=>selectedIds.has(c.id));
-  // Date locale must follow the same `lang` state as the translated text.
-  // resolveLang() read localStorage during render, which the server cannot see,
-  // so the server and client would have formatted these dates differently.
+/**
+ * Renders one table cell for a column key.
+ *
+ * A lookup rather than a switch inside the row so the header and body can never
+ * drift out of column order — the grid assigns cells positionally, so one extra
+ * or missing cell shifts every cell after it.
+ */
+function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdit, onOpenDelete, onArchive }: {
+  col: ResolvedColumn;
+  c: Client;
+  t: TFn;
+  lang: string;
+  onOpenDetail: (c: Client) => void;
+  canEdit?: boolean;
+  isAdmin?: boolean;
+  onOpenEdit: (c: Client) => void;
+  onOpenDelete: (ids: string[], names: string[]) => void;
+  onArchive?: (id: string) => void | Promise<void>;
+}) {
+  switch (col.key) {
+    case "id":
+      return <span className="id-cell" title={t("th.id")}>#{c.id}</span>;
+    case "client":
+      return (
+        <span className="person-cell" onClick={() => onOpenDetail(c)}>
+          <b>{c.name}</b>
+          <small><span className="ltr-num">{c.phoneNumber}</span></small>
+          {c.notes && <span className="notes-indicator"><MessageSquare size={10} /></span>}
+        </span>
+      );
+    case "status":
+      return <StatusPill status={c.status} t={t} />;
+    case "channel":
+      return <span className="chan-tag"><i className="dot" style={{ background: CH_COLORS[c.acquisitionChannel] }} />{channelLabel(t, c.acquisitionChannel)}</span>;
+    case "project":
+      return <span>{c.project}</span>;
+    case "location":
+      return <span>{c.location}</span>;
+    case "registeredAt":
+      return <span className="muted">{c.createdAt ? new Date(c.createdAt).toLocaleDateString(dateLocale(lang)) : "—"}</span>;
+    case "operation":
+      return <span className="op-text">{c.operationToTake}</span>;
+    case "firstContact":
+      return <span className="muted">{c.firstContactPerson || "—"}</span>;
+    case "secondContact":
+      return <span className="muted">{c.secondContactPerson || "—"}</span>;
+    case "lastUpdateDate":
+      return <span className="muted">{c.lastUpdateDate ? new Date(c.lastUpdateDate).toLocaleDateString(dateLocale(lang)) : "—"}</span>;
+    case "actions":
+      return (
+        <span className="actions-cell no-detail">
+          {canEdit && <button className="icon-btn" title={t("common.edit")} onClick={e => { e.stopPropagation(); onOpenEdit(c); }}><Pencil size={14} /></button>}
+          {isAdmin && <><button className="icon-btn danger" title={t("common.delete")} onClick={e => { e.stopPropagation(); onOpenDelete([c.id], [c.name]); }}><Trash2 size={14} /></button>
+            <button className="icon-btn" title={t("nav.archived")} onClick={e => { e.stopPropagation(); onArchive && onArchive(c.id); }}><Archive size={14} /></button></>}
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
+function ClientTable({ clients, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, columns, onColumnsChange, rtl, t }: {
+  clients: Client[];
+  selectedIds: Set<string>;
+  toggleSelect: (id: string) => void;
+  toggleSelectAll: () => void;
+  onOpenEdit: (c: Client) => void;
+  onOpenDelete: (ids: string[], names: string[]) => void;
+  onOpenDetail: (c: Client) => void;
+  isAdmin?: boolean;
+  canEdit?: boolean;
+  onArchive?: (id: string) => void | Promise<void>;
+  tableRef?: React.RefObject<HTMLDivElement> | null;
+  columns: ResolvedColumn[];
+  onColumnsChange: (c: ResolvedColumn[]) => void;
+  rtl: boolean;
+  t: TFn;
+}) {
   const { lang } = useLang();
+  const allSelected = clients.length > 0 && clients.every(c => selectedIds.has(c.id));
+
+  // Width changes preview live during the drag and commit once on release —
+  // otherwise a drag would fire a save per pixel.
+  const [draft, setDraft] = useState<{ key: ColumnKey; w: number } | null>(null);
+  const drag = useRef<{ key: ColumnKey; startX: number; startW: number } | null>(null);
+  // Suppress text selection while dragging, or the drag selects the row text.
+  useEffect(() => {
+    if (!draft) return;
+    const prev = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    return () => { document.body.style.userSelect = prev; };
+  }, [draft]);
+
+  const startResize = (e: React.PointerEvent, col: ResolvedColumn) => {
+    if (col.locked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { key: col.key, startX: e.clientX, startW: col.w };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    setDraft({ key: col.key, w: col.w });
+  };
+
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    // In RTL the grid flows right-to-left, so moving the pointer RIGHT NARROWS
+    // the column. Without this inversion every drag runs backwards for Arabic
+    // users — the app's default language.
+    const delta = rtl ? d.startX - e.clientX : e.clientX - d.startX;
+    const col = columns.find(c => c.key === d.key);
+    if (!col) return;
+    setDraft({ key: d.key, w: Math.min(col.max, Math.max(col.min, d.startW + delta)) });
+  };
+
+  const endResize = () => {
+    const done = draft;
+    drag.current = null;
+    setDraft(null);
+    if (!done) return;
+    onColumnsChange(columns.map(c => (c.key === done.key ? { ...c, w: done.w } : c)));
+  };
+
+  /** Double-click a divider to restore that column's default width. */
+  const resetColumn = (col: ResolvedColumn) => {
+    const def = CLIENT_COLUMNS.find(d => d.key === col.key);
+    if (!def || col.locked) return;
+    onColumnsChange(columns.map(c => (c.key === col.key ? { ...c, w: def.w } : c)));
+  };
+
+  const onResizeKey = (e: React.KeyboardEvent, col: ResolvedColumn) => {
+    if (col.locked) return;
+    const step = e.shiftKey ? 24 : 8;
+    let w: number | null = null;
+    // Arrow keys are mirrored in RTL, same as the drag.
+    if (e.key === "ArrowRight") w = col.w + (rtl ? -step : step);
+    else if (e.key === "ArrowLeft") w = col.w + (rtl ? step : -step);
+    if (w === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onColumnsChange(columns.map(c => (c.key === col.key ? { ...c, w: Math.min(col.max, Math.max(col.min, w)) } : c)));
+  };
+
+  // The live drag width, so the header and every body row move together.
+  const layout = draft ? columns.map(c => (c.key === draft.key ? { ...c, w: draft.w } : c)) : columns;
+  const shown = layout.filter(col => !col.hidden);
+
   return (
     <div className="table-scroll-wrapper">
-      <div className="scroll-indicator-left hidden" ref={(el) => { if(el) { const t2 = tableRef?.current; if(t2){ const check = ()=>{ el.classList.toggle("hidden", t2.scrollLeft <= 0); }; check(); t2.addEventListener("scroll",check,{passive:true}); } } }} />
+      <div className="scroll-indicator-left hidden" ref={(el) => { if (el) { const t2 = tableRef?.current; if (t2) { const check = () => { el.classList.toggle("hidden", t2.scrollLeft <= 0); }; check(); t2.addEventListener("scroll", check, { passive: true }); } } }} />
       <div className="scroll-indicator-right hidden" />
-      <div className="client-table" ref={tableRef}>
+      <div
+        className="client-table"
+        ref={tableRef}
+        style={{ ["--ct-cols" as string]: gridTemplate(layout) }}
+      >
         <div className="client-row client-head">
-          <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="cb"/>
-          <span className="id-cell">{t("th.id")}</span><span>{t("th.client")}</span><span>{t("th.status")}</span><span>{t("th.source")}</span><span>{t("th.project")}</span><span>{t("th.location")}</span><span>{t("th.date")}</span><span>{t("form.operation")}</span><span>{t("th.first")}</span><span>{t("th.second")}</span><span>{t("detail.lastUpdate")}</span><span/></div>
-        {clients.map(c=>(
-          <div className={`client-row client-row-clickable ${selectedIds.has(c.id)?"selected":""}`} key={c.id} onClick={e=>{(e.target as HTMLElement).tagName!=="INPUT"&&(e.target as HTMLElement).tagName!=="SELECT"&&! (e.target as HTMLElement).closest(".no-detail")&&onOpenDetail(c)}}>
-            <input type="checkbox" checked={selectedIds.has(c.id)} onChange={()=>toggleSelect(c.id)} className="cb" onClick={e=>e.stopPropagation()}/>
-            <span className="id-cell" title={t("th.id")}>#{c.id}</span>
-            <span className="person-cell" onClick={()=>onOpenDetail(c)}><b>{c.name}</b><small><span className="ltr-num">{c.phoneNumber}</span></small>{c.notes&&<span className="notes-indicator"><MessageSquare size={10}/></span>}</span>
-            <StatusPill status={c.status} t={t} />
-            <span className="chan-tag"><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
-            <span>{c.project}</span><span>{c.location}</span><span className="muted">{c.createdAt?new Date(c.createdAt).toLocaleDateString(dateLocale(lang)):"—"}</span>
-            <span className="op-text">{c.operationToTake}</span>
-            <span className="muted">{c.firstContactPerson || "—"}</span>
-            <span className="muted">{c.secondContactPerson || "—"}</span>
-            <span className="muted">{c.lastUpdateDate?new Date(c.lastUpdateDate).toLocaleDateString(dateLocale(lang)):"—"}</span>
-            <span className="actions-cell no-detail">
-              {canEdit && <><button className="icon-btn" title={t("common.edit")} onClick={e=>{e.stopPropagation();onOpenEdit(c);}}><Pencil size={14}/></button></>}
-              {isAdmin && <><button className="icon-btn danger" title={t("common.delete")} onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={14}/></button>
-                <button className="icon-btn" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={14}/></button></>}
+          {shown.map(col => (
+            <span key={col.key} className="col-head-cell">
+              {col.key === "select"
+                ? <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="cb" />
+                : col.labelKey ? t(col.labelKey) : null}
+              {!col.locked && (
+                <span
+                  className="col-resizer"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={t("cols.resize", { name: col.labelKey ? t(col.labelKey) : col.key })}
+                  aria-valuenow={col.w}
+                  aria-valuemin={col.min}
+                  aria-valuemax={col.max}
+                  tabIndex={0}
+                  title={t("cols.resizeHint")}
+                  onPointerDown={e => startResize(e, col)}
+                  onPointerMove={onMove}
+                  onPointerUp={endResize}
+                  onPointerCancel={endResize}
+                  onDoubleClick={e => { e.stopPropagation(); resetColumn(col); }}
+                  onKeyDown={e => onResizeKey(e, col)}
+                />
+              )}
             </span>
+          ))}
+        </div>
+        {clients.map(c => (
+          <div className={`client-row client-row-clickable ${selectedIds.has(c.id) ? "selected" : ""}`} key={c.id} onClick={e => { (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "SELECT" && !(e.target as HTMLElement).closest(".no-detail") && onOpenDetail(c) }}>
+            {shown.map(col => (
+              col.key === "select"
+                ? <input key={col.key} type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="cb" onClick={e => e.stopPropagation()} />
+                : <ClientCell key={col.key} col={col} c={c} t={t} lang={lang} onOpenDetail={onOpenDetail} canEdit={canEdit} isAdmin={isAdmin} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onArchive={onArchive} />
+            ))}
           </div>
         ))}
-        {clients.length===0&&<div className="empty-state">{t("clients.noResults")}</div>}
+        {clients.length === 0 && <div className="empty-state">{t("clients.noResults")}</div>}
       </div>
     </div>
   );
 }
 
-function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; canEdit?: boolean; onArchive?: (id: string) => void | Promise<void>; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, columns, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; canEdit?: boolean; onArchive?: (id: string) => void | Promise<void>; columns: ResolvedColumn[]; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   const [draggedId, setDraggedId] = useState<string|null>(null);
   const [dropTarget, setDropTarget] = useState<string|null>(null);
-  const columns: string[] = [...new Set([...(allStatuses ?? ["WAITING","WON","LOST"]), ...clients.map(c => c.status)])];
+  // The same saved layout drives the cards, so hiding a field in the table hides
+  // it on every card too. Widths are ignored here: cards are fixed-width in a
+  // 3-column board, so there is nothing for a width to act on.
+  const show = (key: ColumnKey) => columns.find(c => c.key === key)?.hidden === false;
+  const statusColumns: string[] = [...new Set([...(allStatuses ?? ["WAITING","WON","LOST"]), ...clients.map(c => c.status)])];
   return (
     <div className="kanban-board">
-      {columns.map(col=>(
+      {statusColumns.map(col=>(
         <section key={col} className={`kanban-col ${dropTarget===col?"drop-target":""}`}
           onDragEnter={canEdit?()=>setDropTarget(col):undefined} onDragOver={canEdit?(e=>{e.preventDefault();setDropTarget(col);}):undefined}
           onDragLeave={canEdit?()=>setDropTarget(null):undefined} onDrop={canEdit?()=>{if(draggedId){updateStatus(draggedId,col);setDraggedId(null);setDropTarget(null);}}:undefined}>
@@ -1447,18 +1696,20 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
                 {isAdmin && <><button className="icon-btn-sm danger" title={t("common.delete")} onClick={e=>{e.stopPropagation();onOpenDelete([c.id],[c.name]);}}><Trash2 size={12}/></button>
                   <button className="icon-btn-sm" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={12}/></button></>}
               </span></div>
-              <div className="card-ch">
+              {show("channel") && <div className="card-ch">
                 <i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>
                 <span>{channelLabel(t, c.acquisitionChannel)}</span>
-              </div>
-              <p className="card-project">{c.project}</p>
-              <p className="card-location">{c.location}</p>
+              </div>}
+              {show("project") && <p className="card-project">{c.project}</p>}
+              {show("location") && <p className="card-location">{c.location}</p>}
               {c.notes&&<p className="card-notes"><MessageSquare size={10}/>{c.notes.slice(0,40)}{c.notes.length>40?"...":""}</p>}
-              <strong className="card-op">{c.operationToTake}</strong>
-              <footer className="card-contacts">
-                <span className="muted">{t("card.first")}: {c.firstContactPerson || "—"}</span>
-                <span className="muted">{t("card.second")}: {c.secondContactPerson || "—"}</span>
-              </footer>
+              {show("operation") && <strong className="card-op">{c.operationToTake}</strong>}
+              {(show("firstContact") || show("secondContact")) && (
+                <footer className="card-contacts">
+                  {show("firstContact") && <span className="muted">{t("card.first")}: {c.firstContactPerson || "—"}</span>}
+                  {show("secondContact") && <span className="muted">{t("card.second")}: {c.secondContactPerson || "—"}</span>}
+                </footer>
+              )}
               <div className="card-status-wrap">
                 <StatusPill status={c.status} t={t} />
               </div>

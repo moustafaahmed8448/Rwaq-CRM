@@ -23,7 +23,7 @@ import "./marketing.css";
 type User = { name: string; initials: string; role: string; email?: string };
 
 const CH_COLORS: Record<string, string> = {
-  FACEBOOK: "#4f46e5", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed",
+  FACEBOOK: "#1877f2", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed",
   GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2",
 };
 const DEFAULT_CHANNELS = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"];
@@ -362,12 +362,12 @@ export default function MarketingPage() {
                 <div className="mkt-chart-heading"><div><span className="mkt-eyebrow">{t("dash.trendEyebrow")}</span><h3>{t("dash.trendTitle")}</h3></div><span className="mkt-chart-note">{t("dash.trendNote")}</span></div>
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={monthlyData.slice(0, 6).reverse()}>
-                    <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#9ca3af" }} />
-                    <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} />
+                    <CartesianGrid stroke="rgba(19,34,60,.10)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#7e8fa0" }} />
+                    <YAxis tick={{ fontSize: 10, fill: "#7e8fa0" }} />
                     <Tooltip formatter={(v) => sar(v as number)} />
-                    <Area type="monotone" dataKey="spend" stroke="#4f46e5" fill="url(#gradSpend)" strokeWidth={2} />
-                    <defs><linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#4f46e5" stopOpacity={.2} /><stop offset="95%" stopColor="#4f46e5" stopOpacity={0} /></linearGradient></defs>
+                    <Area type="monotone" dataKey="spend" stroke="#069de3" fill="url(#gradSpend)" strokeWidth={2} />
+                    <defs><linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#069de3" stopOpacity={.26} /><stop offset="95%" stopColor="#069de3" stopOpacity={0} /></linearGradient></defs>
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

@@ -78,6 +78,12 @@ model AppUser {
   role      String   @default("Sales")
   hash      String
   language  String   @default("ar")
+  /**
+   * Per-user clients-table layout: column widths and visibility.
+   * Sparse JSON — absent keys fall back to CLIENT_COLUMN_DEFAULTS, so a column
+   * added later picks up its default instead of being stranded by a stale entry.
+   */
+  clientColumns Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

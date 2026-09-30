@@ -154,6 +154,62 @@ export async function GET(request: NextRequest) {
     const firstSalespersonReport = roleReport((c) => c.firstContactPerson);
     const secondSalespersonReport = roleReport((c) => c.secondContactPerson);
 
+    /**
+     * Outcome-split timeline for the dashboard trend chart.
+     *
+     * Buckets the period's clients by WEEK and splits each bucket with the same
+     * `classifyStatus` the KPI cards use, so the chart and the cards can never
+     * disagree. Local-day keys, not toISOString(): the same UTC trap documented
+     * on `dayKey` in reporting.ts would push every client a day to the left for
+     * anyone east of Greenwich.
+     */
+    const timeline = (() => {
+      // Anchor the series to the DATA, not to the period start. "All time"
+      // resolves to the 1970 epoch, which produced a chart that opened with two
+      // decades of empty buckets before the first real client.
+      const stamps = periodClients
+        .map((c) => new Date(c.createdAt))
+        .filter((d) => !Number.isNaN(d.getTime()))
+        .map((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime());
+      if (stamps.length === 0) return [];
+
+      const first = new Date(Math.min(...stamps));
+      const last = new Date(Math.max(...stamps));
+      const days = Math.max(1, Math.round((last.getTime() - first.getTime()) / 86400000) + 1);
+      // Long ranges get many empty buckets; cap the count so the chart stays
+      // readable and the payload small.
+      const stepDays = Math.max(1, Math.ceil(days / 26));
+      const buckets: Array<{ key: string; total: number; won: number; lost: number; waiting: number; other: number }> = [];
+      const index = new Map<string, (typeof buckets)[number]>();
+      for (let offset = 0; offset < days; offset += stepDays) {
+        const bucketStart = new Date(first);
+        bucketStart.setDate(bucketStart.getDate() + offset);
+        const key = `${bucketStart.getFullYear()}-${String(bucketStart.getMonth() + 1).padStart(2, "0")}-${String(bucketStart.getDate()).padStart(2, "0")}`;
+        const row = { key, total: 0, won: 0, lost: 0, waiting: 0, other: 0 };
+        buckets.push(row);
+        index.set(key, row);
+      }
+      for (const client of periodClients) {
+        const d = new Date(client.createdAt);
+        if (Number.isNaN(d.getTime())) continue;
+        const offset = Math.floor((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - first.getTime()) / 86400000);
+        const snapped = offset - (offset % stepDays);
+        const bucketStart = new Date(first);
+        bucketStart.setDate(bucketStart.getDate() + snapped);
+        const key = `${bucketStart.getFullYear()}-${String(bucketStart.getMonth() + 1).padStart(2, "0")}-${String(bucketStart.getDate()).padStart(2, "0")}`;
+        const row = index.get(key);
+        if (!row) continue;
+        row.total += 1;
+        switch (classifyStatus(client.status)) {
+          case "won": row.won += 1; break;
+          case "lost": row.lost += 1; break;
+          case "progress": row.waiting += 1; break;
+          default: row.other += 1;
+        }
+      }
+      return buckets;
+    })();
+
     return NextResponse.json({
       source: "postgres",
       period: { kind: period.kind, from: period.fromStr, to: period.toStr },
@@ -163,6 +219,7 @@ export async function GET(request: NextRequest) {
       salespersonLeaderboard,
       firstSalespersonReport,
       secondSalespersonReport,
+      timeline,
       totalClients: periodClients.length,
       totals,
       campaignNames,

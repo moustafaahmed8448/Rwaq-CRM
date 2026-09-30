@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { type ActivityEntry, type ClientData, type MarketingMetric, makeActivityEntry } from "./types";
 import { normalizeStatus } from "./reporting";
 import { identityKey } from "./import-clients";
+import { sanitizePrefs, type ColumnPrefs } from "./client-columns";
 
 /**
  * Postgres is the single source of truth. Every read and write in the app goes
@@ -758,9 +759,23 @@ export type UserRecord = {
   role: string;
   hash: string;
   language: string;
+  /**
+   * Saved clients-table layout. Sparse — see resolveColumns(), which fills the
+   * gaps from the registry defaults.
+   */
+  clientColumns: ColumnPrefs;
 };
 
-type UserDb = Prisma.AppUserGetPayload<Record<string, never>> & { language?: unknown };
+type UserDb = Prisma.AppUserGetPayload<Record<string, never>> & {
+  language?: unknown;
+  clientColumns?: unknown;
+};
+
+/** Reads the stored JSON layout, tolerating NULL and any junk shape. */
+const toColumnPrefs = (raw: unknown): ColumnPrefs => {
+  if (!raw || typeof raw !== "object") return {};
+  return sanitizePrefs(raw);
+};
 
 const toUserRecord = (row: UserDb): UserRecord => ({
   username: row.username,
@@ -769,6 +784,7 @@ const toUserRecord = (row: UserDb): UserRecord => ({
   role: row.role,
   hash: row.hash,
   language: typeof row.language === "string" && row.language === "en" ? "en" : "ar",
+  clientColumns: toColumnPrefs(row.clientColumns),
 });
 
 function isMissingLanguageColumn(error: unknown): boolean {
@@ -820,7 +836,7 @@ export async function countUsers(): Promise<number> {
 }
 
 export async function createUser(
-  input: Omit<UserRecord, "language"> & { language?: string },
+  input: Omit<UserRecord, "language" | "clientColumns"> & { language?: string; clientColumns?: ColumnPrefs },
 ): Promise<UserRecord> {
   try {
     const row = await prisma.appUser.create({
@@ -831,6 +847,7 @@ export async function createUser(
         role: input.role,
         hash: input.hash,
         language: input.language ?? "ar",
+        clientColumns: (input.clientColumns ?? {}) as Prisma.InputJsonValue,
       },
     });
     return toUserRecord(row);
@@ -845,10 +862,26 @@ export async function createUser(
         role: input.role,
         hash: input.hash,
         language: input.language ?? "ar",
+        clientColumns: (input.clientColumns ?? {}) as Prisma.InputJsonValue,
       },
     });
     return toUserRecord(row);
   }
+}
+
+export async function saveUserColumnPrefs(
+  username: string,
+  prefs: unknown,
+): Promise<ColumnPrefs> {
+  // Sanitize before persisting: unknown keys are dropped and widths clamped to
+  // the registry, so a hand-crafted payload cannot store junk the UI would then
+  // have to defend against on every render.
+  const clean = sanitizePrefs(prefs);
+  await prisma.appUser.update({
+    where: { username: username.toLowerCase() },
+    data: { clientColumns: clean as Prisma.InputJsonValue },
+  });
+  return clean;
 }
 
 export async function updateUser(

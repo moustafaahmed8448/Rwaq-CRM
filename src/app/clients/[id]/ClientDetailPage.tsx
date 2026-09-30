@@ -237,7 +237,7 @@ function ActivityItem({ entry, t, lang }: { entry: ActivityEntry; t: (key: strin
     CREATED: { icon: <Plus size={13} />, color: "#22c55e" },
     DELETED: { icon: <Trash2 size={13} />, color: "#ef4444" },
     STATUS_CHANGE: { icon: <TrendingUp size={13} />, color: "#f59e0b" },
-    FIELD_EDIT: { icon: <Edit3 size={13} />, color: "#4f46e5" },
+    FIELD_EDIT: { icon: <Edit3 size={13} />, color: "#069de3" },
     NOTE_ADD: { icon: <MessageSquare size={13} />, color: "#0891b2" },
     NOTE_EDIT: { icon: <MessageSquare size={13} />, color: "#0891b2" },
   };

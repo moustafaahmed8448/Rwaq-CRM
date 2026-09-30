@@ -1,21 +1,23 @@
-/* Scoped Marketing redesign. */
-.marketing-shell { background: radial-gradient(ellipse at 5% 0%, #d9f2eb, transparent 42%), radial-gradient(ellipse at 100% 28%, #e7e8ff, transparent 48%), #f4f7fa; min-height: 100vh; }
+/* Scoped Marketing redesign.
+   Retinted from its own teal/green identity to the shared azure + navy glass
+   system, so the marketing tab reads as the same product as the CRM. */
+.marketing-shell { background: transparent; min-height: 100vh; position: relative; }
 .marketing-shell > .content { max-width: 1440px; margin: 0 auto; padding: 30px 32px 56px; width: 100%; min-width: 0; box-sizing: border-box; }
-.marketing-shell .mkt-hero { padding: 34px; border-radius: 24px; background: linear-gradient(115deg, #102d38, #164f55 65%, #316970); box-shadow: 0 18px 40px #173e4918; margin-bottom: 26px; }
-.marketing-shell .mkt-hero::after { width: 420px; height: 420px; right: -150px; top: -160px; border: 55px solid #ffffff08; background: transparent; pointer-events: none; }
+.marketing-shell .mkt-hero { padding: 34px; border-radius: 24px; background: linear-gradient(115deg, var(--navy) 0%, #1a3554 58%, #1f4e73 100%); box-shadow: 0 18px 44px rgba(19, 34, 60, 0.24); margin-bottom: 26px; position: relative; overflow: hidden; }
+.marketing-shell .mkt-hero::after { width: 420px; height: 420px; right: -150px; top: -160px; border: 55px solid rgba(127, 208, 244, 0.07); background: transparent; pointer-events: none; }
 .marketing-shell .mkt-hero h1 { font-size: clamp(26px, 3vw, 40px); letter-spacing: -1.4px; line-height: 1.15; max-width: 580px; margin: 16px 0 12px; }
 .marketing-shell .mkt-hero p { font-size: 14px; line-height: 1.7; max-width: 500px; }
-.marketing-shell .mkt-crumb { font-size: 10px; letter-spacing: 2px; color: #a8dcd2; }
-.marketing-shell .mkt-period { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; border: 1px solid #ffffff24; border-radius: 20px; padding: 7px 11px; font-size: 11px; color: #d5ebe7; }
+.marketing-shell .mkt-crumb { font-size: 10px; letter-spacing: 2px; color: #7fd0f4; }
+.marketing-shell .mkt-period { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 20px; padding: 7px 11px; font-size: 11px; color: #cfe4f2; }
 .marketing-shell .mkt-hero .header-actions { gap: 10px; }
 .marketing-shell .mkt-hero .header-actions button { border-radius: 10px; min-height: 40px; }
-.marketing-shell .mkt-hero-primary { background: #b8f3d9; color: #123d37; }
+.marketing-shell .mkt-hero-primary { background: var(--azure); color: #fff; box-shadow: 0 6px 18px rgba(6, 157, 227, 0.32); }
 .marketing-shell .mkt-hero-stats { gap: 12px; background: transparent; border-radius: 0; margin-top: 30px; }
 .marketing-shell .mkt-stat { border: 1px solid #ffffff20; border-radius: 14px; padding: 18px; background: #ffffff08; gap: 8px; min-width: 0; }
 .marketing-shell .mkt-stat span { font-size: 25px; overflow-wrap: anywhere; }
-.marketing-shell .mkt-stat small { color: #b7d4d1; }
+.marketing-shell .mkt-stat small { color: #b7c9dc; }
 .marketing-shell .kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
-.marketing-shell .kpi-card { border-radius: 16px; padding: 22px; background: #fff; box-shadow: 0 5px 20px #233b5710; min-width: 0; }
+.marketing-shell .kpi-card { border-radius: 16px; padding: 22px; background: var(--glass-bg); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); border-color: var(--glass-border); box-shadow: var(--glass-shadow); min-width: 0; }
 .marketing-shell .kpi-value { font-size: clamp(23px, 2.5vw, 32px); margin: 16px 0 8px; overflow-wrap: anywhere; }
 .marketing-shell .kpi-sub { color: #6c7c8c; }
 .marketing-shell .mkt-highlights { gap: 14px; margin-bottom: 26px; }
@@ -30,8 +32,8 @@
 .marketing-shell .mkt-eyebrow { font-size: 9px; font-weight: 700; letter-spacing: 1.6px; color: #63847f; }
 .marketing-shell .mkt-chart-note { font-size: 10px; color: #6c7c8c; background: #f1f6f6; border-radius: 8px; padding: 7px 9px; }
 .marketing-shell .table-head-row, .marketing-shell .table-row { grid-template-columns: minmax(150px, 1.5fr) repeat(5, minmax(85px, 1fr)); min-width: 650px; gap: 16px; padding: 15px 12px; }
-.marketing-shell .table-head-row, .marketing-shell .recent-head { background: #f4f8fa; border-radius: 8px; color: #617787; }
-.marketing-shell .table-row:hover, .marketing-shell .recent-row:not(.recent-head):hover { background: #f5faf8; }
+.marketing-shell .table-head-row, .marketing-shell .recent-head { background: rgba(19, 34, 60, 0.04); border-radius: 8px; color: #617787; }
+.marketing-shell .table-row:hover, .marketing-shell .recent-row:not(.recent-head):hover { background: rgba(6, 157, 227, 0.06); }
 .marketing-shell .recent-row { min-width: 780px; padding: 15px 12px; }
 .marketing-shell .r-actions { display: flex; gap: 8px; }
 .marketing-shell .r-spend { color: #237867; }
@@ -50,7 +52,7 @@
 .marketing-shell button:focus-visible { outline: 3px solid #45bda3; outline-offset: 3px; }
 [data-theme="dark"] .marketing-shell { background: radial-gradient(ellipse at 5% 0%, #143a38, transparent 42%), radial-gradient(ellipse at 100% 28%, #252747, transparent 48%), #101820; }
 [data-theme="dark"] .marketing-shell .panel,
-[data-theme="dark"] .marketing-shell .kpi-card { background: #1b2632; border-color: #344353; color: #e8eef5; box-shadow: none; }
+[data-theme="dark"] .marketing-shell .kpi-card { background: var(--glass-bg-strong); border-color: var(--glass-border); color: var(--ink); box-shadow: var(--glass-shadow); }
 [data-theme="dark"] .marketing-shell .mkt-highlight { background: #1b2933; border-color: #344353; }
 [data-theme="dark"] .marketing-shell .mkt-highlight strong,
 [data-theme="dark"] .marketing-shell .panel h3,
