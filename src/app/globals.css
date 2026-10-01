@@ -1690,6 +1690,14 @@ input.ltr-num { text-align: left; }
 }
 .period-summary { font-size: 11.5px; color: #9ca3af; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
 
+/* Dashboard narrowing row, directly under the period tabs. Flex with wrapping
+   rather than a grid: the MultiSelect triggers are variable-width buttons, so a
+   fixed track would clip the longer Arabic status labels. */
+.period-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+
 [data-theme="dark"] .period-tabs { background: #1c1c1f; }
 
 /* ── Per-field validation markers ────────────────────────────────────────

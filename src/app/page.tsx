@@ -31,7 +31,6 @@ import StatusPill, { StatusDot } from "@/components/StatusPill";
 import RefPicker from "@/components/RefPicker";
 import MultiSelect from "@/components/MultiSelect";
 import Select from "@/components/Select";
-import { useCombobox } from "@/lib/use-combobox";
 import ImportClientsModal from "@/components/ImportClientsModal";
 import DashboardCharts, { type ChartView, type TrendPoint } from "@/components/DashboardCharts";
 import ColumnPicker from "@/components/ColumnPicker";
@@ -89,6 +88,20 @@ const daysAgo = (n: number): string => {
 };
 
 /**
+ * The first day of a window that INCLUDES today and spans `n` days.
+ *
+ * Returns `n-1` days back, not `n`. This is inclusive of today, so "last 30 days"
+ * means today plus the 29 days before it — a 30-day span. Passing `n` here would
+ * silently produce a 31-day window, and that is exactly the bug this replaced:
+ * the clients page counted 208 for "Last 30 days" while the dashboard, using
+ * `rollingWindow()` in reporting.ts, counted 201 for the same label. Both were
+ * labelled identically and meant different spans.
+ *
+ * Kept as a named helper so the two pages cannot drift apart again.
+ */
+const rollingStart = (n: number): string => daysAgo(n - 1);
+
+/**
  * Recent-date presets.
  *
  * A FACTORY, not a module constant: the old version computed these once at
@@ -107,13 +120,18 @@ const buildDatePresets = (): DatePreset[] => {
   // reads more consistently. The Monday computation that backed it is gone, so
   // there is no longer a way for this page and the dashboard to disagree about
   // where a week starts — they no longer offer one.
+  //
+  // Rolling windows go through rollingStart() so their span matches the
+  // dashboard's `rollingWindow()` for the same label. The calendar ones
+  // (This month, This year) are unaffected: they are bounded by the month or
+  // year, not by a day count.
   return [
     { label: "date.today", startDate: localDay(new Date()) },
-    { label: "date.last3", startDate: daysAgo(3) },
-    { label: "date.last7", startDate: daysAgo(7) },
-    { label: "date.last14", startDate: daysAgo(14) },
-    { label: "date.last30", startDate: daysAgo(30) },
-    { label: "date.last90", startDate: daysAgo(90) },
+    { label: "date.last3", startDate: rollingStart(3) },
+    { label: "date.last7", startDate: rollingStart(7) },
+    { label: "date.last14", startDate: rollingStart(14) },
+    { label: "date.last30", startDate: rollingStart(30) },
+    { label: "date.last90", startDate: rollingStart(90) },
     { label: "date.thisMonth", startDate: localDay(firstOfMonth) },
     { label: "date.thisYear", startDate: localDay(firstOfYear) },
   ];
@@ -218,6 +236,22 @@ export default function Home() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [periodLoading, setPeriodLoading] = useState(false);
+  /**
+   * Dashboard narrowing by status / channel / location — the same three groups
+   * the clients page offers, and deliberately a SEPARATE state from `filters`
+   * above. The clients table has its own filter set; sharing one would mean
+   * filtering a dashboard panel also silently refiltered the clients table and
+   * changed the table's page count out from under the user.
+   *
+   * These intersect with the period rather than replacing it.
+   */
+  const [dashFilters, setDashFilters] = useState<{ status: string[]; channel: string[]; location: string[] }>({
+    status: [], channel: [], location: [],
+  });
+  const setDashFilter = (key: "status" | "channel" | "location", values: string[]) =>
+    setDashFilters((cur) => ({ ...cur, [key]: values }));
+  const clearDashFilters = () => setDashFilters({ status: [], channel: [], location: [] });
+  const dashFilterCount = dashFilters.status.length + dashFilters.channel.length + dashFilters.location.length;
   // `other` counts clients whose status sits outside the built-in pipeline
   // (a user-defined status). Without it the three outcome cards silently
   // summed to less than the client count.
@@ -406,6 +440,12 @@ export default function Home() {
       if (customFrom) params.set("from", customFrom);
       if (customTo) params.set("to", customTo);
     }
+    // Dashboard narrowing, sent only when non-empty so an unfiltered group adds
+    // no query key at all. These INTERSECT with the period above rather than
+    // replacing it, so "Last 30 days + LOST" is LOST clients from that window.
+    if (dashFilters.status.length > 0) params.set("statuses", dashFilters.status.join(","));
+    if (dashFilters.channel.length > 0) params.set("channels", dashFilters.channel.join(","));
+    if (dashFilters.location.length > 0) params.set("locations", dashFilters.location.join(","));
     // Flagging the pending fetch so the period summary can show a loading state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPeriodLoading(true);
@@ -439,7 +479,7 @@ export default function Home() {
       })
       .catch(() => undefined)
       .finally(() => setPeriodLoading(false));
-  }, [user, periodKind, customFrom, customTo]);
+  }, [user, periodKind, customFrom, customTo, dashFilters.status, dashFilters.channel, dashFilters.location]);
 
   // Table scroll detection
   useEffect(() => {
@@ -938,7 +978,33 @@ export default function Home() {
     );
   };
 
-  const exportReport = () => exportExcel();
+  /**
+ * Dashboard "Export report" — its own query, NOT the clients table's.
+ *
+ * This used to alias `exportExcel()`, which builds its query from `filters.*`
+ * — the clients TABLE's filter state. So the button exported whatever the table
+ * happened to be filtered to and ignored the dashboard's own status/channel/
+ * location selections entirely. The two filter sets are deliberately separate
+ * (so filtering a dashboard panel never refilters the table), which made that
+ * alias wrong by construction.
+ *
+ * Dates come from `periodInfo`, which the analytics response already resolved
+ * from the selected preset, so the export cannot describe a different window
+ * than the panels above it.
+ */
+const exportDashboard = () => {
+  void exportClientsFile(
+    {
+      statuses: dashFilters.status.join(","),
+      channels: dashFilters.channel.join(","),
+      locations: dashFilters.location.join(","),
+      from: periodInfo.from,
+      to: periodInfo.to,
+    },
+    `rwaq-dashboard-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    t("clients.exportedToast", { n: periodInfo.totals.total }),
+  );
+};
 
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); };
 
@@ -985,7 +1051,7 @@ export default function Home() {
             updateStatus={updateStatus} updateClientField={updateClientField}
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             onAddStatus={addStatus} onAddChannel={addChannel} onAddLocation={addLocation}
-            onExport={exportReport} exporting={exporting}
+            onExport={exportDashboard} exporting={exporting}
             scoped={isScoped}
             onToggleStageFilter={toggleStageFilter}
             periodKind={periodKind}
@@ -996,6 +1062,10 @@ export default function Home() {
             customFrom={customFrom}
             customTo={customTo}
             periodLoading={periodLoading}
+            dashFilters={dashFilters}
+            setDashFilter={setDashFilter}
+            clearDashFilters={clearDashFilters}
+            dashFilterCount={dashFilterCount}
             t={t}
           />
         ) : (
@@ -1266,14 +1336,20 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, fir
   );
 }
 
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, periodBreakdowns, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } };
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, periodBreakdowns, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, dashFilters, setDashFilter, clearDashFilters, dashFilterCount, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } };
   /**
    * Period-scoped per-status / per-location / per-channel counts, so the stage
    * panel, funnel, conversion rate and location bars describe the same window as
    * the KPI cards rather than all time.
    */
   periodBreakdowns?: { statusCounts?: Record<string, number>; locationCounts?: Record<string, number>; channelCounts?: Record<string, number>; totals?: { total: number; won: number; lost: number; waiting: number; other: number } };
-  onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
+  onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean;
+  /** Status/channel/location narrowing, applied on top of the period. */
+  dashFilters: { status: string[]; channel: string[]; location: string[] };
+  setDashFilter: (key: "status" | "channel" | "location", values: string[]) => void;
+  clearDashFilters: () => void;
+  dashFilterCount: number;
+  t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   // Same shared colour map the rest of the app resolves through.
   const colors = useOptionColors();
@@ -1370,9 +1446,12 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
       <header className="dashboard-hero">
         <div>
           {heroLogo && <img src={heroLogo} alt={t("brand.logoAlt")} className="hero-logo" />}
+          {/* The h1 headline and its subtitle were removed at the user's request;
+              the logo and this small eyebrow label are what remain. The i18n keys
+              `dash.heroTitle` / `dash.heroSubtitle` are left in place deliberately:
+              the dictionary is checked for key parity against work/keys.txt, and
+              two unused strings cost nothing. */}
           <span className="dashboard-eyebrow">{t("dash.heroEyebrow")}</span>
-          <h1>{t("dash.heroTitle")}</h1>
-          <p>{t("dash.heroSubtitle")}</p>
         </div>
         <div className="dashboard-hero-summary">
           <span>{t("dash.clientOverview")}</span>
@@ -1425,6 +1504,68 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
               : t(`period.${periodKind}`)}
         </span>
       </div>
+
+      {/* Dashboard narrowing. Sits directly under the period tabs because it
+          composes with them rather than replacing them: the tabs choose the
+          window, these three groups cut it down further. The same MultiSelect
+          the clients page uses, and the same render functions, so "LOST" here
+          and "LOST" there resolve to the same label and the same colour. */}
+      <div className="period-filters">
+        <MultiSelect
+          label={t("filter.allStatuses")}
+          options={allStatuses ?? []}
+          selected={dashFilters.status}
+          onChange={v => setDashFilter("status", v)}
+          render={v => statusLabel(t, v)}
+          t={t}
+        />
+        <MultiSelect
+          label={t("filter.allChannels")}
+          options={allChannels ?? []}
+          selected={dashFilters.channel}
+          onChange={v => setDashFilter("channel", v)}
+          render={v => channelLabel(t, v)}
+          t={t}
+        />
+        <MultiSelect
+          label={t("filter.allLocations")}
+          options={allLocations ?? []}
+          selected={dashFilters.location}
+          onChange={v => setDashFilter("location", v)}
+          render={v => locationLabel(t, v)}
+          t={t}
+        />
+      </div>
+
+      {/* One chip per selected value, each removable on its own — the same
+          affordance the clients page has. The dropdown trigger only ever shows
+          the FIRST value plus a "+N" count, so without this row a selection of
+          LOST + WON + QUALIFIED was indistinguishable from LOST alone: there
+          was no way to see what was picked, nor to drop one pick without
+          reopening the menu and unticking it. */}
+      {dashFilterCount > 0 && (
+        <div className="filter-chips">
+          {dashFilters.status.map(s => (
+            <span key={`d-st-${s}`} className="filter-chip">
+              {statusLabel(t, s)}
+              <button title={t("common.clear")} onClick={() => setDashFilter("status", dashFilters.status.filter(x => x !== s))}>×</button>
+            </span>
+          ))}
+          {dashFilters.channel.map(c => (
+            <span key={`d-ch-${c}`} className="filter-chip">
+              {channelLabel(t, c)}
+              <button title={t("common.clear")} onClick={() => setDashFilter("channel", dashFilters.channel.filter(x => x !== c))}>×</button>
+            </span>
+          ))}
+          {dashFilters.location.map(l => (
+            <span key={`d-lo-${l}`} className="filter-chip">
+              {locationLabel(t, l)}
+              <button title={t("common.clear")} onClick={() => setDashFilter("location", dashFilters.location.filter(x => x !== l))}>×</button>
+            </span>
+          ))}
+          <button type="button" className="filter-chip clear-all-chip" onClick={clearDashFilters}>{t("filter.clear")} ×</button>
+        </div>
+      )}
 
       {/* KPI strip — the four outcome cards (won / lost / in progress / other)
           plus spend, reach and CPA. `other` is what makes the outcome cards sum

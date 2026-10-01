@@ -29,16 +29,41 @@ export async function GET(request: NextRequest) {
     q.get("to") ?? undefined,
   );
 
+  /**
+   * Optional status / channel / location narrowing, applied ON TOP of the period.
+   *
+   * These are the same three groups the clients page filters by, comma-separated
+   * exactly as `filterValues()` parses them in /api/crm/clients, so a dashboard
+   * filter and a clients filter mean the same thing. They intersect with the
+   * period rather than replacing it: "Last 30 days + LOST" is LOST clients from
+   * the last 30 days, which is what someone narrowing a chart expects.
+   */
+  const multi = (...keys: string[]): string[] | undefined => {
+    for (const key of keys) {
+      const list = (q.get(key) ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+      if (list.length > 0) return list;
+    }
+    return undefined;
+  };
+  // Spread conditionally so an unfiltered group contributes no key at all —
+  // `status: undefined` is not the same as omitting it once it reaches the
+  // where-builder, so the omission is what keeps an unset filter out of the SQL.
+  const groupFilter: { status?: string[]; channel?: string[]; location?: string[] } = {
+    ...(multi("statuses", "status") ? { status: multi("statuses", "status") } : {}),
+    ...(multi("channels", "channel") ? { channel: multi("channels", "channel") } : {}),
+    ...(multi("locations", "location") ? { location: multi("locations", "location") } : {}),
+  };
+
   try {
     const [metrics, periodClients, allClients, customStatuses, customLocations, customChannels] = await Promise.all([
       listMetrics({ from: period.fromStr, to: period.toStr }),
-      // Client counts for the reporting window, still the signed-in user's own.
       // Deliberately NOT includeArchived: an archived client is out of the book, so
       // counting it inflated every figure on this page — the KPI cards, the stage
       // panel, the funnel, the location and channel bars, the timeline and the
       // salesperson reports all derive from this one array. This is the only
       // change needed to exclude them from all of them at once.
       listClients({
+        ...groupFilter,
         assignee: assigneeScope(sessionUser),
         createdFrom: period.fromStr,
         createdTo: period.toStr,

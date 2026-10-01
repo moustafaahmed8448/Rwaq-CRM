@@ -23,14 +23,17 @@ const localDay = (d: Date): string =>
 
 /** Rolling windows offered as one-click presets, matching the clients page. */
 const datePresets = (): Array<{ label: string; startDate: string }> => {
-  const daysAgo = (n: number): string => { const d = new Date(); d.setDate(d.getDate() - n); return localDay(d); };
+  // `n-1` days back, not `n`: the window INCLUDES today, so "last 7 days" spans
+  // exactly 7 days. Using `n` here produced an 8-day window and put this page's
+  // counts out of step with the same labels on the clients page and dashboard.
+  const rollingStart = (n: number): string => { const d = new Date(); d.setDate(d.getDate() - (n - 1)); return localDay(d); };
   const firstOfMonth = new Date(); firstOfMonth.setDate(1);
   const firstOfYear = new Date(); firstOfYear.setMonth(0, 1);
   return [
     { label: "date.today", startDate: localDay(new Date()) },
-    { label: "date.last7", startDate: daysAgo(7) },
-    { label: "date.last30", startDate: daysAgo(30) },
-    { label: "date.last90", startDate: daysAgo(90) },
+    { label: "date.last7", startDate: rollingStart(7) },
+    { label: "date.last30", startDate: rollingStart(30) },
+    { label: "date.last90", startDate: rollingStart(90) },
     { label: "date.thisMonth", startDate: localDay(firstOfMonth) },
     { label: "date.thisYear", startDate: localDay(firstOfYear) },
   ];
@@ -199,9 +202,6 @@ export default function ArchivedPage() {
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           <span>–</span>
           <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          {hasFilters && (
-            <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>{t("filter.clear")} ×</button>
-          )}
         </div>
         <div className="date-presets archive-filters">
           {datePresets().map(p => (
@@ -214,6 +214,37 @@ export default function ArchivedPage() {
             </button>
           ))}
         </div>
+
+        {/* One chip per active filter, each removable on its own. The MultiSelect
+            trigger collapses a multi-pick to "first +N", so without this row there
+            was no way to see what was actually selected here — the same gap this
+            closed on the clients page and the dashboard. */}
+        {hasFilters && (
+          <div className="filter-chips">
+            {query && <span className="filter-chip">&ldquo;{query.slice(0, 24)}&rdquo;<button title={t("common.clear")} onClick={() => setQuery("")}>×</button></span>}
+            {statusFilter.map(s => (
+              <span key={`a-st-${s}`} className="filter-chip">
+                {statusLabel(t, s)}
+                <button title={t("common.clear")} onClick={() => setStatusFilter(statusFilter.filter(x => x !== s))}>×</button>
+              </span>
+            ))}
+            {channelFilter.map(c => (
+              <span key={`a-ch-${c}`} className="filter-chip">
+                {channelLabel(t, c)}
+                <button title={t("common.clear")} onClick={() => setChannelFilter(channelFilter.filter(x => x !== c))}>×</button>
+              </span>
+            ))}
+            {locationFilter.map(l => (
+              <span key={`a-lo-${l}`} className="filter-chip">
+                {locationLabel(t, l)}
+                <button title={t("common.clear")} onClick={() => setLocationFilter(locationFilter.filter(x => x !== l))}>×</button>
+              </span>
+            ))}
+            {startDate && <span className="filter-chip">{t("common.from")} {startDate}<button title={t("common.clear")} onClick={() => setStartDate("")}>×</button></span>}
+            {endDate && <span className="filter-chip">{t("common.to")} {endDate}<button title={t("common.clear")} onClick={() => setEndDate("")}>×</button></span>}
+            <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>{t("filter.clear")} ×</button>
+          </div>
+        )}
 
         <section className="panel">
           <div className="panel-heading">
