@@ -14,13 +14,13 @@ import { apiErrorMessage, readApiError } from "@/lib/api-errors";
 import {
   PIPELINE_STAGES,
   PREDEFINED_STATUSES,
+  PERIOD_KINDS,
   channelLabel,
   isInProgress,
   isLost,
   isWon,
   BUILTIN_LOCATION_KEYS,
   locationLabel,
-  statusColor,
   statusLabel,
   type PeriodKind,
 } from "@/lib/reporting";
@@ -29,11 +29,14 @@ import { num, sar, dateLocale } from "@/lib/format";
 import { useLogo } from "@/lib/logo";
 import StatusPill, { StatusDot } from "@/components/StatusPill";
 import RefPicker from "@/components/RefPicker";
+import MultiSelect from "@/components/MultiSelect";
 import Select from "@/components/Select";
 import { useCombobox } from "@/lib/use-combobox";
 import ImportClientsModal from "@/components/ImportClientsModal";
 import DashboardCharts, { type ChartView, type TrendPoint } from "@/components/DashboardCharts";
 import ColumnPicker from "@/components/ColumnPicker";
+import { useOptionColors } from "@/lib/option-colors";
+import { optionColor } from "@/lib/ref-options";
 import {
   CLIENT_COLUMNS, resolveColumns, gridTemplate,
   type ColumnKey, type ResolvedColumn,
@@ -67,7 +70,6 @@ const SORT_LABELS: Record<string, string> = {
 };
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const CH_COLORS: Record<string, string> = { FACEBOOK: "#1877f2", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed", GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2" };
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
 
 
@@ -92,28 +94,21 @@ const daysAgo = (n: number): string => {
  * A FACTORY, not a module constant: the old version computed these once at
  * import, so a tab left open overnight kept offering yesterday's dates.
  *
- * "This week" starts Monday, matching `startOfWeek` in reporting.ts. It used to
- * use `getDay()` (Sunday), so the same label produced a different range on the
- * clients page than on the dashboard.
+ * "This week" was removed from this list — "Last 7 days" covers the same ground
+ * and the rolling set reads more consistently.
  */
 const buildDatePresets = (): DatePreset[] => {
-  // Monday of the current week, matching startOfWeek() in reporting.ts. The old
-  // preset used getDay() (Sunday), so "This week" covered a different range on
-  // the clients page than on the dashboard.
-  const monday = (() => {
-    const d = new Date();
-    const day = d.getDay();
-    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
-    return d;
-  })();
   const firstOfMonth = new Date();
   firstOfMonth.setDate(1);
   const firstOfYear = new Date();
   firstOfYear.setMonth(0, 1);
 
+  // No "This week": "Last 7 days" covers the same ground and the rolling set
+  // reads more consistently. The Monday computation that backed it is gone, so
+  // there is no longer a way for this page and the dashboard to disagree about
+  // where a week starts — they no longer offer one.
   return [
     { label: "date.today", startDate: localDay(new Date()) },
-    { label: "date.thisWeek", startDate: localDay(monday) },
     { label: "date.last3", startDate: daysAgo(3) },
     { label: "date.last7", startDate: daysAgo(7) },
     { label: "date.last14", startDate: daysAgo(14) },
@@ -134,7 +129,18 @@ const FIELD_KEYS: Record<string, string> = {
 const initialFilters: Filters = { query: "", status: [], channel: [], location: [], firstContact: [], secondContact: [], startDate: "", endDate: "" };
 
 function matchesFilters(client: Client, filters: Filters) {
-  const date = (client.createdAt || "").slice(0, 10);
+  /**
+   * The client's registration day in the LOCAL calendar.
+   *
+   * This used to be `client.createdAt.slice(0, 10)`, which slices the UTC ISO
+   * string — so it read the UTC day, while the server filtered on local midnight
+   * (`startOfLocalDay`). East of Greenwich those disagree for anything created
+   * between 00:00 and the local offset: at UTC+3 the header showed 195 clients for
+   * "last 30 days" while the paged table counted 202, from the same filter on the
+   * same screen. The server's reading is the correct one (a timestamp's day
+   * should be the user's day), so the browser is corrected to match it.
+   */
+  const date = client.createdAt ? localDay(new Date(client.createdAt)) : "";
   // Ignore spaces/dashes/parentheses so phone numbers match with or without
   // formatting, e.g. "1018240912" finds "+20 101 824 0912".
   const norm = (s: string) => s.replace(/[\s\-().]/g, "").toLowerCase();
@@ -216,6 +222,20 @@ export default function Home() {
   // (a user-defined status). Without it the three outcome cards silently
   // summed to less than the client count.
   const [periodInfo, setPeriodInfo] = useState({ from: "", to: "", campaignCount: 0, campaignNames: [] as string[], totals: { total: 0, won: 0, lost: 0, waiting: 0, other: 0 } });
+  // Period-scoped per-status / location / channel counts. Without these the stage
+  // panel, funnel and location bars were recomputed in the browser from every
+  // client, so "this week" moved the KPI cards and left the rest on all time.
+  const [periodBreakdowns, setPeriodBreakdowns] = useState<
+    | {
+        statusCounts?: Record<string, number>;
+        locationCounts?: Record<string, number>;
+        channelCounts?: Record<string, number>;
+        totals?: { total: number; won: number; lost: number; waiting: number; other: number };
+      }
+    // undefined until the first analytics response lands; the Dashboard falls
+    // back to all-time counts so the panels are never blank on first paint.
+    | undefined
+  >(undefined);
   // Per-salesperson outcome report, split by contact role. Server-computed and
   // period-scoped, so it agrees with the KPI cards above it.
   const [spReports, setSpReports] = useState<{ first: SpRow[]; second: SpRow[] }>({ first: [], second: [] });
@@ -244,6 +264,9 @@ export default function Home() {
   // signed-in user's layout arrives.
   const [columns, setColumns] = useState<ResolvedColumn[]>(() => resolveColumns(null));
   const [savingLayout, setSavingLayout] = useState(false);
+  // Admin-set option colours, shared module-wide so every pill, dot and tag in
+  // this file resolves the same value without prop-drilling them down.
+  const colors = useOptionColors();
   const rtl = typeof document !== "undefined" && document.documentElement.dir === "rtl";
 
   /**
@@ -319,11 +342,15 @@ export default function Home() {
   });
   const tableRef = useRef<HTMLDivElement>(null);
 
-  const addToast = (type: Toast["type"], message: string) => {
+  // Stable via useCallback: `addToast` was a plain function, so it got a new
+  // identity every render. Anything memoised against it (selectAllMatching) then
+  // re-created every render too, which the compiler rejects as unpreservable
+  // memoization — and it would have re-fetched the id list on every keystroke.
+  const addToast = useCallback((type: Toast["type"], message: string) => {
     const id = ++toastId;
     setToasts(p => [...p, { id, type, message }]);
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3500);
-  };
+  }, []);
 
   useEffect(() => {
     fetch("/api/auth/me").then(async r => { if (!r.ok) { router.replace("/login"); return null; } return r.json(); }).then(d => {
@@ -394,6 +421,14 @@ export default function Home() {
           campaignNames: d.campaignNames ?? [],
           totals: d.totals ?? { total: 0, won: 0, lost: 0, waiting: 0, other: 0 },
         });
+        // Same response carries the breakdowns that scope the stage panel, funnel
+        // and location bars to the selected window.
+        setPeriodBreakdowns({
+          statusCounts: d.statusCounts,
+          locationCounts: d.locationCounts,
+          channelCounts: d.channelCounts,
+          totals: d.totals,
+        });
         // Same response carries the per-salesperson breakdown, so the sales
         // performance panel is always the selected period rather than all time.
         setSpReports({
@@ -420,6 +455,90 @@ export default function Home() {
   }, []);
 
   const filteredClients = useMemo(() => sortClients(clients.filter(c => matchesFilters(c, filters)), sortBy), [clients, filters, sortBy]);
+
+  /* ── Paged table rows ────────────────────────────────────────────────────
+     `clients` stays the FULL list: the dashboard KPIs, funnel, stage panel and
+     the salesperson reports are all derived from it, so paging that state would
+     make every card describe one screen. The table therefore gets its own slice
+     from ?paged=1, which is the only place that ever shows a subset.
+
+     The two lists are deliberately separate rather than one list with an offset
+     applied in JS — that is the whole point of the change. */
+  const [tableRows, setTableRows] = useState<Client[]>([]);
+  const [tableTotal, setTableTotal] = useState(0);
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageCount, setTablePageCount] = useState(1);
+  const [tableLoading, setTableLoading] = useState(false);
+  const PAGE_SIZE = 25;
+
+  /**
+   * Builds the table query from the same filter state the client-side matcher
+   * uses, so the two can never disagree about what is being shown. Debounced by
+   * the caller for the search box only; the dropdowns fire immediately.
+   */
+  const tableQuery = useMemo(() => {
+    // Stringified rather than returning the params object: the effect below
+    // depends on this value, and a fresh URLSearchParams every render would
+    // defeat the memo and refetch the table on every keystroke elsewhere.
+    const params = new URLSearchParams({ paged: "1", pageSize: String(PAGE_SIZE) });
+    if (filters.query) params.set("q", filters.query);
+    if (filters.status.length) params.set("status", filters.status.join(","));
+    if (filters.channel.length) params.set("channel", filters.channel.join(","));
+    if (filters.location.length) params.set("location", filters.location.join(","));
+    if (filters.firstContact.length) params.set("firstContact", filters.firstContact.join(","));
+    if (filters.secondContact.length) params.set("secondContact", filters.secondContact.join(","));
+    if (filters.startDate) params.set("from", filters.startDate);
+    if (filters.endDate) params.set("to", filters.endDate);
+    params.set("sort", sortBy);
+    return params.toString();
+  }, [filters, sortBy]);
+
+  /**
+   Fetches one page of the table. Takes the page number as an argument rather
+   than reading `tablePage` from a closure, so the fetch effect below can depend
+   on it without re-creating itself (which is what broke memoization before).
+   */
+  const loadTable = useCallback(async (page: number, query: string) => {
+    setTableLoading(true);
+    try {
+      const res = await fetch(`/api/crm/clients?${query}&page=${page}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const d = await res.json() as {
+        clients?: Client[];
+        total?: number;
+        page?: number;
+        pageCount?: number;
+      };
+      setTableRows(d.clients ?? []);
+      setTableTotal(d.total ?? 0);
+      setTablePage(d.page ?? page);
+      setTablePageCount(d.pageCount ?? 1);
+    } catch {
+      // Leave the previous page on screen rather than blanking the table: a
+      // failed refresh should not look like "no clients match".
+    } finally {
+      setTableLoading(false);
+    }
+  }, [setTablePage]);
+
+  /**
+   * Single fetch for the table: page + filters + sort in one dependency list.
+   *
+   * These used to be two effects — one for "filters changed, go to page 1" and
+   * one for "page changed, fetch" — which meant a setState inside an effect to
+   * reset the page, and a window where neither matched. Filtering straight to
+   * page 1 here means there is exactly one transition to reason about.
+   *
+   * Every state write happens after `await`, inside the promise, so none of them
+   * runs synchronously during the effect body and none can cascade a render.
+   * Flagged for the same reason as the period-summary effect further down.
+   */
+  useEffect(() => {
+    if (!user || view !== "clients") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadTable(tablePage, tableQuery);
+  }, [user, view, tablePage, tableQuery, loadTable]);
+
   // The two contact roles are listed separately, because they are separate
   // filters: a merged list could not tell you who is the 1st and who the 2nd.
   const firstContacts = useMemo(
@@ -464,15 +583,27 @@ export default function Home() {
   };
 
   const updateFilter = (key: "query" | "startDate" | "endDate", value: string) => {
+    // Any filter change restarts at page 1: staying on page 7 of a now much
+    // smaller result set shows an empty table and reads as a bug.
+    setTablePage(1);
     setFilters(cur => ({ ...cur, [key]: value }));
     if (key !== "query") setActiveDatePreset(null);
   };
 
+  // Re-ordering while on page 7 of 14 would keep the offset, which is rarely
+  // what you want after a sort change — page 1 of the new order is.
+  const handleSortBy = (s: SortField) => {
+    setTablePage(1);
+    setSortBy(s);
+  };
+
   const setMultiFilter = (key: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => {
+    setTablePage(1);
     setFilters(cur => ({ ...cur, [key]: values }));
   };
 
   const clearAllFilters = () => {
+    setTablePage(1);
     setFilters(initialFilters);
     setActiveDatePreset(null);
   };
@@ -533,9 +664,15 @@ export default function Home() {
       return;
     }
     const r = await res.json().catch(() => ({}));
+    // Re-read the reference data rather than clearing it. These used to
+    // `setRemovableLocations([])` / `setLocationUsage({})`, which made the
+    // trash icon vanish for EVERY remaining option after the first delete (the
+    // picker only offers delete for values in `removable`) and blanked the usage
+    // counts. The endpoint now returns all three fields on DELETE, so one
+    // response restores the whole state.
     setCustomLocations(r.locations ?? []);
-    setRemovableLocations([]);
-    setLocationUsage({});
+    setRemovableLocations(r.removable ?? []);
+    setLocationUsage(r.usage ?? {});
     addToast("success", t("refData.removedLocation", { value: label }));
   };
 
@@ -547,9 +684,11 @@ export default function Home() {
       return;
     }
     const r = await res.json().catch(() => ({}));
+    // Same fix as removeLocation: keep the removable list and usage map so the
+    // remaining options stay deletable and keep their counts.
     setCustomChannels(r.channels ?? []);
-    setRemovableChannels([]);
-    setChannelUsage({});
+    setRemovableChannels(r.removable ?? []);
+    setChannelUsage(r.usage ?? {});
     addToast("success", t("refData.removedChannel", { value: label }));
   };
 
@@ -598,9 +737,11 @@ export default function Home() {
     // them from `filteredClients` (the unfiltered, all-time client list), which
     // threw away the period and made the ROI table disagree with the KPI cards.
     ...metric,
-    // The local client list is still used to decide which channels to show.
-    inUse: filteredClients.some(c => c.acquisitionChannel === metric.channel),
-  })), [metrics, filteredClients]);
+    // The local client list decides which channels to show. Reads the FULL list
+    // for the same reason <Dashboard clients={...}> does: a clients-page filter
+    // must not change which channels the dashboard considers active.
+    inUse: clients.some(c => c.acquisitionChannel === metric.channel),
+  })), [metrics, clients]);
 
   const openEdit = (client: Client) => setEditDraft({ ...client });
   const openCreate = () => setEditDraft({
@@ -675,7 +816,47 @@ export default function Home() {
   };
 
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleSelectAll = () => setSelectedIds(prev => prev.size === filteredClients.length ? new Set() : new Set(filteredClients.map(c => c.id)));
+
+  /**
+   * Selects (or clears) every row ON THE CURRENT PAGE.
+   *
+   * This used to select from `filteredClients` — the whole filtered book — while
+   * the table renders `tableRows`, one page of 25. So ticking the header box
+   * appeared to leave rows unticked, and the "N selected" count jumped to numbers
+   * that were not on screen. Selection now means "what you can see".
+   */
+  const toggleSelectAll = () => {
+    const visible = tableRows.map((c) => c.id);
+    const allVisibleSelected = visible.length > 0 && visible.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visible.forEach((id) => next.delete(id));
+      else visible.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  /**
+   * Selects EVERY client the current filter matches, across all pages.
+   *
+   * The header checkbox covers the visible page only. This is the escape hatch for
+   * "archive everything from the last 30 days", which otherwise means paging
+   * through 9 screens by hand.
+   *
+   * Ids are fetched with `idsOnly=1` — the point is to tick boxes, not to
+   * download 200 client records with their activity logs.
+   */
+  const selectAllMatching = async () => {
+    const res = await fetch(`/api/crm/clients?${tableQuery}&idsOnly=1`, { cache: "no-store" }).catch(() => null);
+    if (!res || !res.ok) {
+      addToast("error", t("clients.selectAllFailed"));
+      return;
+    }
+    const d = await res.json() as { ids?: string[] };
+    setSelectedIds(new Set(d.ids ?? []));
+  };
 
   const updateStatus = async (id: string, status: string) => {
     await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
@@ -778,6 +959,9 @@ export default function Home() {
           else if (tab === "clients") setView("clients");
           else if (tab === "archived") router.push("/archived");
           else if (tab === "marketing") router.push("/marketing");
+          // The options page is a separate route, not a view of this one — the
+          // final `else` used to swallow it and land on Settings instead.
+          else if (tab === "options") router.push("/options");
           else router.push("/settings");
         }}
       />
@@ -787,7 +971,12 @@ export default function Home() {
           <Dashboard
             metrics={visibleMetrics} totalSpend={totalSpend} totalReach={totalReach}
             won={won} lost={lost} waiting={waiting} unclassified={unclassified}
-            clients={filteredClients}
+            // The UNFILTERED list, deliberately: this used to be `filteredClients`,
+            // which meant a search or status filter set on the clients page silently
+            // re-sculpted the dashboard's cards, funnel and charts. The clients
+            // filter bar belongs to the clients table; the dashboard has its own
+            // reporting-period control, and the two must not bleed into each other.
+            clients={clients}
             salespeople={salespeople}
             spReports={spReports}
             timeline={timeline}
@@ -801,6 +990,7 @@ export default function Home() {
             onToggleStageFilter={toggleStageFilter}
             periodKind={periodKind}
             periodInfo={periodInfo}
+            periodBreakdowns={periodBreakdowns}
             onPeriodChange={setPeriodKind}
             onCustomRange={(f, to) => { setCustomFrom(f); setCustomTo(to); }}
             customFrom={customFrom}
@@ -810,15 +1000,16 @@ export default function Home() {
           />
         ) : (
           <ClientsView
-            clients={filteredClients} allClients={clients} mode={mode} setMode={setMode}
+            clients={mode === "table" ? tableRows : filteredClients} allClients={clients} mode={mode} setMode={setMode}
             filters={filters} updateFilter={updateFilter}
             setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters}
             updateStatus={updateStatus} updateClientField={updateClientField}
             firstContacts={firstContacts} secondContacts={secondContacts}
-            sortBy={sortBy} setSortBy={setSortBy}
+            sortBy={sortBy} setSortBy={handleSortBy}
             columns={columns} onColumnsChange={commitColumns} rtl={rtl}
             onAssigned={refreshNotifications}
             selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
+            onClearSelection={clearSelection} onSelectAllMatching={() => void selectAllMatching()}
             onOpenEdit={openEdit} onOpenCreate={openCreate} onOpenImport={() => setImporting(true)} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
             onOpenDetail={openDetail}
             exportExcel={exportExcel} exportSelected={exportSelected}
@@ -844,6 +1035,7 @@ export default function Home() {
             applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset}
             datePresets={buildDatePresets()}
             filterCount={activeFilterCount}
+            pager={{ page: tablePage, pageCount: tablePageCount, total: tableTotal, loading: tableLoading, onPage: setTablePage, t }}
             t={t}
           />
         )}
@@ -860,13 +1052,16 @@ export default function Home() {
                 <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} /></Field>
                 <Field label={t("form.project")} wide><textarea rows={3} value={editDraft.project ?? ""} onChange={e => setEditDraft({ ...editDraft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
                 <Field label={t("form.location")}>
-                  <RefPicker value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} render={v => locationLabel(t, v)} onRemove={user.role === "Admin" ? removeLocation : undefined} removable={removableLocations} removeUsage={locationUsage} placeholder={t("form.locationPh")} t={t} />
+                  <RefPicker kind="locations" value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} render={v => locationLabel(t, v)} onRemove={user.role === "Admin" ? removeLocation : undefined} removable={removableLocations} removeUsage={locationUsage} placeholder={t("form.locationPh")} t={t} />
                 </Field>
                 <Field label={t("form.channel")}>
-                  <RefPicker value={editDraft.acquisitionChannel ?? ""} options={allChannels} onAdd={addChannel} onChange={v => setEditDraft({ ...editDraft, acquisitionChannel: v })} render={v => channelLabel(t, v)} onRemove={user.role === "Admin" ? removeChannel : undefined} removable={removableChannels} removeUsage={channelUsage} placeholder={t("form.channelPh")} t={t} />
+                  <RefPicker kind="channels" value={editDraft.acquisitionChannel ?? ""} options={allChannels} onAdd={addChannel} onChange={v => setEditDraft({ ...editDraft, acquisitionChannel: v })} render={v => channelLabel(t, v)} onRemove={user.role === "Admin" ? removeChannel : undefined} removable={removableChannels} removeUsage={channelUsage} placeholder={t("form.channelPh")} t={t} />
                 </Field>
                 <Field label={t("form.status")}>
-                  <RefPicker value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} render={v => statusLabel(t, v)} placeholder={t("form.statusPh")} t={t} />
+                  {/* Delete was never wired here, so no trash icon ever rendered
+                      for a custom status. Now matches the location and channel
+                      pickers above: admin only, saved values only, unused only. */}
+                  <RefPicker kind="statuses" value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} render={v => statusLabel(t, v)} onRemove={user.role === "Admin" ? removeStatus : undefined} removable={removableStatuses} removeUsage={statusUsage} placeholder={t("form.statusPh")} t={t} />
                 </Field>
                 <Field label={t("form.firstContact")}>
                   <Select
@@ -942,7 +1137,10 @@ export default function Home() {
                       onChange={v => updateStatus(detailClient.id, v)}
                       render={v => statusLabel(t, v)}
                       className="status-select"
-                      style={{ background: statusColor(detailClient.status) + "1f", color: statusColor(detailClient.status) }}
+                      style={{
+                        background: optionColor("statuses", detailClient.status, colors) + "1f",
+                        color: optionColor("statuses", detailClient.status, colors),
+                      }}
                       t={t}
                       ariaLabel={t("form.status")}
                     />
@@ -950,9 +1148,9 @@ export default function Home() {
                     <StatusPill status={detailClient.status} t={t} />
                   )}
                 </div>
-                <div className="meta-item"><span className="meta-label">{t("form.channel")}</span><span className="chan-tag-inline"><i className="dot" style={{ background: CH_COLORS[detailClient.acquisitionChannel] }} />{channelLabel(t, detailClient.acquisitionChannel)}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.channel")}</span><span className="chan-tag-inline"><i className="dot" style={{ background: optionColor("channels", detailClient.acquisitionChannel, colors) }} />{channelLabel(t, detailClient.acquisitionChannel)}</span></div>
                 <div className="meta-item"><span className="meta-label">{t("form.project")}</span><span className="meta-value">{detailClient.project}</span></div>
-                <div className="meta-item"><span className="meta-label">{t("form.location")}</span><span className="meta-value">{detailClient.location}</span></div>
+                <div className="meta-item"><span className="meta-label">{t("form.location")}</span><span className="meta-value"><i className="dot" style={{ background: optionColor("locations", detailClient.location, colors) }} />{detailClient.location}</span></div>
                 <div className="meta-item"><span className="meta-label">{t("form.firstContact")}</span><span className="meta-value">{detailClient.firstContactPerson}</span></div>
                 <div className="meta-item"><span className="meta-label">{t("form.secondContact")}</span><span className="meta-value">{detailClient.secondContactPerson || "—"}</span></div>
                 <div className="meta-item full"><span className="meta-label">{t("form.operation")}</span><span className="meta-value op-value">{detailClient.operationToTake}</span></div>
@@ -1068,131 +1266,42 @@ function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, fir
   );
 }
 
-function MultiSelect({ label, options, selected, onChange, render, onRemove, removable, removeUsage, t }: {
-  label: string; options: string[]; selected: string[];
-  onChange: (values: string[]) => void; render?: (v: string) => string;
-  /** Deletes the value from the saved reference list (admin only, server-gated). */
-  onRemove?: (value: string) => void;
-  /** Only values in this list may be removed; built-ins are code constants. */
-  removable?: string[];
-  /** Client count per value, used to warn before removing something in use. */
-  removeUsage?: Record<string, number>;
-  t: TFn;
-}) {
-  const lab = (v: string) => (render ? render(v) : v);
-  const toggleValue = (v: string) => {
-    onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
-  };
-
-  const cb = useCombobox({
-    options, labelOf: lab, selected, onSelect: toggleValue, closeOnSelect: false,
-    // Backspace on an empty search removes the most recent pick, so a
-    // mis-filtered multi-select can be corrected without reaching for a mouse.
-    onRemoveLast: () => { if (selected.length) onChange(selected.slice(0, -1)); },
-  });
-
-  return (
-    <div className="ms-wrap cbx" data-cbx-root={cb.rootId}>
-      <button
-        id={cb.triggerId}
-        type="button"
-        className={`ms-trigger ${selected.length > 0 ? "ms-active" : ""}`}
-        aria-haspopup="listbox"
-        aria-expanded={cb.open}
-        onClick={cb.toggle}
-      >
-        <span className="ms-value">
-          {selected.length === 0 ? label
-            : selected.length === 1 ? lab(selected[0])
-            : `${lab(selected[0])} +${selected.length - 1}`}
-        </span>
-        <ChevronDown size={12} />
-      </button>
-      {cb.open && (
-        <div className="ms-menu">
-          <div className="ms-search-row">
-            <input
-              id={cb.inputId}
-              className="ms-search"
-              role="combobox"
-              aria-expanded
-              aria-controls={cb.menuId}
-              aria-autocomplete="list"
-              aria-activedescendant={cb.filtered[cb.active] ? cb.optionId(cb.active) : undefined}
-              value={cb.query}
-              placeholder={t("common.search")}
-              onChange={e => cb.setQuery(e.target.value)}
-              onKeyDown={cb.onKeyDown}
-            />
-          </div>
-          {/* The listbox role sits here, not on .ms-menu: the options are direct
-              children of this element, which is what the role requires. */}
-          <div className="ms-list" id={cb.menuId} role="listbox">
-            {cb.filtered.length === 0 && <div className="ms-empty">{t("common.noMatches")}</div>}
-            {cb.filtered.map((o, i) => {
-              // Only saved (custom) values, and only while nothing references them.
-              // A value still attached to clients cannot be removed: deleting it from
-              // the list would leave those clients pointing at a value that no longer
-              // exists anywhere in the UI. The count on the row explains why.
-              const used = removeUsage?.[o] ?? 0;
-              const canRemove = Boolean(onRemove && removable?.includes(o) && used === 0);
-              return (
-                <div
-                  key={o}
-                  /* role="none" keeps this wrapper out of the a11y tree so the
-                     option is a direct child of the listbox; a role="option"
-                     here would wrap a nested button, which is invalid ARIA. */
-                  role="none"
-                  className={`ms-opt-row ${selected.includes(o) ? "ms-opt-on" : ""} ${i === cb.active ? "ms-opt-active" : ""}`}
-                  onMouseEnter={() => cb.setActive(i)}
-                >
-                  <button
-                    id={cb.optionId(i)}
-                    type="button"
-                    role="option"
-                    aria-selected={selected.includes(o)}
-                    className="ms-opt"
-                    tabIndex={-1}
-                    onClick={() => toggleValue(o)}
-                  >
-                    <span className="ms-check">{selected.includes(o) && <Check size={11} />}</span>
-                    <span className="ms-opt-label">{lab(o)}</span>
-                    {used > 0 && <span className="ms-opt-count">{num(used)}</span>}
-                  </button>
-                  {canRemove && (
-                    <button
-                      type="button"
-                      className="ms-opt-del"
-                      title={t("refData.removeTitle")}
-                      aria-label={t("refData.removeAria", { value: lab(o) })}
-                      onClick={() => {
-                        // Removing the value from the saved list does NOT touch
-                        // clients already using it, so say so before doing it.
-                        const msg = used > 0
-                          ? t("refData.removeUsedConfirm", { value: lab(o), n: used })
-                          : t("refData.removeConfirm", { value: lab(o) });
-                        if (!confirm(msg)) return;
-                        onChange(selected.filter(x => x !== o));
-                        onRemove?.(o);
-                      }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {selected.length > 0 && <button type="button" className="ms-clear" onClick={() => onChange([])}>{t("clients.clearSelection")}</button>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } }; onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, periodBreakdowns, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } };
+  /**
+   * Period-scoped per-status / per-location / per-channel counts, so the stage
+   * panel, funnel, conversion rate and location bars describe the same window as
+   * the KPI cards rather than all time.
+   */
+  periodBreakdowns?: { statusCounts?: Record<string, number>; locationCounts?: Record<string, number>; channelCounts?: Record<string, number>; totals?: { total: number; won: number; lost: number; waiting: number; other: number } };
+  onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean; t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
-  const topLocations = useMemo(() => { const m = new Map<string,number>(); clients.forEach(c=>m.set(c.location,(m.get(c.location)||0)+1)); return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5); }, [clients]);
+  // Same shared colour map the rest of the app resolves through.
+  const colors = useOptionColors();
+
+  /**
+   * Counts for the panels that must agree with the KPI cards.
+   *
+   * The API returns these scoped to the selected period; the client-derived
+   * versions describe all time. Picking "this week" used to move the seven cards
+   * and leave the funnel, stage panel and location bars on the whole history, so
+   * one screen showed two different periods side by side. These are the period's
+   * numbers, falling back to the all-time computation only when the API has not
+   * answered yet (first paint) so the panel is never blank.
+   */
+  const periodCounts = periodBreakdowns;
+  const statusCountFor = (status: string): number =>
+    periodCounts?.statusCounts?.[status] ?? 0;
+  const locationEntries: Array<[string, number]> = useMemo(() => {
+    const source: Array<[string, number]> = periodCounts?.locationCounts
+      ? Object.entries(periodCounts.locationCounts)
+      : (() => {
+          const m = new Map<string, number>();
+          clients.forEach((c) => m.set(c.location, (m.get(c.location) ?? 0) + 1));
+          return [...m.entries()] as Array<[string, number]>;
+        })();
+    return source.sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [periodCounts, clients]);
+  const periodTotal = periodCounts?.totals?.total ?? clients.length;
 
   // Which contact role the sales performance panel is reporting on. Defaults to
   // the 2nd contact: that is the number most reps could not previously see at
@@ -1204,37 +1313,40 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
   // Status panel: every pipeline stage in registry order, followed by the
   // user-defined statuses created on the clients page. Without the second half,
   // a status added there never appeared on the dashboard at all.
+  //
+  // Counts come from the period-scoped map so the stage bars describe the same
+  // window as the KPI cards; the all-time client list is only the fallback for
+  // the first paint, before the analytics response has landed.
   const stageCounts = useMemo(() => {
     const stages = PIPELINE_STAGES.map((stage) => ({
       value: stage.value,
-      color: stage.color,
-      count: clients.filter((c) => c.status === stage.value).length,
+      // Through optionColor, not stage.color directly: an admin-set override has
+      // to win here too, or the stage panel would ignore the options page while
+      // the pill beside every client honoured it.
+      color: optionColor("statuses", stage.value, colors),
+      count: statusCountFor(stage.value),
     }));
     const custom = (allStatuses ?? [])
       .filter((value) => !PREDEFINED_STATUSES.includes(value))
       .map((value) => ({
         value,
-        color: statusColor(value),
-        count: clients.filter((c) => c.status === value).length,
+        color: optionColor("statuses", value, colors),
+        count: statusCountFor(value),
       }));
     return [...stages, ...custom];
-  }, [clients, allStatuses]);
+  }, [allStatuses, colors, periodCounts]);
 
-  const inProgress = useMemo(
-    () => clients.filter((c) => isInProgress(c.status)).length,
-    [clients],
-  );
+  // "Waiting" is the period total, so the funnel header and the KPI card it sits
+  // beside cannot disagree.
+  const inProgress = periodCounts?.totals?.waiting
+    ?? clients.filter((c) => isInProgress(c.status)).length;
 
   // Funnel: the active pipeline (everything up to "Contracted"), each step
   // showing its pass rate from the previous one. "Final loss" is terminal and
   // sits outside the funnel, so it is reported separately below.
-  //
-  // Written as a two-pass reduce rather than a loop with a reassigned variable:
-  // mutating a `let` while building a memo trips the compiler's
-  // "cannot reassign variable after render completes" rule.
   const funnelStages = useMemo(() => {
     const active = PIPELINE_STAGES.filter((s) => s.outcome !== "lost");
-    const counts = active.map((stage) => clients.filter((c) => c.status === stage.value).length);
+    const counts = active.map((stage) => statusCountFor(stage.value));
     return active.map((stage, i) => ({
       stage,
       count: counts[i],
@@ -1243,10 +1355,14 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
       rate: i === 0 || counts[i - 1] === 0 ? null : Math.round((counts[i] / counts[i - 1]) * 100),
       entering: i === 0,
     }));
-  }, [clients]);
+  }, [periodCounts]);
 
-  const finalConversionRate = clients.length > 0
-    ? Math.round((clients.filter((c) => isWon(c.status)).length / clients.length) * 100)
+  // Same window as the cards above it, so the headline rate is not an all-time
+  // figure sitting under a weekly funnel.
+  const wonInPeriod = periodCounts?.totals?.won
+    ?? clients.filter((c) => isWon(c.status)).length;
+  const finalConversionRate = periodTotal > 0
+    ? Math.round((wonInPeriod / periodTotal) * 100)
     : 0;
 
   return (
@@ -1260,15 +1376,20 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         </div>
         <div className="dashboard-hero-summary">
           <span>{t("dash.clientOverview")}</span>
-          <strong>{MONEY.format(clients.length)}</strong>
-          <small>{t("dash.clientsInThisView")}</small>
+          {/* The PERIOD's client count, not the all-time list. This used to read
+              `clients.length`, so "This week" showed a weekly spend beside a
+              lifetime client total. */}
+          <strong>{MONEY.format(periodTotal)}</strong>
+          <small>{t("dash.clientsInThisView", { period: t(`period.${periodKind}`) })}</small>
           <button type="button" onClick={onExport} disabled={exporting}><Download size={14} />{exporting ? t("dash.exporting") : t("dash.exportReport")}</button>
         </div>
       </header>
-      {/* Reporting period — scopes the six cards below. Defaults to this week. */}
+      {/* Reporting period — scopes every panel below. The tab list is driven by
+          PERIOD_KINDS rather than hardcoded here, so adding a window is a
+          one-line change in reporting.ts and it cannot drift out of sync. */}
       <div className="period-bar">
         <div className="period-tabs" role="group" aria-label={t("period.label")}>
-          {(["week", "month", "all", "custom"] as PeriodKind[]).map(k => (
+          {PERIOD_KINDS.map(k => (
             <button
               key={k}
               type="button"
@@ -1282,10 +1403,19 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         </div>
         {periodKind === "custom" && (
           <div className="period-custom">
-            <input type="date" value={customFrom} onChange={e => onCustomRange(e.target.value, customTo)} aria-label={t("common.from")} />
-            <span>–</span>
-            <input type="date" value={customTo} onChange={e => onCustomRange(customFrom, e.target.value)} aria-label={t("common.to")} />
-          </div>
+              {/* Visible From / To labels. These existed only as aria-labels, so the
+                  two pickers rendered as unlabelled boxes and the active range was
+                  invisible. */}
+              <label className="period-custom-field">
+                <span>{t("common.from")}</span>
+                <input type="date" value={customFrom} onChange={e => onCustomRange(e.target.value, customTo)} aria-label={t("common.from")} />
+              </label>
+              <span className="period-custom-sep">–</span>
+              <label className="period-custom-field">
+                <span>{t("common.to")}</span>
+                <input type="date" value={customTo} onChange={e => onCustomRange(customFrom, e.target.value)} aria-label={t("common.to")} />
+              </label>
+            </div>
         )}
         <span className="period-summary">
           {periodLoading
@@ -1332,13 +1462,13 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         <div className="panel-heading">
           <h3>{t("stage.title")} <small>{scoped ? t("dash.scopeMine") : t("dash.scopeAll")}</small></h3>
         </div>
-        <div className="stage-total-row">
-          <span className="stage-total-label">{t("stage.total")}</span>
-          <strong className="stage-total-value">{num(clients.length)}</strong>
-        </div>
         <div className="stage-rows">
           {stageCounts.map(({ value, color, count }) => {
-            const pct = clients.length > 0 ? Math.round((count / clients.length) * 100) : 0;
+            // Denominator is the PERIOD total, not `clients.length` (the whole
+            // all-time book). With the two mixed, a weekly view showed every bar
+            // as a sliver of 337 while the header claimed a total the bars did
+            // not add up to.
+            const pct = periodTotal > 0 ? Math.round((count / periodTotal) * 100) : 0;
             return (
               <button
                 type="button"
@@ -1357,6 +1487,13 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
               </button>
             );
           })}
+        </div>
+        {/* Total moved BELOW the stages, and now reports the selected period, so
+            it reads as the sum of the bars directly above it rather than as an
+            unrelated headline. */}
+        <div className="stage-total-row stage-total-row-footer">
+          <span className="stage-total-label">{t("stage.total")}</span>
+          <strong className="stage-total-value">{num(periodTotal)}</strong>
         </div>
       </section>
 
@@ -1413,7 +1550,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
             <div className="roi-head"><span>{t("roi.channel")}</span><span>{t("roi.spend")}</span><span>{t("roi.won")}</span><span>{t("roi.cpa")}</span></div>
             {metrics.filter((m: Metric)=>m.totalClients>0).map((m: Metric)=>(
               <div className="roi-row" key={m.channel}>
-                <span className="chan-cell"><i className="dot" style={{background:CH_COLORS[m.channel]}}/>{m.platform}</span>
+                <span className="chan-cell"><i className="dot" style={{background:optionColor("channels", m.channel, colors)}}/>{m.platform}</span>
                 <span>{sar(m.spend)}</span><span>{m.won}</span>
                 <span className={m.cpa<100?"good":m.cpa<500?"":"bad"}>{m.cpa > 0 ? sar(m.cpa) : "—"}</span>
               </div>
@@ -1422,36 +1559,62 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         </div>
       </section>
 
-      {/* Recent clients (full width) */}
+      {/* Recent clients (full width).
+          A real table rather than a stack of rows. Each row used to be a flex box
+          whose most prominent text was the tiny uppercase "PROJECT" / "LOCATION"
+          label above the value, so the eye landed on a label that repeated the
+          column header instead of on the data. Here the headers sit once, above,
+          and the project and location carry the weight on the value itself. */}
       <section className="panel recent-clients-panel">
         <div className="panel-heading"><h3>{t("recent.title")}</h3><button className="btn-ghost" onClick={()=>onExport()} disabled={exporting} style={{fontSize:11}}>{t("common.export")}</button></div>
         {recentClients.length === 0 && <div className="empty-state">{t("recent.empty")}</div>}
-        {recentClients.map(c => (
-          <div className="recent-client-row" key={c.id}>
-            <span className="rc-avatar">{c.name.slice(0,2).toUpperCase()}</span>
-            <div className="rc-info">
-              <strong>{c.name}</strong>
-              <small>
-                <span className="rc-kv"><span className="rc-k">{t("recent.project")}</span><span className="rc-v">{c.project || "—"}</span></span>
-                {c.location ? <span className="rc-kv"><span className="rc-k">{t("recent.location")}</span><span className="rc-v">{c.location}</span></span> : null}
-              </small>
+        {recentClients.length > 0 && (
+          <div className="recent-table">
+            <div className="recent-head-row">
+              <span>{t("th.client")}</span>
+              <span>{t("recent.project")}</span>
+              <span>{t("recent.location")}</span>
+              <span>{t("th.source")}</span>
+              <span>{t("th.status")}</span>
             </div>
-            <span className="chan-tag-inline" style={{ flexShrink: 0 }}><i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>{channelLabel(t, c.acquisitionChannel)}</span>
-            <StatusPill status={c.status} t={t} style={{ flexShrink: 0 }} />
+            {recentClients.map(c => (
+              <div className="recent-row" key={c.id}>
+                <span className="recent-client">
+                  <span className="rc-avatar">{c.name.slice(0,2).toUpperCase()}</span>
+                  <span className="recent-client-name">{c.name}</span>
+                </span>
+                {/* The project is the point of this panel, so it is the value that
+                    is emphasised — not the column header above it. */}
+                <span className="recent-project">{c.project || "—"}</span>
+                <span className="recent-location">
+                  <i className="dot" style={{ background: optionColor("locations", c.location, colors) }} />
+                  {c.location || "—"}
+                </span>
+                <span className="chan-tag-inline"><i className="dot" style={{background:optionColor("channels", c.acquisitionChannel, colors)}}/>{channelLabel(t, c.acquisitionChannel)}</span>
+                <StatusPill status={c.status} t={t} />
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </section>
 
       {/* Top locations + Conversion funnel underneath */}
       <div className="dashboard-grid-2">
         <section className="panel">
-          <div className="panel-heading"><h3>{t("loc.title")}</h3><span className="muted" style={{fontSize:11}}>{t("loc.clients", { n: clients.length })}</span></div>
-          {topLocations.length === 0 && <div className="empty-state">{t("loc.noData")}</div>}
-          {topLocations.map(([loc, count], i) => (
+          <div className="panel-heading"><h3>{t("loc.title")}</h3><span className="muted" style={{fontSize:11}}>{t("loc.clients", { n: periodTotal })}</span></div>
+          {locationEntries.length === 0 && <div className="empty-state">{t("loc.noData")}</div>}
+          {locationEntries.map(([loc, count], i) => (
             <div className="loc-bar-row" key={loc}>
               <span className="loc-rank">#{i+1}</span>
-              <div className="loc-bar-track"><div className="loc-bar-fill" style={{width: `${Math.round(count/clients.length*100)}%`, background: ["#069de3","#0891b2","#f59e0b","#22c55e","#7c3aed"][i]}}/></div>
-              <span className="loc-name">{loc}</span>
+              {/* Coloured by the location itself, not by rank. A rank palette made
+                  the bar colour change whenever a client moved between cities, so
+                  the same location wore a different colour from one render to the
+                  next — and could not match an admin-set colour at all. */}
+              <div className="loc-bar-track"><div className="loc-bar-fill" style={{width: `${periodTotal > 0 ? Math.round((count/periodTotal)*100) : 0}%`, background: optionColor("locations", loc, colors)}}/></div>
+              <span className="loc-name">
+                <i className="dot" style={{ background: optionColor("locations", loc, colors) }} />
+                {loc}
+              </span>
               <span className="loc-count">{count}</span>
             </div>
           ))}
@@ -1464,17 +1627,20 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           <div className="funnel2">
             {funnelStages.map(({ stage, count, rate, entering }, i) => {
               const width = clients.length > 0 ? Math.max(2, Math.round((count / clients.length) * 100)) : 0;
+              // Resolved here so the funnel honours an admin-set colour, matching
+              // the stage panel and the pills rather than the code constant.
+              const stageColor = optionColor("statuses", stage.value, colors);
               return (
                 <div className="funnel2-step" key={stage.value}>
                   <div className="funnel2-head">
-                    <span className="funnel2-dot" style={{ background: stage.color }} />
+                    <span className="funnel2-dot" style={{ background: stageColor }} />
                     <span className="funnel2-name">{statusLabel(t, stage.value)}</span>
                     <span className="funnel2-count">{num(count)}</span>
                   </div>
                   <div className="funnel2-track">
                     <div
                       className="funnel2-fill"
-                      style={{ width: `${width}%`, background: stage.color, opacity: entering ? 1 : 0.82 }}
+                      style={{ width: `${width}%`, background: stageColor, opacity: entering ? 1 : 0.82 }}
                     />
                   </div>
                   {i > 0 && (
@@ -1498,7 +1664,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         <h3>{t("brk.title")} <small>{t("loc.clients", { n: clients.length })}</small></h3>
         <div className="table-head-row"><span>{t("brk.platform")}</span><span>{t("roi.spend")}</span><span>{t("brk.reach")}</span><span>{t("brk.clients")}</span><span>{t("roi.cpa")}</span></div>
         {metrics.map((item: Metric)=><div className="table-row" key={item.channel}>
-          <span className="chan-cell"><i className="dot" style={{background:CH_COLORS[item.channel]}}/>{item.platform}</span>
+          <span className="chan-cell"><i className="dot" style={{background:optionColor("channels", item.channel, colors)}}/>{item.platform}</span>
           <span>{sar(item.spend)}</span><span>{MONEY.format(item.reach)}</span><span>{item.totalClients}</span><span>{item.cpa.toFixed(2)}</span>
         </div>)}
       </section>
@@ -1513,7 +1679,23 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
-  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; columns: ResolvedColumn[]; onColumnsChange: (c: ResolvedColumn[]) => void; rtl: boolean; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
+  applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation,
+  onClearSelection,
+  onSelectAllMatching,
+  pager, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; columns: ResolvedColumn[]; onColumnsChange: (c: ResolvedColumn[]) => void; rtl: boolean; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>;
+  /** Clears the bulk selection. Always offered while anything is selected. */
+  onClearSelection?: () => void;
+  /** Ticks every client the current filter matches, across all pages. */
+  onSelectAllMatching?: () => void;
+  pager?: { page: number; pageCount: number; total: number; loading: boolean; onPage: (p: number) => void; t: TFn }; t: TFn }) {
+  // Page controls for the paged table. Supplied only in table mode — kanban
+  // renders the whole book at once, so a pager there would be meaningless.
+  const showPager = Boolean(pager && mode === "table");
+  const hasPrev = showPager && pager!.page > 1;
+  const hasNext = showPager && pager!.page < pager!.pageCount;
+  const rowFrom = showPager ? (pager!.page - 1) * 25 + 1 : 0;
+  const rowTo = showPager ? Math.min(pager!.page * 25, pager!.total) : 0;
+
   return (
     <div className="page">
       <div className="page-header">
@@ -1522,6 +1704,10 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
           {bulkCount>0&&<span className="selection-info">{t("clients.selectedCount",{n:bulkCount})}
             {isAdmin && <><button className="btn-danger-sm" onClick={onBulkDelete}>{t("clients.deleteSelected")}</button>
               <button className="btn-archive-sm" onClick={onArchiveSelected}>{t("clients.archiveSelected")}</button></>}
+            {/* Always offered while anything is ticked. Selecting every visible row
+                then wanting to change your mind had no way back except re-clicking
+                them one at a time. */}
+            <button className="btn-ghost" onClick={onClearSelection}>{t("clients.clearSelection")}</button>
           </span>}
           <div className="segmented">
             <button className={mode==="table"?"seg-active":""} onClick={()=>setMode("table")}><LayoutDashboard size={14}/>{t("clients.table")}</button>
@@ -1535,8 +1721,54 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
         </div>
       </div>
       <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} firstContacts={firstContacts} secondContacts={secondContacts} sortBy={sortBy} setSortBy={setSortBy} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveStatus={refData.onRemoveStatus} removableStatuses={refData.removableStatuses} statusUsage={refData.statusUsage} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
-      <div className="result-note">{t("clients.showing",{n:clients.length,total:allClients.length})} · {t("clients.selected",{n:selectedIds.size})}</div>
+      {/* One count for the whole page. This used to read `clients.length` and
+          `allClients.length`, which in table mode are the PAGE and the WHOLE BOOK —
+          so "last 30 days" rendered "25 of 337" while the pager underneath correctly
+          said "of 202". Both now come from the server's filtered total. */}
+      <div className="result-note">{mode === "table"
+        ? t("clients.showingRange", { from: rowFrom, to: rowTo, total: pager?.total ?? clients.length })
+        : t("clients.showing", { n: clients.length, total: allClients.length })}
+        {" · "}{t("clients.selected", { n: selectedIds.size })}
+        {/* Cross-page bulk select. Page-level select-all (the header checkbox)
+            covers what is on screen; this covers every row the current filter
+            matches, so a "delete all 202 in the last 30 days" is still possible
+            without paging through by hand. */}
+        {mode === "table" && selectedIds.size > 0 && pager && pager.total > clients.length && (
+          <button className="result-note-action" onClick={onSelectAllMatching}>
+            {t("clients.selectAllMatching", { n: pager.total })}
+          </button>
+        )}
+      </div>
       {mode==="table"? <ClientTable clients={clients} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} columns={columns} onColumnsChange={onColumnsChange} rtl={rtl} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} columns={columns} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
+      {/* Pager. Only in table mode — kanban shows the whole book. */}
+      {showPager && pager && (
+        <div className="table-pager">
+          <span className="table-pager-count">
+            {pager.loading
+              ? t("common.loading")
+              : pager.total === 0
+                ? t("clients.noResults")
+                : t("clients.showingRange", { from: rowFrom, to: rowTo, total: pager.total })}
+          </span>
+          <div className="table-pager-controls">
+            <button
+              className="btn-outline"
+              disabled={!hasPrev || pager.loading}
+              onClick={() => pager.onPage(pager.page - 1)}
+            >
+              {t("pager.prev")}
+            </button>
+            <span className="table-pager-page">{t("pager.pageOf", { page: pager.page, count: pager.pageCount })}</span>
+            <button
+              className="btn-outline"
+              disabled={!hasNext || pager.loading}
+              onClick={() => pager.onPage(pager.page + 1)}
+            >
+              {t("pager.next")}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1560,6 +1792,9 @@ function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdi
   onOpenDelete: (ids: string[], names: string[]) => void;
   onArchive?: (id: string) => void | Promise<void>;
 }) {
+  // Same shared colour map as the rest of the app, so a channel recoloured on
+  // the options page shows here without this component knowing the option exists.
+  const colors = useOptionColors();
   switch (col.key) {
     case "id":
       return <span className="id-cell" title={t("th.id")}>#{c.id}</span>;
@@ -1574,11 +1809,13 @@ function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdi
     case "status":
       return <StatusPill status={c.status} t={t} />;
     case "channel":
-      return <span className="chan-tag"><i className="dot" style={{ background: CH_COLORS[c.acquisitionChannel] }} />{channelLabel(t, c.acquisitionChannel)}</span>;
+      return <span className="chan-tag"><i className="dot" style={{ background: optionColor("channels", c.acquisitionChannel, colors) }} />{channelLabel(t, c.acquisitionChannel)}</span>;
     case "project":
       return <span>{c.project}</span>;
     case "location":
-      return <span>{c.location}</span>;
+      // Locations gained a colour here for the first time; previously this cell
+      // was plain text with nothing to distinguish one city from another.
+      return <span className="loc-tag"><i className="dot" style={{ background: optionColor("locations", c.location, colors) }} />{c.location}</span>;
     case "registeredAt":
       return <span className="muted">{c.createdAt ? new Date(c.createdAt).toLocaleDateString(dateLocale(lang)) : "—"}</span>;
     case "operation":
@@ -1746,6 +1983,7 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
   // it on every card too. Widths are ignored here: cards are fixed-width in a
   // 3-column board, so there is nothing for a width to act on.
   const show = (key: ColumnKey) => columns.find(c => c.key === key)?.hidden === false;
+  const colors = useOptionColors();
   const statusColumns: string[] = [...new Set([...(allStatuses ?? ["WAITING","WON","LOST"]), ...clients.map(c => c.status)])];
   return (
     <div className="kanban-board">
@@ -1764,11 +2002,11 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
                   <button className="icon-btn-sm" title={t("nav.archived")} onClick={e=>{e.stopPropagation();onArchive&&onArchive(c.id);}}><Archive size={12}/></button></>}
               </span></div>
               {show("channel") && <div className="card-ch">
-                <i className="dot" style={{background:CH_COLORS[c.acquisitionChannel]}}/>
+                <i className="dot" style={{background:optionColor("channels", c.acquisitionChannel, colors)}}/>
                 <span>{channelLabel(t, c.acquisitionChannel)}</span>
               </div>}
               {show("project") && <p className="card-project">{c.project}</p>}
-              {show("location") && <p className="card-location">{c.location}</p>}
+              {show("location") && <p className="card-location"><i className="dot" style={{background:optionColor("locations", c.location, colors)}}/>{c.location}</p>}
               {c.notes&&<p className="card-notes"><MessageSquare size={10}/>{c.notes.slice(0,40)}{c.notes.length>40?"...":""}</p>}
               {show("operation") && <strong className="card-op">{c.operationToTake}</strong>}
               {(show("firstContact") || show("secondContact")) && (

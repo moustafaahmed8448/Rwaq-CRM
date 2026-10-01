@@ -6,6 +6,7 @@ import {
   classifyStatus,
   isInProgress,
   parsePeriodKind,
+  PREDEFINED_STATUSES,
   resolvePeriod,
 } from "@/lib/reporting";
 
@@ -32,14 +33,20 @@ export async function GET(request: NextRequest) {
     const [metrics, periodClients, allClients, customStatuses, customLocations, customChannels] = await Promise.all([
       listMetrics({ from: period.fromStr, to: period.toStr }),
       // Client counts for the reporting window, still the signed-in user's own.
+      // Deliberately NOT includeArchived: an archived client is out of the book, so
+      // counting it inflated every figure on this page — the KPI cards, the stage
+      // panel, the funnel, the location and channel bars, the timeline and the
+      // salesperson reports all derive from this one array. This is the only
+      // change needed to exclude them from all of them at once.
       listClients({
-        includeArchived: true,
         assignee: assigneeScope(sessionUser),
         createdFrom: period.fromStr,
         createdTo: period.toStr,
       }),
       // Unfiltered, used only to build the channel menu: it should still offer
-      // every channel in the workspace, not just the ones used this week.
+      // every channel in the workspace, not just the ones used this week — and
+      // keeps archived rows on purpose, so archiving the last client on a channel
+      // does not make that channel vanish from the dropdown.
       listClients({ includeArchived: true, assignee: assigneeScope(sessionUser) }),
       readSetting("statuses"),
       readSetting("locations"),
@@ -155,6 +162,41 @@ export async function GET(request: NextRequest) {
     const secondSalespersonReport = roleReport((c) => c.secondContactPerson);
 
     /**
+     * Per-status counts INSIDE the period.
+     *
+     * The dashboard's stage panel, funnel and conversion rate used to recompute
+     * these in the browser from the full client list, so selecting "this week"
+     * changed the seven KPI cards and left the funnel, stage bars and location
+     * panel describing all time — the two halves of one screen disagreeing.
+     * Counting here means every section describes the same window.
+     *
+     * Every status is pre-seeded to 0 so a stage with no clients in the window
+     * still renders its row at zero, rather than vanishing from the funnel and
+     * making the pass-rate chain unreadable.
+     */
+    const statusCounts: Record<string, number> = {};
+    for (const stage of PREDEFINED_STATUSES) statusCounts[stage] = 0;
+    for (const custom of customStatuses) if (!statusCounts[custom]) statusCounts[custom] = 0;
+    for (const client of periodClients) {
+      const key = client.status;
+      statusCounts[key] = (statusCounts[key] ?? 0) + 1;
+    }
+
+    /** Per-location counts inside the period, for the "top locations" panel. */
+    const locationCounts: Record<string, number> = {};
+    for (const client of periodClients) {
+      const key = client.location;
+      if (key) locationCounts[key] = (locationCounts[key] ?? 0) + 1;
+    }
+
+    /** Per-channel counts inside the period, for the channel breakdown panel. */
+    const channelCounts: Record<string, number> = {};
+    for (const client of periodClients) {
+      const key = client.acquisitionChannel;
+      if (key) channelCounts[key] = (channelCounts[key] ?? 0) + 1;
+    }
+
+    /**
      * Outcome-split timeline for the dashboard trend chart.
      *
      * Buckets the period's clients by WEEK and splits each bucket with the same
@@ -222,6 +264,11 @@ export async function GET(request: NextRequest) {
       timeline,
       totalClients: periodClients.length,
       totals,
+      // Period-scoped breakdowns so every dashboard panel describes the same
+      // window as the KPI cards above them.
+      statusCounts,
+      locationCounts,
+      channelCounts,
       campaignNames,
       campaignCount: metrics.length,
       customStatuses,

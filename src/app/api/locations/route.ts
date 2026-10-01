@@ -16,30 +16,45 @@ export async function GET(request: NextRequest) {
     const clients = await listClients({ includeArchived: true });
     const clientLocations = [...new Set(clients.map((c) => c.location).filter(Boolean))];
     const custom = await readSetting("locations");
-    const all = [...DEFAULT_LOCATIONS, ...clientLocations, ...custom];
-
-    // Deduplicate while preserving order
-    const seen = new Set<string>();
-    const unique: string[] = [];
-    for (const loc of all) {
-      const key = loc.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(loc);
-      }
-    }
+    const unique = dedupeLocations([...DEFAULT_LOCATIONS, ...clientLocations, ...custom]);
     return NextResponse.json({
       locations: unique,
       // How many clients currently use each location. The delete flow warns with
       // this, because removing a value from the saved list does NOT touch the
       // clients already set to it.
-      usage: Object.fromEntries(unique.map((loc) => [loc, clients.filter((c) => c.location === loc).length])),
+      usage: usageFor(unique, clients),
       // Only these can be removed; the built-ins are code constants.
       removable: custom,
     });
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }
+}
+
+/**
+ * Location list, de-duplicated case-insensitively while preserving order.
+ *
+ * "Riyadh" is a built-in, but a client can hold "riyadh"; without folding case
+ * the admin page would list the same city twice and offer to delete the wrong
+ * one.
+ */
+function dedupeLocations(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const loc of values) {
+    const key = loc.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(loc);
+  }
+  return unique;
+}
+
+/** Client count per location, case-insensitively to match the delete guard. */
+function usageFor(locations: string[], clients: { location: string }[]): Record<string, number> {
+  return Object.fromEntries(
+    locations.map((loc) => [loc, clients.filter((c) => c.location.toLowerCase() === loc.toLowerCase()).length]),
+  );
 }
 
 /**
@@ -82,7 +97,19 @@ export async function DELETE(request: NextRequest) {
     }
     await removeSettingValue("locations", label);
     const remaining = await readSetting("locations");
-    return NextResponse.json({ ok: true, locations: [...DEFAULT_LOCATIONS, ...remaining] });
+    // Return the full picture, not just the value list. The clients page keeps
+    // `removable` and `usage` in state to decide whether to show a trash icon;
+    // returning only `locations` forced it to either guess or blank those maps,
+    // which silently hid delete for every other option.
+    const clients = await listClients({ includeArchived: true });
+    const clientLocations = [...new Set(clients.map((c) => c.location).filter(Boolean))];
+    const unique = dedupeLocations([...DEFAULT_LOCATIONS, ...clientLocations, ...remaining]);
+    return NextResponse.json({
+      ok: true,
+      locations: unique,
+      removable: remaining,
+      usage: usageFor(unique, clients),
+    });
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }

@@ -35,7 +35,7 @@ export function databaseErrorMessage(error: unknown): string {
 
 /* ── Reference data (channels / statuses / locations) ─────────────────────── */
 
-export type SettingKey = "channels" | "statuses" | "locations" | "logo";
+export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "optionColors";
 
 export async function readSetting(key: SettingKey): Promise<string[]> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -83,6 +83,127 @@ export async function writeSettingValue(key: SettingKey, value: string): Promise
 
 export async function clearSettingValue(key: SettingKey): Promise<void> {
   await prisma.setting.deleteMany({ where: { key } });
+}
+
+/* ── Object settings (e.g. the admin-set reference-option colours) ───────────
+   A third shape, alongside the string arrays and the single-string scalars: the
+   "optionColors" row holds { statuses: {…}, channels: {…}, locations: {…} }. It
+   is kept in its own key rather than folded into the existing arrays precisely
+   so the array contract above — and every reader of it — stays untouched, and so
+   colouring an option needs no migration. */
+
+export async function readSettingObject(key: SettingKey): Promise<Record<string, unknown> | null> {
+  const row = await prisma.setting.findUnique({ where: { key } });
+  // Guard the shape: an array would satisfy a naive `typeof === "object"` check
+  // and then be indexed by kind, yielding undefined everywhere.
+  if (!row?.value || typeof row.value !== "object" || Array.isArray(row.value)) return null;
+  return row.value as Record<string, unknown>;
+}
+
+export async function writeSettingObject(
+  key: SettingKey,
+  value: Record<string, unknown>,
+): Promise<void> {
+  await prisma.setting.upsert({
+    where: { key },
+    update: { value: value as Prisma.InputJsonValue },
+    create: { key, value: value as Prisma.InputJsonValue },
+  });
+}
+
+/* ── Reference-option rename (admin) ───────────────────────────────────────
+   A reference value is not a foreign key — it is a plain string copied onto
+   every Client row. Renaming one therefore means rewriting that string
+   everywhere it was stored, which is why this cannot be a Setting-only edit:
+   leaving the clients behind would strand them on a value that no longer exists
+   anywhere in the UI, which is exactly what the delete guard exists to prevent.
+
+   Everything runs in ONE transaction. A partial rename (clients rewritten, list
+   not, or vice versa) is worse than no rename at all, so either all of it
+   applies or none of it does. */
+
+export type RenameField = "status" | "acquisitionChannel" | "location";
+
+export type RenameOutcome =
+  | { ok: true; clients: number; metrics: number }
+  | { ok: false; reason: "collision"; label: string };
+
+/**
+ * Renames a reference value across every place it is stored.
+ *
+ * `actor` is threaded into the activity log so the timeline on each affected
+ * client shows who changed it and what it changed from — a silent bulk rewrite
+ * of 300 rows would otherwise be invisible to everyone who owns those clients.
+ *
+ * Locations match case-insensitively (matching every other location guard in
+ * the app); status and channel match exactly, because those are stored as
+ * upper-cased tokens and folding case would silently rewrite rows the admin did
+ * not ask about.
+ */
+export async function renameOptionValue(
+  field: RenameField,
+  from: string,
+  to: string,
+  actor: string,
+): Promise<RenameOutcome> {
+  const clientWhere =
+    field === "location"
+      ? { [field]: { equals: from, mode: "insensitive" as const } }
+      : { [field]: from };
+
+  // Pre-flight, inside the transaction: a channel rename can violate
+  // MarketingMetric's @@unique([startDate, endDate, channel]). Detecting it
+  // first turns a mid-write constraint error into a clean refusal.
+  if (field === "acquisitionChannel") {
+    const clash = await prisma.marketingMetric.findFirst({
+      where: { channel: to, NOT: { channel: from } },
+      select: { id: true },
+    });
+    if (clash) return { ok: false, reason: "collision", label: to };
+  }
+
+  const affected = await prisma.client.findMany({
+    where: clientWhere,
+    select: { id: true, activityLog: true },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    // Per-row rather than one updateMany: each row's activityLog has to be
+    // appended to individually, and a single updateMany cannot express that.
+    // Batched so a rename touching hundreds of clients is still a handful of
+    // round-trips instead of one per client.
+    const BATCH = 50;
+    for (let i = 0; i < affected.length; i += BATCH) {
+      const slice = affected.slice(i, i + BATCH);
+      await Promise.all(
+        slice.map((row) => {
+          const log = Array.isArray(row.activityLog) ? (row.activityLog as unknown as ActivityEntry[]) : [];
+          const entry = makeActivityEntry(
+            field === "status" ? "STATUS_CHANGE" : "FIELD_EDIT",
+            actor,
+            { field, oldValue: from, newValue: to },
+          );
+          return tx.client.update({
+            where: { id: row.id },
+            data: {
+              [field]: to,
+              activityLog: [...log, entry] as unknown as Prisma.InputJsonValue,
+            },
+          });
+        }),
+      );
+    }
+
+    if (field === "acquisitionChannel") {
+      await tx.marketingMetric.updateMany({ where: { channel: from }, data: { channel: to } });
+    }
+  });
+
+  return {
+    ok: true,
+    clients: affected.length,
+    metrics: field === "acquisitionChannel" ? await prisma.marketingMetric.count({ where: { channel: to } }) : 0,
+  };
 }
 
 /* ── Clients ─────────────────────────────────────────────────────────────── */
@@ -135,17 +256,24 @@ export function toClientRow(row: ClientRecordDb): ClientRow {
 }
 
 export type ClientFilters = {
-  channel?: string;
-  status?: string;
-  location?: string;
+  /**
+   * Each of these accepts a single value OR a list. A list ORs within the field
+   * while still ANDing with the other fields — the same semantics as
+   * matchesFilters() in src/app/page.tsx, which the filter bar has always used.
+   * A single string is kept working so the existing callers (analytics, options
+   * usage counts, the archived page) need no change.
+   */
+  channel?: string | string[];
+  status?: string | string[];
+  location?: string | string[];
   /**
    * Restrict to clients whose FIRST contact matches. Composes with
    * `secondContact` as AND, so `first=A&second=B` narrows to the pairing rather
    * than the union.
    */
-  firstContact?: string;
+  firstContact?: string | string[];
   /** Restrict to clients whose SECOND contact matches. See `firstContact`. */
-  secondContact?: string;
+  secondContact?: string | string[];
   /**
    * Restrict to clients where this person is the 1st or 2nd contact. Used to
    * scope Sales/CRM users to their own book. Matched with `equals` rather than
@@ -162,27 +290,80 @@ export type ClientFilters = {
   createdTo?: string;
   archived?: boolean;
   includeArchived?: boolean;
+  /**
+   * Free-text search over name / phone / project / notes.
+   *
+   * Digits are compared digit-only on the phone column so "1018240912" finds
+   * "+20 101 824 0912" — the same normalization matchesFilters() applied in the
+   * browser before this moved server-side. Without it a search would silently
+   * stop finding rows that the old client-side filter found, which is worse than
+   * no search at all.
+   *
+   * PostgreSQL has no portable "strip all non-digits" in a `contains`, so the
+   * comparison normalizes both sides in JS and ORs the fields.
+   */
+  search?: string;
 };
+
+/**
+ * Normalises `where.AND` to an array so a clause can be appended without
+ * discarding the ones already there.
+ *
+ * This exists because three different filters (assignee, location list, free
+ * text) each contribute an OR group, and Prisma's `AND` accepts either a single
+ * object or an array. Assigning `where.AND = [...]` blindly at each site is how
+ * the location filter silently vanished the moment a search was also active.
+ */
+function existingAnd(where: Prisma.ClientWhereInput): Prisma.ClientWhereInput[] {
+  const current = where.AND;
+  if (Array.isArray(current)) return current;
+  return current ? [current] : [];
+}
 
 export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
   const where: Prisma.ClientWhereInput = {};
-  if (filters.channel) where.acquisitionChannel = filters.channel;
-  if (filters.status && filters.status !== "ALL") where.status = filters.status;
-  if (filters.location) where.location = { contains: filters.location, mode: "insensitive" };
+  // Normalises the string-or-list fields to an array. "ALL" is the filter bar's
+  // sentinel for "no filter" and must not become a literal value.
+  const asList = (value: string | string[] | undefined): string[] =>
+    (Array.isArray(value) ? value : value ? [value] : []).filter(
+      (v) => v && v !== "ALL",
+    );
+
+  // Status, channel and location all filter the same way: an OR of exact,
+// case-insensitive equality tests per value, folded into AND.
+//
+// Written as OR-of-equals rather than `{ in: [...] }` because Prisma's `in`
+// cannot take a case-insensitive mode — `in` is always exact. With `in`, a
+// client stored "Riyadh" dropped out of a "riyadh" filter, and any value whose
+// casing differed from the stored column vanished silently. The OR form matches
+// on case, so a filter can never disagree with the dropdown it was chosen from.
+//
+// Pushed into AND rather than assigned to where.OR, because `search` also
+// contributes an OR group below and one would overwrite the other.
+  const anyOf = (field: string, values: string[]): Prisma.ClientWhereInput =>
+    ({ OR: values.map((v) => ({ [field]: { equals: v, mode: "insensitive" } })) });
+
+  const channels = asList(filters.channel);
+  const statuses = asList(filters.status);
+  const locations = asList(filters.location);
+  const groups: Prisma.ClientWhereInput[] = [];
+  if (channels.length > 0) groups.push(anyOf("acquisitionChannel", channels));
+  if (statuses.length > 0) groups.push(anyOf("status", statuses));
+  if (locations.length > 0) groups.push(anyOf("location", locations));
+  if (groups.length > 0) where.AND = [...existingAnd(where), ...groups];
   // 1st and 2nd contact are separate filters that AND together, so selecting a
-  // 1st and a 2nd contact narrows to clients held by that exact pairing. The
-  // UI dropdowns pass whole names, so this uses `equals` rather than the
-  // `contains` a free-typed search would need.
-  if (filters.firstContact) {
-    where.firstContactPerson = { equals: filters.firstContact, mode: "insensitive" };
-  }
-  if (filters.secondContact) {
-    where.secondContactPerson = { equals: filters.secondContact, mode: "insensitive" };
-  }
+  // 1st and a 2nd contact narrows to clients held by that exact pairing. Same
+  // OR-of-equals treatment as status/channel — `in` plus `mode` is not a valid
+  // Prisma filter, so it was silently ignored.
+  const firstContacts = asList(filters.firstContact);
+  if (firstContacts.length > 0) where.firstContactPerson = { in: firstContacts };
+  const secondContacts = asList(filters.secondContact);
+  if (secondContacts.length > 0) where.secondContactPerson = { in: secondContacts };
   if (filters.assignee) {
     // AND, not OR: this has to compose with an explicit salesperson filter
     // rather than overwrite it.
     where.AND = [
+      ...existingAnd(where),
       {
         OR: [
           { firstContactPerson: { equals: filters.assignee, mode: "insensitive" } },
@@ -201,6 +382,33 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
       ...(filters.createdTo ? { lt: startOfLocalDay(filters.createdTo) } : {}),
     };
   }
+  if (filters.search) {
+    const q = filters.search.trim();
+    if (q) {
+      // Same folding matchesFilters() used in the browser: spaces, dashes and
+      // parentheses are ignored so a phone matches however it was typed. The
+      // text fields get a plain case-insensitive contains; the phone gets the
+      // digits-only comparison.
+      const text = q.replace(/[\s\-().]/g, "");
+      const clauses: Prisma.ClientWhereInput[] = [
+        { name: { contains: q, mode: "insensitive" } },
+        { project: { contains: q, mode: "insensitive" } },
+        { notes: { contains: q, mode: "insensitive" } },
+      ];
+      // The phone is matched BOTH ways, because Postgres compares the stored
+      // string as-is: a stored "+20 101 824 0912" would never match `contains`
+      // "1018240912". Comparing the punctuation-stripped query covers the common
+      // case; including the raw query means a partially-typed fragment like
+      // "+20 101" still matches. A true digits-insensitive match against the
+      // STORED side would need a functional index (SQL 006) — noted rather than
+      // silently approximated.
+      if (text) clauses.push({ phoneNumber: { contains: text } });
+      if (q) clauses.push({ phoneNumber: { contains: q, mode: "insensitive" } });
+      // Folded in as AND so it composes with the assignee/date/location clauses
+      // above, rather than overwriting where.AND.
+      where.AND = [...existingAnd(where), { OR: clauses }];
+    }
+  }
   return where;
 }
 
@@ -210,6 +418,108 @@ export async function listClients(filters: ClientFilters = {}): Promise<ClientRo
     orderBy: { lastUpdateDate: "desc" },
   });
   return rows.map(toClientRow);
+}
+
+/* ── Paged client listing (the clients table) ─────────────────────────────────
+   `listClients` above returns EVERY matching row and is what the dashboard, the
+   kanban and the reference-option usage counts depend on. It must keep doing
+   that: those figures describe the whole book, so silently paging them would
+   make the KPI cards disagree with the funnel.
+
+   This sibling exists purely so the clients TABLE can fetch one screen at a
+   time. Before it, every page view downloaded all 337 clients — ~270 KB
+   uncompressed, most of it the per-row activityLog that the table never renders.
+   The detail page already fetches one client on its own, so dropping
+   activityLog here costs the table nothing. */
+
+export type ClientPage = {
+  rows: ClientRow[];
+  /** Total rows matching the filter, ignoring the page window. */
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+};
+
+export type ClientSort = "recent" | "oldest" | "registered" | "registeredOldest";
+
+/** Page size bounds. The cap stops a hand-crafted ?pageSize=100000 from becoming
+    a denial-of-service on our own database. */
+const MAX_PAGE_SIZE = 200;
+
+/**
+ * One page of clients, plus the total match count the pager needs.
+ *
+ * The count is fetched alongside rather than as `rows.length`, because the
+ * pager needs to know how many pages exist — not how many rows came back.
+ *
+ * `orderBy` mirrors sortClients() in src/app/page.tsx exactly. Numeric ids
+ * compare as numbers so id 9 sorts before id 10; the same tie-breaker applies
+ * here or the two disagree on the "recent" order for rows saved together.
+ */
+export async function listClientsPaged(
+  filters: ClientFilters,
+  options: { page?: number; pageSize?: number; sort?: ClientSort } = {},
+): Promise<ClientPage> {
+  const pageSize = Math.min(Math.max(options.pageSize ?? 25, 1), MAX_PAGE_SIZE);
+  // Clamped to >= 1 so a negative or NaN ?page= yields page 1 rather than a
+  // negative OFFSET, which Postgres rejects.
+  const requested = Number(options.page ?? 1);
+  const page = Number.isFinite(requested) ? Math.max(Math.floor(requested), 1) : 1;
+
+  const orderBy: Prisma.ClientOrderByWithRelationInput[] =
+    options.sort === "oldest"
+      ? [{ lastUpdateDate: "desc" }, { id: "asc" }]
+      : options.sort === "registered"
+        ? [{ createdAt: "desc" }, { id: "desc" }]
+        : options.sort === "registeredOldest"
+          ? [{ createdAt: "asc" }, { id: "asc" }]
+          // Default matches the order `listClients` already returns, so the
+          // first page of the table is unchanged by this work.
+          : [{ lastUpdateDate: "desc" }, { id: "desc" }];
+
+  const where = clientWhere(filters);
+
+  const [rows, total] = await Promise.all([
+    prisma.client.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.client.count({ where }),
+  ]);
+
+  return {
+    rows: rows.map(toClientRow),
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(Math.ceil(total / pageSize), 1),
+  };
+}
+
+/**
+ * Just the ids matching a filter.
+ *
+ * Backs "select all N matching" on the clients table. Selecting 200 rows must not
+ * cost 200 full client records (each with its activity log) just to learn which
+ * ids they are — this selects the single `id` column instead.
+ */
+export async function listClientIds(filters: ClientFilters): Promise<{ rows: never[]; ids: string[]; total: number; page: number; pageSize: number; pageCount: number }> {
+  const where = clientWhere(filters);
+  const [rows, total] = await Promise.all([
+    prisma.client.findMany({ where, select: { id: true }, orderBy: { lastUpdateDate: "desc" } }),
+    prisma.client.count({ where }),
+  ]);
+  return {
+    rows: [] as never[],
+    ids: rows.map((r) => r.id),
+    total,
+    page: 1,
+    pageSize: total,
+    pageCount: 1,
+  };
 }
 
 export async function findClient(id: string): Promise<ClientRow | null> {
@@ -434,22 +744,6 @@ export async function recordSyncRun(input: {
 }
 
 /**
- * Identity keys for every stored client, so a re-run of the import is a no-op
- * instead of duplicating the sheet.
- *
- * Uses the SAME `identityKey` the planner uses, which matters for the rows whose
- * phone column holds prose instead of a number: keying on the phone alone
- * returns nothing for those, and they were re-imported on every single run.
- */
-export async function existingClientKeys(): Promise<string[]> {
-  const rows = await prisma.client.findMany({
-    select: { phoneNumber: true, name: true, project: true },
-  });
-  return rows
-    .map((r) => identityKey({ phone: r.phoneNumber, name: r.name, project: r.project }))
-    .filter(Boolean);
-}
-
 /**
  * Every client, shaped for the sheet importer to diff against.
  *

@@ -1,13 +1,40 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Archive, ArchiveRestore, Trash2, Search, UsersRound, AlertCircle } from "lucide-react";
+import { Archive, ArchiveRestore, Trash2, Search, UsersRound, AlertCircle, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import MultiSelect from "@/components/MultiSelect";
 import { useLang } from "@/lib/i18n";
 import { apiErrorMessage } from "@/lib/api-errors";
-import { channelLabel, statusLabel } from "@/lib/reporting";
+import { channelLabel, locationLabel, statusLabel } from "@/lib/reporting";
+import { optionColor } from "@/lib/ref-options";
+import { useOptionColors } from "@/lib/option-colors";
+import StatusPill from "@/components/StatusPill";
 import { dateLocale } from "@/lib/format";
+
+/**
+ * YYYY-MM-DD in the LOCAL calendar — the same rule as `localDay` in the clients
+ * page and `dayKey` in reporting.ts. Written out rather than imported because
+ * those two are module-private to their files.
+ */
+const localDay = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Rolling windows offered as one-click presets, matching the clients page. */
+const datePresets = (): Array<{ label: string; startDate: string }> => {
+  const daysAgo = (n: number): string => { const d = new Date(); d.setDate(d.getDate() - n); return localDay(d); };
+  const firstOfMonth = new Date(); firstOfMonth.setDate(1);
+  const firstOfYear = new Date(); firstOfYear.setMonth(0, 1);
+  return [
+    { label: "date.today", startDate: localDay(new Date()) },
+    { label: "date.last7", startDate: daysAgo(7) },
+    { label: "date.last30", startDate: daysAgo(30) },
+    { label: "date.last90", startDate: daysAgo(90) },
+    { label: "date.thisMonth", startDate: localDay(firstOfMonth) },
+    { label: "date.thisYear", startDate: localDay(firstOfYear) },
+  ];
+};
 
 type Client = {
   id: string; name: string; phoneNumber: string; status: string;
@@ -28,6 +55,8 @@ export default function ArchivedPage() {
   const [toast, setToast] = useState<string | null>(null);
 
   const isAdmin = user?.role === "Admin";
+  // Shared colour map, so a recoloured channel or status matches everywhere.
+  const colors = useOptionColors();
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const load = useCallback(async () => {
@@ -57,14 +86,50 @@ export default function ArchivedPage() {
     localStorage.setItem("rwaq-dark", darkMode ? "1" : "0");
   }, [darkMode]);
 
+  /* ── Filters ────────────────────────────────────────────────────────────
+     Filtering happens in the browser over the `?archived=1` payload rather than
+     on the server. That is a deliberate choice for this page, not an oversight:
+     the archived book is small, and sending the filters to the API would need a
+     paging path that no other caller uses. The semantics still match
+     matchesFilters() in src/app/page.tsx — every group ANDs together, every
+     value inside a group ORs — so the same status means the same thing here. */
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [channelFilter, setChannelFilter] = useState<string[]>([]);
+  const [locationFilter, setLocationFilter] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
   const shown = useMemo(() => {
     // Ignore spaces/dashes/parentheses so phone numbers match with or without
     // formatting, e.g. "1018240912" finds "+20 101 824 0912".
     const norm = (s: string) => s.replace(/[\s\-().]/g, "").toLowerCase();
     const q = norm(query);
-    if (!q) return clients;
-    return clients.filter((c) => norm(`${c.name} ${c.phoneNumber} ${c.project} ${c.location}`).includes(q));
-  }, [clients, query]);
+    return clients.filter((c) => {
+      // LOCAL calendar day, not createdAt.slice(0,10): that slices the UTC ISO
+      // string, which reads the wrong day east of Greenwich and would disagree
+      // with the server's own local-midnight comparison on the clients page.
+      const day = c.createdAt ? localDay(new Date(c.createdAt)) : "";
+      return (!q || norm(`${c.name} ${c.phoneNumber} ${c.project} ${c.location}`).includes(q)) &&
+        (statusFilter.length === 0 || statusFilter.includes(c.status)) &&
+        (channelFilter.length === 0 || channelFilter.includes(c.acquisitionChannel)) &&
+        (locationFilter.length === 0 || locationFilter.includes(c.location)) &&
+        (!startDate || day >= startDate) && (!endDate || day <= endDate);
+    });
+  }, [clients, query, statusFilter, channelFilter, locationFilter, startDate, endDate]);
+
+  // Option lists come from the rows actually loaded, so a filter can only ever
+  // offer a value that has archived clients behind it — no empty dropdowns.
+  const archiveStatuses = useMemo(() => [...new Set(clients.map(c => c.status).filter(Boolean))].sort(), [clients]);
+  const archiveChannels = useMemo(() => [...new Set(clients.map(c => c.acquisitionChannel).filter(Boolean))].sort(), [clients]);
+  const archiveLocations = useMemo(() => [...new Set(clients.map(c => c.location).filter(Boolean))].sort(), [clients]);
+
+  const hasFilters = Boolean(query) || statusFilter.length > 0 || channelFilter.length > 0 ||
+    locationFilter.length > 0 || Boolean(startDate) || Boolean(endDate);
+
+  const clearAllFilters = () => {
+    setQuery(""); setStatusFilter([]); setChannelFilter([]); setLocationFilter([]);
+    setStartDate(""); setEndDate("");
+  };
 
   const restore = async (c: Client) => {
     setBusyId(c.id);
@@ -112,21 +177,47 @@ export default function ArchivedPage() {
             <h1>{t("archive.title")}</h1>
             <p>{t("archive.sub")}</p>
           </div>
-          <div className="header-actions">
-            <div className="search-box">
-              <Search size={15} />
-              <input placeholder={t("archive.searchPh")} value={query} onChange={(e) => setQuery(e.target.value)} />
-            </div>
-          </div>
         </div>
 
         {!isAdmin && (
           <div className="archive-note"><AlertCircle size={14} /> {t("archive.adminNote")}</div>
         )}
 
+        {/* ── Filters: same shape as the clients page, scoped to archived rows only ── */}
+        <div className="filter-row archive-filters">
+          <div className="search-box">
+            <Search size={15} />
+            <input placeholder={t("archive.searchPh")} value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          <MultiSelect label={t("filter.allStatuses")} options={archiveStatuses} selected={statusFilter} onChange={setStatusFilter} render={v => statusLabel(t, v)} t={t} />
+          <MultiSelect label={t("filter.allChannels")} options={archiveChannels} selected={channelFilter} onChange={setChannelFilter} render={v => channelLabel(t, v)} t={t} />
+          <MultiSelect label={t("filter.allLocations")} options={archiveLocations} selected={locationFilter} onChange={setLocationFilter} render={v => locationLabel(t, v)} t={t} />
+        </div>
+        <div className="date-bar archive-filters">
+          <Filter size={13} />
+          <span>{t("th.date")}</span>
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <span>–</span>
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          {hasFilters && (
+            <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>{t("filter.clear")} ×</button>
+          )}
+        </div>
+        <div className="date-presets archive-filters">
+          {datePresets().map(p => (
+            <button
+              key={p.label}
+              className={`date-preset-btn ${startDate === p.startDate && !endDate ? "active" : ""}`}
+              onClick={() => { setStartDate(p.startDate); setEndDate(""); }}
+            >
+              {t(p.label)}
+            </button>
+          ))}
+        </div>
+
         <section className="panel">
           <div className="panel-heading">
-            <h3>{t("archive.heading")} <small>{t("archive.clientsCount", { n: clients.length })}</small></h3>
+            <h3>{t("archive.heading")} <small>{t("archive.clientsCount", { n: shown.length })}</small></h3>
             <span className="muted" style={{ fontSize: 11 }}>{isAdmin ? t("archive.adminFull") : t("archive.readOnly", { role: user.role })}</span>
           </div>
 
@@ -147,8 +238,12 @@ export default function ArchivedPage() {
                 <strong>{c.name}</strong>
                 <small><span className="ltr-num">{c.phoneNumber}</span> · {c.project} · {c.location}</small>
               </div>
-              <span className="chan-tag"><i className="dot" />{channelLabel(t, c.acquisitionChannel)}</span>
-              <span className={`status-pill status-${String(c.status).toLowerCase()}`}>{statusLabel(t, c.status)}</span>
+              <span className="chan-tag"><i className="dot" style={{ background: optionColor("channels", c.acquisitionChannel, colors) }} />{channelLabel(t, c.acquisitionChannel)}</span>
+              <span className="loc-tag"><i className="dot" style={{ background: optionColor("locations", c.location, colors) }} />{c.location}</span>
+              {/* StatusPill rather than the class-based `status-${…}` span: that
+                  naming only ever matched three hardcoded values, so an archived
+                  client on any of the six pipeline stages rendered uncoloured. */}
+              <StatusPill status={c.status} t={t} />
               <span className="muted archive-date">
                 {c.archivedAt ? t("common.archivedOn", { date: new Date(c.archivedAt).toLocaleDateString(dateLocale(lang)) }) : t("archive.archivedLabel")}
               </span>

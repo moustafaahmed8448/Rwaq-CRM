@@ -12,22 +12,76 @@ import {
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import RefPicker from "@/components/RefPicker";
-import Select from "@/components/Select";
+import MultiSelect from "@/components/MultiSelect";
 import { useLang } from "@/lib/i18n";
 import type { MarketingMetric } from "@/lib/types";
 import { num, sar, dateLocale } from "@/lib/format";
 import { channelLabel } from "@/lib/reporting";
+import { optionColor } from "@/lib/ref-options";
+import { useOptionColors } from "@/lib/option-colors";
 import { apiErrorMessage } from "@/lib/api-errors";
 import { downloadFile, exportQuery } from "@/lib/download";
 import "./marketing.css";
 
 type User = { name: string; initials: string; role: string; email?: string };
 
-const CH_COLORS: Record<string, string> = {
-  FACEBOOK: "#1877f2", INSTAGRAM: "#e11d48", X: "#111827", TIKTOK: "#7c3aed",
-  GOOGLE_ADS: "#d97706", WHATSAPP: "#16a34a", CALLS: "#ea580c", SALES: "#0891b2",
-};
 const DEFAULT_CHANNELS = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"];
+
+/**
+ * Date windows offered on this page.
+ *
+ * The same set as the dashboard's rolling presets (minus This week and All
+ * time, neither of which makes sense for spend: spend is always dated, so "all
+ * time" would be the default anyway and "this week" is just "last 7 days"
+ * restated). Kept local rather than imported so this page's list can diverge
+ * from the dashboard's without coupling them.
+ */
+type MarketingPreset = "all" | "today" | "last3" | "last7" | "last14" | "last30" | "last90" | "month" | "year";
+
+interface PresetDef {
+  kind: MarketingPreset;
+  labelKey: string;
+  /** Inclusive first day. Undefined for "all", which has no lower bound. */
+  start?: () => string;
+  days?: number;
+}
+
+/** YYYY-MM-DD in the local calendar — same rule as the dashboard's dayKey. */
+const localDay = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const daysAgo = (n: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return localDay(d);
+};
+
+const PRESETS: PresetDef[] = [
+  // "All time" FIRST, because PRESETS[0].kind is the default state. It used to
+  // default to "today", so the page opened showing one day of spend while the
+  // header read as an all-time view.
+  { kind: "all", labelKey: "period.all" },
+  { kind: "today", labelKey: "period.today" },
+  { kind: "last3", labelKey: "period.last3", days: 3 },
+  { kind: "last7", labelKey: "period.last7", days: 7 },
+  { kind: "last14", labelKey: "period.last14", days: 14 },
+  { kind: "last30", labelKey: "period.last30", days: 30 },
+  { kind: "last90", labelKey: "period.last90", days: 90 },
+  { kind: "month", labelKey: "period.month", start: () => { const d = new Date(); d.setDate(1); return localDay(d); } },
+  { kind: "year", labelKey: "period.year", start: () => { const d = new Date(); d.setMonth(0, 1); return localDay(d); } },
+];
+
+/**
+ * The window a preset resolves to right now.
+ *
+ * "all" resolves to two empty strings, which the filter reads as "no bounds" —
+ * the same signal the cleared-custom-range path produces, so no downstream code
+ * needs a special case for it.
+ */
+function presetRange(p: PresetDef): { from: string; to: string } {
+  if (p.kind === "all") return { from: "", to: "" };
+  return { from: p.start ? p.start() : daysAgo((p.days ?? 1) - 1), to: "" };
+}
 
 export default function MarketingPage() {
   const router = useRouter();
@@ -55,11 +109,20 @@ export default function MarketingPage() {
   // branch, so a 500 / 409 / 403 looked identical to clicking nothing.
   const [saveError, setSaveError] = useState("");
   const [loading, setLoading] = useState(true);
+  // Channel colours now resolve through the shared store, so a colour an admin
+  // sets on the options page shows on this page's charts and tables too. The
+  // page previously carried its own copy of the channel palette.
+  const colors = useOptionColors();
 
-  /* ── Filters: date range + channel ── */
+  /* ── Filters: preset window + custom range + channel ── */
+  // The window is kept as an explicit preset OR a custom range rather than two
+  // free date fields alone: a bare pair of inputs cannot say "Today" or
+  // "Last 30 days", and this page has been stuck showing a hardcoded "All time"
+  // badge while the numbers underneath described whatever range was typed.
+  const [preset, setPreset] = useState<MarketingPreset>(PRESETS[0].kind);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [channelFilter, setChannelFilter] = useState<string>("ALL");
+  const [channelFilters, setChannelFilters] = useState<string[]>([]);
 
   const loadMetrics = async () => {
     setLoading(true);
@@ -202,15 +265,45 @@ export default function MarketingPage() {
     await loadMetrics();
   };
 
+  // The active window is the preset's, unless the admin typed a custom range —
+  // in which case that wins. Typed dates clear the preset highlight so the badge
+  // can never claim "Last 30 days" over a range someone set by hand.
+  // Memoized because the filter below depends on it, and a fresh object literal
+  // on every render would defeat the useMemo entirely.
+  // Named `activeWindow`, not `window`, to avoid shadowing the global.
+  const activePreset = fromDate || toDate ? null : PRESETS.find((p) => p.kind === preset);
+  const activeWindow = useMemo(
+    () => (activePreset ? presetRange(activePreset) : { from: fromDate, to: toDate }),
+    [activePreset, fromDate, toDate]
+  );
+
   // Everything below (KPIs, charts, tables, export) is derived from the
   // filtered view. A metric is included when its period overlaps the
   // selected range and it matches the selected channel.
   const filteredMetrics = useMemo(() => metrics.filter(m => {
-    if (channelFilter !== "ALL" && m.channel !== channelFilter) return false;
-    if (fromDate && m.endDate < fromDate) return false;
-    if (toDate && m.startDate > toDate) return false;
+    // Empty array means "every channel". This replaces the old "ALL" string
+    // sentinel, which could not express "three channels" at all.
+    if (channelFilters.length > 0 && !channelFilters.includes(m.channel)) return false;
+    if (activeWindow.from && m.endDate < activeWindow.from) return false;
+    if (activeWindow.to && m.startDate > activeWindow.to) return false;
     return true;
-  }), [metrics, channelFilter, fromDate, toDate]);
+  }), [metrics, channelFilters, activeWindow]);
+
+  /**
+   * Whether anything is narrowing the view, which gates the clear button.
+   *
+   * "All time" is the default and always active, so it does NOT count — otherwise
+   * the button would be visible on load and would clear nothing.
+   */
+  const hasFilters = (activePreset?.kind ?? "all") !== "all" || Boolean(fromDate) || Boolean(toDate) || channelFilters.length > 0;
+
+  /** Back to the state the page opens in: all time, all channels. */
+  const clearAllFilters = () => {
+    setPreset(PRESETS[0].kind);
+    setFromDate("");
+    setToDate("");
+    setChannelFilters([]);
+  };
 
   const totalSpend = useMemo(() => filteredMetrics.reduce((s, m) => s + Number(m.spend ?? 0), 0), [filteredMetrics]);
   const totalReach = useMemo(() => filteredMetrics.reduce((s, m) => s + Number(m.reach ?? 0), 0), [filteredMetrics]);
@@ -265,16 +358,20 @@ export default function MarketingPage() {
               <div className="breadcrumb mkt-crumb"><Layers size={14} />{t("mkt.workspace")}</div>
               <h1>{t("mkt.title")}</h1>
               <p>{t("mkt.sub")}</p>
-              <span className="mkt-period"><Calendar size={13} /> {t("dash.allTime")}</span>
+              <span className="mkt-period"><Calendar size={13} /> {activePreset ? t(activePreset.labelKey) : t("dash.allTime")}</span>
             </div>
             <div className="header-actions">
               <button className="btn-outline mkt-hero-btn" onClick={() => {
                 // Exports the filtered view as a real .xlsx, filtered server-side
                 // with the same period-overlap + channel semantics as the UI.
                 downloadFile(`/api/export/marketing${exportQuery({
-                  channel: channelFilter !== "ALL" ? channelFilter : undefined,
-                  from: fromDate || undefined,
-                  to: toDate || undefined,
+                  // Comma-joined; /api/export/marketing already splits on commas and drops "ALL".
+                  channel: channelFilters.length > 0 ? channelFilters.join(",") : undefined,
+                  // The preset's window, not just the typed dates — otherwise
+                  // "Last 30 days" would export everything while the screen
+                  // showed 30 days.
+                  from: activeWindow.from || undefined,
+                  to: activeWindow.to || undefined,
                 })}`, `marketing-${new Date().toISOString().slice(0, 10)}.xlsx`)
                   .catch(() => alert(t("mkt.exportFail")));
               }}><Download size={15} />{t("mkt.exportExcel")}</button>
@@ -300,8 +397,26 @@ export default function MarketingPage() {
               <KpiCard label={t("mkt.avgCpc")} value={sar(avgCPC)} sub={t("dash.kpiCpcSub")} accent="#16a34a" icon={<MousePointer size={14} />} />
             </section>
 
-            {/* ── Filters: date range + channel ── */}
+            {/* ── Filters: preset window + custom range + channel ── */}
             <section className="mkt-filters">
+              <div className="mkt-filter-field">
+                <label>{t("period.label")}</label>
+                {/* Preset buttons. Typing a custom range below clears the
+                    highlight, so the active window is never ambiguous. */}
+                <div className="mkt-presets">
+                  {PRESETS.map(p => (
+                    <button
+                      key={p.kind}
+                      type="button"
+                      className={`mkt-preset${activePreset?.kind === p.kind ? " active" : ""}`}
+                      aria-pressed={activePreset?.kind === p.kind}
+                      onClick={() => { setPreset(p.kind); setFromDate(""); setToDate(""); }}
+                    >
+                      {t(p.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="mkt-filter-field">
                 <label>{t("common.from")}</label>
                 <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
@@ -312,18 +427,22 @@ export default function MarketingPage() {
               </div>
               <div className="mkt-filter-field">
                 <label>{t("form.channel")}</label>
-                <Select
-                  value={channelFilter}
-                  /* "ALL" stays selectable so the filter can be widened back
-                     out without reaching for the separate clear button. */
-                  options={["ALL", ...allChannels]}
-                  onChange={setChannelFilter}
-                  render={v => (v === "ALL" ? t("ch.all") : channelLabel(t, v))}
+                {/* Same multi-select as the clients page, so picking several
+                    channels at once works here too. Empty selection = all. */}
+                <MultiSelect
+                  label={t("filter.allChannels")}
+                  options={allChannels}
+                  selected={channelFilters}
+                  onChange={setChannelFilters}
+                  render={v => channelLabel(t, v)}
+                  onRemove={canEdit ? removeChannel : undefined}
+                  removable={removableChannels}
+                  removeUsage={channelUsage}
                   t={t}
                 />
               </div>
-              {(fromDate || toDate || channelFilter !== "ALL") && (
-                <button className="btn-ghost mkt-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setChannelFilter("ALL"); }}>{t("dash.clearFilters")}</button>
+              {hasFilters && (
+                <button className="btn-ghost mkt-filter-clear" onClick={clearAllFilters}>{t("dash.clearFilters")}</button>
               )}
             </section>
 
@@ -382,7 +501,7 @@ export default function MarketingPage() {
                 <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
                     <Pie data={channelBreakdown.map(c => ({ name: c.name, value: c.spend }))} cx="50%" cy="50%" outerRadius={85} innerRadius={55} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} dataKey="value">
-                      {channelBreakdown.map((c, i) => <Cell key={c.channel} fill={CH_COLORS[c.channel] || "#9ca3af"} />)}
+                      {channelBreakdown.map((c) => <Cell key={c.channel} fill={optionColor("channels", c.channel, colors)} />)}
                     </Pie>
                     <Tooltip formatter={(v) => sar(v as number)} />
                   </PieChart>
@@ -398,7 +517,7 @@ export default function MarketingPage() {
               </div>
               {channelBreakdown.map(c => (
                 <div className="table-row" key={c.channel}>
-                  <span className="chan-cell"><i className="dot" style={{ background: CH_COLORS[c.channel] }} />{c.name}</span>
+                  <span className="chan-cell"><i className="dot" style={{ background: optionColor("channels", c.channel, colors) }} />{c.name}</span>
                   <span>{sar(c.spend)}</span><span>{num(c.reach)}</span><span>{num(c.clicks)}</span>
                   <span className={Number(c.cpm) < 1 ? "good" : Number(c.cpm) < 3 ? "" : "bad"}>{sar(c.cpm)}</span>
                   <span>{sar(c.cpc)}</span>
@@ -414,18 +533,24 @@ export default function MarketingPage() {
                 <span className="muted" style={{ fontSize: 11 }}>{t("common.records", { n: filteredMetrics.length })}</span>
               </div>
               <div className="recent-row recent-head">
-                <span /><span>{t("mkt.campaignName")}</span><span>{t("dash.thChannel")}</span><span>{t("dash.thPeriod")}</span><span>{t("dash.thSpend")}</span><span>{t("dash.thReach")}</span><span>{t("dash.thNotes")}</span><span />
+                <span>{t("dash.thChannel")}</span><span>{t("mkt.campaignName")}</span><span>{t("dash.thPeriod")}</span><span className="r-num">{t("dash.thSpend")}</span><span className="r-num">{t("dash.thReach")}</span><span>{t("dash.thNotes")}</span><span />
               </div>
               {filteredMetrics.length === 0 && <div className="empty-state">{t("dash.noMetrics")}</div>}
               {filteredMetrics.slice(-10).reverse().map(m => (
                 <div className="recent-row" key={m.id}>
-                  <span className="dot" style={{ background: CH_COLORS[m.channel] }} />
+                  {/* Channel as a tinted pill rather than a bare dot: at this size a
+                      6px dot carries no label, so the colour read as decoration. */}
+                  <span className="mkt-chan-pill">
+                    <i className="dot" style={{ background: optionColor("channels", m.channel, colors) }} />
+                    {channelLabel(t, m.channel)}
+                  </span>
                   <span className="r-campaign">{m.name || "—"}</span>
-                  <span className="r-channel">{channelLabel(t, m.channel)}</span>
                   <span className="r-period">{new Date(m.startDate).toLocaleDateString(dateLocale(lang))} — {new Date(m.endDate).toLocaleDateString(dateLocale(lang))}</span>
-                  <span className="r-spend">{sar(Number(m.spend))}</span>
-                  <span className="r-reach">{num(Number(m.reach))}</span>
-                  <span className="muted" style={{ flex: 1 }}>{m.notes ? m.notes.slice(0, 40) : "—"}</span>
+                  {/* tabular-nums so digits line up across rows, and both figures
+                      right-aligned: they are the two columns being compared. */}
+                  <span className="r-num r-spend">{sar(Number(m.spend))}</span>
+                  <span className="r-num r-reach">{num(Number(m.reach))}</span>
+                  <span className="r-notes muted">{m.notes ? m.notes.slice(0, 40) : "—"}</span>
                   <div className="r-actions no-detail">
                     {canEdit && <button className="icon-btn-sm" onClick={() => openEdit(m)} title={t("common.edit")}><Edit3 size={12} /></button>}
                     {canEdit && <button className="icon-btn-sm danger" onClick={() => deleteMetric(m.id)} title={t("common.delete")}><Trash2 size={12} /></button>}
@@ -451,6 +576,7 @@ export default function MarketingPage() {
                 </Field>
                 <Field label={t("form.channel")} error={formErrors.channel}>
                   <RefPicker
+                    kind="channels"
                     value={form.channel === "__custom__" ? (form.customChannelName || "") : form.channel}
                     options={allChannels}
                     onChange={v => { clearError("channel"); setForm(f => ({ ...f, channel: v, customChannelName: "" })); }}

@@ -8,20 +8,24 @@ import { notificationMessage } from "@/lib/reporting";
 import BrandMark from "@/components/BrandMark";
 import {
   Bell, ChevronDown, LayoutDashboard, UsersRound, Layers, Settings, LogOut,
-  Sun, Moon, Menu, X as XIcon, Archive, CheckCheck, Globe, Palette,
+  Sun, Moon, Menu, X as XIcon, Archive, CheckCheck, Globe, Palette, Settings2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export type HeaderUser = { name: string; initials: string; role?: string };
-export type NavTab = "dashboard" | "clients" | "archived" | "marketing" | "settings";
+export type NavTab = "dashboard" | "clients" | "archived" | "marketing" | "options" | "settings";
 
 type Notif = { id: string; message: string; read: boolean; createdAt: string; type?: string; clientName?: string };
 
-const NAV: { key: NavTab; icon: React.ReactNode }[] = [
+const NAV: { key: NavTab; icon: React.ReactNode; adminOnly?: boolean }[] = [
   { key: "dashboard", icon: <LayoutDashboard size={16} /> },
   { key: "clients", icon: <UsersRound size={16} /> },
   { key: "archived", icon: <Archive size={16} /> },
   { key: "marketing", icon: <Layers size={16} /> },
+  // Reference-option management (statuses / channels / locations + their
+  // colours). Admin-only in the UI; /api/options rejects every write from any
+  // other role, so hiding the tab is about clarity, not security.
+  { key: "options", icon: <Settings2 size={16} />, adminOnly: true },
   { key: "settings", icon: <Settings size={16} /> },
 ];
 
@@ -101,8 +105,10 @@ export default function AppHeader({
   };
 
   // Marketing is viewable by every role (campaign figures are company-wide);
-  // only its write actions are admin-gated, inside the page itself.
-  const visibleNav = NAV;
+  // only its write actions are admin-gated, inside the page itself. The options
+  // tab is admin-only in the UI too — /api/options enforces the same rule on
+  // every write, so this mirrors the server rather than replacing it.
+  const visibleNav = NAV.filter((item) => !item.adminOnly || user.role === "Admin");
   const go = (tab: NavTab) => {
     setMobileMenuOpen(false);
     setNotifOpen(false);
@@ -112,6 +118,7 @@ export default function AppHeader({
     else if (tab === "clients") router.push("/?view=clients");
     else if (tab === "archived") router.push("/archived");
     else if (tab === "marketing") router.push("/marketing");
+    else if (tab === "options") router.push("/options");
     else router.push("/settings");
   };
 

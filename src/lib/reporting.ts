@@ -173,14 +173,30 @@ export function stageFallback(status: string): string {
  */
 const CUSTOM_STATUS_COLORS = ["#7c3aed", "#db2777", "#0d9488", "#ea580c", "#2563eb", "#65a30d"] as const;
 
+/**
+ * Stable palette colour for any value with no built-in colour of its own.
+ *
+ * Cycled by a hash of the value, so the same custom status — or location — keeps
+ * the same colour everywhere it appears. A flat grey was unusable: the first
+ * pipeline stage is already grey, so a custom status and "Non-responsive" looked
+ * identical.
+ *
+ * Exported because `optionColor` in src/lib/ref-options.ts needs the same
+ * fallback for channels and locations, and two hash implementations would let
+ * one value pick a different colour depending on which screen rendered it.
+ */
+export function hashedColor(key: string): string {
+  const value = String(key ?? "");
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  return CUSTOM_STATUS_COLORS[hash % CUSTOM_STATUS_COLORS.length];
+}
+
 /** Accent colour for a status; custom statuses get a stable palette colour. */
 export function statusColor(status: string): string {
   const stage = STAGE_BY_VALUE.get(status);
   if (stage) return stage.color;
-  const key = String(status ?? "");
-  let hash = 0;
-  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  return CUSTOM_STATUS_COLORS[hash % CUSTOM_STATUS_COLORS.length];
+  return hashedColor(status);
 }
 
 /** Dictionary keys for the built-in channels / statuses (see src/lib/i18n.tsx). */
@@ -418,7 +434,18 @@ export const endOfMonth = (date = new Date()) => {
   return value;
 };
 
-export type PeriodKind = "week" | "month" | "all" | "custom";
+export type PeriodKind =
+  | "today"
+  | "week"
+  | "last3"
+  | "last7"
+  | "last14"
+  | "last30"
+  | "last90"
+  | "month"
+  | "year"
+  | "all"
+  | "custom";
 
 export interface ResolvedPeriod {
   kind: PeriodKind;
@@ -484,15 +511,89 @@ export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now 
     to.setDate(to.getDate() + 1);
     to.setHours(0, 0, 0, 0);
     const from = new Date(EPOCH);
-    return { kind: "all", from, to, fromStr: dayKey(from), toStr: dayKey(to) };
+    return { kind, from, to, fromStr: dayKey(from), toStr: dayKey(to) };
   }
 
+  // Rolling windows, resolved before the calendar ones so a new tab only needs a
+  // single entry here.
+  const rolling: Partial<Record<PeriodKind, number>> = {
+    today: 1,
+    last3: 3,
+    last7: 7,
+    last14: 14,
+    last30: 30,
+    last90: 90,
+  };
+  const days = rolling[kind];
+  if (days !== undefined) {
+    const window = rollingWindow(days, now);
+    return { kind, from: window.from, to: window.to, fromStr: window.fromStr, toStr: window.toStr };
+  }
+
+  if (kind === "year") {
+    const from = new Date(now.getFullYear(), 0, 1);
+    const to = new Date(now.getFullYear() + 1, 0, 1);
+    return { kind, from, to, fromStr: dayKey(from), toStr: dayKey(to) };
+  }
+
+  // "week" and "month" fall through to here, the two calendar-bounded periods.
   const fromDate = kind === "month" ? startOfMonth(now) : startOfWeek(now);
   const toDate = kind === "month" ? endOfMonth(now) : endOfWeek(now);
-  return { kind: kind === "month" ? "month" : "week", from: fromDate, to: toDate, fromStr: dayKey(fromDate), toStr: dayKey(toDate) };
+  return { kind, from: fromDate, to: toDate, fromStr: dayKey(fromDate), toStr: dayKey(toDate) };
 }
 
-/** Parses a `?period=` query value, defaulting to week. */
+/**
+ * Parses a `?period=` query value, defaulting to today.
+ *
+ * "week" is accepted even though it is no longer offered as a tab: bookmarks and
+ * shared links from before it was removed would otherwise fall through to the
+ * default anyway, but accepting it explicitly keeps `resolvePeriod` in charge of
+ * what it means rather than an accidental default.
+ */
 export function parsePeriodKind(value: string | null | undefined): PeriodKind {
-  return value === "month" || value === "all" || value === "custom" ? value : "week";
+  if (value === "week") return "week";
+  // Cast to ReadonlySet rather than calling .includes: PERIOD_KINDS is a
+  // `as const` tuple whose element type excludes "week", so .includes() refuses
+  // a plain PeriodKind argument.
+  const known: ReadonlySet<string> = new Set(PERIOD_KINDS);
+  return known.has(value ?? "") ? (value as PeriodKind) : "today";
+}
+
+/**
+ * The reporting windows offered on the dashboard.
+ *
+ * "week" was removed from the tab list at the user's request — "Last 7 days"
+ * covers the same ground and the rolling set reads more consistently. It is still
+ * a valid `PeriodKind` and `resolvePeriod` still handles it, so an old
+ * `?period=week` link keeps working; only the button is gone.
+ */
+export const PERIOD_KINDS = [
+  "today",
+  "last3",
+  "last7",
+  "last14",
+  "last30",
+  "last90",
+  "month",
+  "year",
+  "all",
+  "custom",
+] as const satisfies readonly PeriodKind[];
+
+/**
+ * Resolves the rolling "last N days" windows.
+ *
+ * `to` is EXCLUSIVE everywhere it is consumed (`createdAt: { lt }` in
+ * clientWhere), so the upper bound is tomorrow's midnight — not today's. Using
+ * today would silently drop every client registered earlier on the final day of
+ * the window, which is how a "last 7 days" view quietly covered only 6.
+ */
+function rollingWindow(days: number, now: Date): ResolvedPeriod {
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+  from.setDate(from.getDate() - (days - 1));
+  const to = new Date(now);
+  to.setDate(to.getDate() + 1);
+  to.setHours(0, 0, 0, 0);
+  return { from, to, fromStr: dayKey(from), toStr: dayKey(to) } as ResolvedPeriod;
 }

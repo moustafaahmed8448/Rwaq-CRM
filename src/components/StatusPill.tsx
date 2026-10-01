@@ -13,7 +13,9 @@
  * The alpha suffix is appended to the hex accent to produce a wash for the
  * background while the full colour is used for the text.
  */
-import { statusColor, statusLabel, type TranslateFn } from "@/lib/reporting";
+import { statusLabel, type TranslateFn } from "@/lib/reporting";
+import { useOptionColors } from "@/lib/option-colors";
+import { optionColor } from "@/lib/ref-options";
 
 export default function StatusPill({
   status,
@@ -26,7 +28,8 @@ export default function StatusPill({
   variant?: "pill" | "badge";
   style?: React.CSSProperties;
 }) {
-  const color = statusColor(status);
+  const colors = useOptionColors();
+  const color = optionColor("statuses", status, colors);
   const label = statusLabel(t, status);
   const cls = variant === "badge" ? "status-badge" : "status-pill";
   return (
@@ -38,5 +41,6 @@ export default function StatusPill({
 
 /** The round colour chip used on kanban column headers. */
 export function StatusDot({ status }: { status: string }) {
-  return <span className="kanban-dot" style={{ background: statusColor(status) }} />;
+  const colors = useOptionColors();
+  return <span className="kanban-dot" style={{ background: optionColor("statuses", status, colors) }} />;
 }

@@ -5,6 +5,30 @@
 .marketing-shell > .content { max-width: 1440px; margin: 0 auto; padding: 30px 32px 56px; width: 100%; min-width: 0; box-sizing: border-box; }
 .marketing-shell .mkt-hero { padding: 34px; border-radius: 24px; background: linear-gradient(115deg, var(--navy) 0%, #1a3554 58%, #1f4e73 100%); box-shadow: 0 18px 44px rgba(19, 34, 60, 0.24); margin-bottom: 26px; position: relative; overflow: hidden; }
 .marketing-shell .mkt-hero::after { width: 420px; height: 420px; right: -150px; top: -160px; border: 55px solid rgba(127, 208, 244, 0.07); background: transparent; pointer-events: none; }
+/* Preset window buttons. Same idea as the dashboard's period tabs, sized for
+   this page's filter bar. Wraps because eight of them plus two date inputs plus
+   the channel picker do not fit on one row. */
+.marketing-shell .mkt-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.marketing-shell .mkt-preset {
+  border: 1px solid #dfe7ee;
+  background: #fbfdfe;
+  color: #4a6a66;
+  border-radius: 20px;
+  padding: 6px 11px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.marketing-shell .mkt-preset:hover { border-color: #7fc7b5; color: #16323c; }
+.marketing-shell .mkt-preset.active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+[data-theme="dark"] .marketing-shell .mkt-preset { background: #101820; border-color: #344353; color: #b9d8d0; }
+[data-theme="dark"] .marketing-shell .mkt-preset.active { background: #0f766e; border-color: #0f766e; color: #fff; }
 .marketing-shell .mkt-hero h1 { font-size: clamp(26px, 3vw, 40px); letter-spacing: -1.4px; line-height: 1.15; max-width: 580px; margin: 16px 0 12px; }
 .marketing-shell .mkt-hero p { font-size: 14px; line-height: 1.7; max-width: 500px; }
 .marketing-shell .mkt-crumb { font-size: 10px; letter-spacing: 2px; color: #7fd0f4; }
@@ -34,7 +58,35 @@
 .marketing-shell .table-head-row, .marketing-shell .table-row { grid-template-columns: minmax(150px, 1.5fr) repeat(5, minmax(85px, 1fr)); min-width: 650px; gap: 16px; padding: 15px 12px; }
 .marketing-shell .table-head-row, .marketing-shell .recent-head { background: rgba(19, 34, 60, 0.04); border-radius: 8px; color: #617787; }
 .marketing-shell .table-row:hover, .marketing-shell .recent-row:not(.recent-head):hover { background: rgba(6, 157, 227, 0.06); }
-.marketing-shell .recent-row { min-width: 780px; padding: 15px 12px; }
+/* Recent entries: 7 columns, in the order the JSX renders them —
+   channel pill, campaign, period, spend, reach, notes, actions.
+   Explicit tracks rather than the inherited `.recent-row` template, which had 8
+   columns for the old leading dot-cell. Spend/reach get fixed minimums so the
+   figures stay readable as digits rather than being squeezed by a fr share. */
+.marketing-shell .recent-row {
+  grid-template-columns: minmax(110px, 0.9fr) minmax(150px, 1.6fr) minmax(130px, 1.1fr) minmax(90px, 0.7fr) minmax(70px, 0.5fr) minmax(120px, 1.2fr) auto;
+  gap: 14px;
+  padding: 11px 12px;
+  min-width: 780px;
+  align-items: center;
+}
+.marketing-shell .recent-head { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+/* Figures being compared, so: right-aligned and digit-width-stable. */
+.marketing-shell .r-num { text-align: right; font-variant-numeric: tabular-nums; }
+.marketing-shell .r-reach { color: var(--ink-soft); }
+.marketing-shell .r-notes { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Channel as a tinted pill. The tint is a fixed low-alpha teal rather than the
+   channel's own colour: mixing a 10% wash of eight different brand hues into one
+   table made the rows read as unrelated. The dot still carries the real colour. */
+.marketing-shell .mkt-chan-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px 3px 7px; border-radius: 11px;
+  background: rgba(35, 120, 103, 0.09);
+  font-size: 11px; font-weight: 600; color: #237867;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.marketing-shell .mkt-chan-pill .dot { flex: none; margin: 0; }
+[data-theme="dark"] .marketing-shell .mkt-chan-pill { background: rgba(140, 220, 197, 0.12); color: #8cdcc5; }
 .marketing-shell .r-actions { display: flex; gap: 8px; }
 .marketing-shell .r-spend { color: #237867; }
 .marketing-shell .mkt-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 20px; border-radius: 14px; padding: 14px 16px; background: #fff; border: 1px solid #e0e8ee; box-shadow: 0 5px 22px #233b5708; }

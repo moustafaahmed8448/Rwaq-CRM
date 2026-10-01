@@ -4,6 +4,13 @@ import { addSettingValue, countClients, databaseErrorMessage, listClients, readS
 
 const DEFAULT_CHANNELS = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"];
 
+/** Client count per channel, matching the exact-match delete guard below. */
+function usageFor(channels: string[], clients: { acquisitionChannel: string }[]): Record<string, number> {
+  return Object.fromEntries(
+    channels.map((ch) => [ch, clients.filter((c) => c.acquisitionChannel === ch).length]),
+  );
+}
+
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   try {
@@ -16,7 +23,7 @@ export async function GET(request: NextRequest) {
       channels: all,
       // Client counts per channel, so the delete flow can warn before removing
       // a value that is still in use.
-      usage: Object.fromEntries(all.map((ch) => [ch, clients.filter((c) => c.acquisitionChannel === ch).length])),
+      usage: usageFor(all, clients),
       // Only saved channels can be removed; the built-ins are code constants.
       removable: custom,
     });
@@ -82,7 +89,16 @@ export async function DELETE(request: NextRequest) {
     }
     await removeSettingValue("channels", label);
     const remaining = await readSetting("channels");
-    return NextResponse.json({ ok: true, channels: [...DEFAULT_CHANNELS, ...remaining] });
+    // Full payload, mirroring /api/locations: the clients page needs `removable`
+    // and `usage` restored to keep offering delete on the other unused channels.
+    const clients = await listClients({ includeArchived: true });
+    const all = [...DEFAULT_CHANNELS, ...remaining];
+    return NextResponse.json({
+      ok: true,
+      channels: all,
+      removable: remaining,
+      usage: usageFor(all, clients),
+    });
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }

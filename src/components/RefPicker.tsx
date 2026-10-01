@@ -18,6 +18,8 @@ import { useState } from "react";
 import { Check, ChevronDown, Loader2, Plus, Trash2 } from "lucide-react";
 import { num } from "@/lib/format";
 import { useCombobox, type TFn } from "@/lib/use-combobox";
+import { useOptionColors } from "@/lib/option-colors";
+import { optionColor, type RefKind } from "@/lib/ref-options";
 
 export default function RefPicker({
   value,
@@ -29,6 +31,8 @@ export default function RefPicker({
   removeUsage,
   render,
   placeholder,
+  /** Which reference list this picker edits, so each option can show its colour. */
+  kind,
   t,
 }: {
   value: string;
@@ -42,9 +46,11 @@ export default function RefPicker({
   removeUsage?: Record<string, number>;
   render?: (v: string) => string;
   placeholder?: string;
+  kind?: RefKind;
   t: TFn;
 }) {
   const [creating, setCreating] = useState(false);
+  const colors = useOptionColors();
 
   const lab = (v: string) => (render ? render(v) : v);
 
@@ -82,7 +88,13 @@ export default function RefPicker({
         aria-expanded={cb.open}
         onClick={cb.toggle}
       >
-        <span className="ms-value">{value ? lab(value) : (placeholder ?? t("form.statusPh"))}</span>
+        <span className="ms-value">
+          {/* The selected value carries its own colour chip, so the colour an admin
+              picked on the options page is visible at the point of use, not only in
+              the list below. */}
+          {value && kind && <i className="dot" style={{ background: optionColor(kind, value, colors) }} />}
+          {value ? lab(value) : (placeholder ?? t("form.statusPh"))}
+        </span>
         <ChevronDown size={12} />
       </button>
       {cb.open && (
@@ -130,6 +142,7 @@ export default function RefPicker({
                     onClick={() => onChange(o)}
                   >
                     <span className="ms-check">{o === value && <Check size={11} />}</span>
+                    {kind && <i className="dot" style={{ background: optionColor(kind, o, colors) }} />}
                     <span className="ms-opt-label">{lab(o)}</span>
                     {used > 0 && <span className="ms-opt-count" title={t("refData.inUseBy", { n: used })}>{num(used)}</span>}
                   </button>

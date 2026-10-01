@@ -9,20 +9,23 @@ import { useLang } from "@/lib/i18n";
 import { dateLocale } from "@/lib/format";
 import { canWrite } from "@/lib/auth";
 import StatusPill from "@/components/StatusPill";
-import { activityFieldLabel, activityValueLabel, channelLabel, describeActivity, PIPELINE_STAGES, pipelineStage, statusLabel as localizeStatus } from "@/lib/reporting";
+import { activityFieldLabel, activityValueLabel, channelLabel, describeActivity, PIPELINE_STAGES, statusLabel as localizeStatus } from "@/lib/reporting";
+import { optionColor, type OptionColors, type RefKind } from "@/lib/ref-options";
+import { useOptionColors } from "@/lib/option-colors";
+import { apiErrorMessage, readApiError } from "@/lib/api-errors";
 import type { ActivityEntry, ClientData } from "@/lib/types";
 
 const PREDEFINED_STATUSES = PIPELINE_STAGES.map((s) => s.value);
 
 /**
- * Badge colours derive from the registry's accent so a stage can never show one
- * colour in the dashboard panel and another on the detail page. User-defined
- * custom statuses keep the violet fallback.
+ * Badge colours resolve through the shared `optionColor`, so a stage can never
+ * show one colour in the dashboard panel and another on the detail page, and an
+ * admin-set colour is honoured here too. The label is left to the caller's
+ * localized lookup — this only decides the tint.
  */
-function getStatusStyle(status: string) {
-  const stage = pipelineStage(status);
-  if (stage) return { bg: stage.color + "22", fg: stage.color, label: stage.fallback };
-  return { bg: "#ede9fe", fg: "#5b21b6", label: status };
+function getStatusStyle(status: string, colors: OptionColors) {
+  const color = optionColor("statuses", status, colors);
+  return { bg: color + "22", fg: color };
 }
 
 function formatTimeAgo(iso: string, t: (key: string, vars?: Record<string, string | number>) => string, lang: string) {
@@ -49,25 +52,49 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
   const [customStatuses, setCustomStatuses] = useState<string[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
   const [channels, setChannels] = useState<string[]>([]);
+  // Which values may be deleted, and how many clients hold each. The picker
+  // needs both to decide whether to draw a trash icon: a saved value, unused by
+  // any client, may be removed — nothing else may.
+  const [removableStatuses, setRemovableStatuses] = useState<string[]>([]);
+  const [removableChannels, setRemovableChannels] = useState<string[]>([]);
+  const [removableLocations, setRemovableLocations] = useState<string[]>([]);
+  const [statusUsage, setStatusUsage] = useState<Record<string, number>>({});
+  const [channelUsage, setChannelUsage] = useState<Record<string, number>>({});
+  const [locationUsage, setLocationUsage] = useState<Record<string, number>>({});
   const [toast, setToast] = useState<string | null>(null);
   const [user, setUser] = useState<{ name: string; initials: string; role?: string } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [daysSinceCreated, setDaysSinceCreated] = useState(0);
+  // Shared colour map, so this page matches the dashboard and clients table.
+  const colors = useOptionColors();
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+  // Delete of a shared reference value is an admin action, on this page exactly
+  // as on the clients modal. `onRemove` is only passed for an admin, and the
+  // picker also requires the value to be unused.
+  const isAdmin = user?.role === "Admin";
 
   useEffect(() => {
     Promise.all([
       fetch(`/api/clients/${clientId}`).then((r) => r.json()),
-      fetch("/api/crm/clients").then((r) => r.json()).then((d) => d.statuses ?? []),
-      fetch("/api/locations").then((r) => r.json()).then((d) => d.locations ?? []).catch(() => []),
-      fetch("/api/channels").then((r) => r.json()).then((d) => d.channels ?? []).catch(() => []),
+      fetch("/api/crm/clients").then((r) => r.json()),
+      fetch("/api/locations").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/channels").then((r) => r.json()).catch(() => ({})),
       fetch("/api/auth/me").then((r) => r.json()).then((d) => d.user ?? null).catch(() => null),
-    ]).then(([data, statuses, locs, chans, me]) => {
+    ]).then(([data, crm, locs, chans, me]) => {
       setClient(data.client);
-      setCustomStatuses(statuses);
-      setLocations(locs);
-      setChannels(chans);
+      setCustomStatuses(crm.statuses ?? []);
+      // These endpoints already returned `removable` and `usage`; they were
+      // being discarded, which is why no delete button could be offered here.
+      setRemovableStatuses(crm.removable ?? []);
+      setStatusUsage(crm.usage ?? {});
+      setLocations(locs.locations ?? []);
+      setRemovableLocations(locs.removable ?? []);
+      setLocationUsage(locs.usage ?? {});
+      setChannels(chans.channels ?? []);
+      setRemovableChannels(chans.removable ?? []);
+      setChannelUsage(chans.usage ?? {});
       setUser(me);
       setDraft(data.client);
       setLoading(false);
@@ -117,6 +144,10 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
     await fetch("/api/locations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: clean }) }).catch(() => {});
     const r = await fetch("/api/locations").then((x) => x.json()).catch(() => ({}));
     setLocations(r.locations ?? []);
+    // A newly added value is saved, not built-in, so it becomes deletable and
+    // its usage is 0 — both must be refreshed or the new entry shows no trash icon.
+    setRemovableLocations(r.removable ?? []);
+    setLocationUsage(r.usage ?? {});
     return clean;
   };
 
@@ -126,6 +157,8 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
     await fetch("/api/channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: key }) }).catch(() => {});
     const r = await fetch("/api/channels").then((x) => x.json()).catch(() => ({}));
     setChannels(r.channels ?? []);
+    setRemovableChannels(r.removable ?? []);
+    setChannelUsage(r.usage ?? {});
     return key;
   };
 
@@ -135,14 +168,64 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
     await fetch("/api/crm/clients", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add", label: key }) }).catch(() => {});
     const r = await fetch("/api/crm/clients").then((x) => x.json()).catch(() => ({}));
     setCustomStatuses(r.statuses ?? []);
+    setRemovableStatuses(r.removable ?? []);
+    setStatusUsage(r.usage ?? {});
     return key;
+  };
+
+  /**
+   * Removes an unused reference value, then refreshes the list it came from.
+   *
+   * All three go through /api/options, which is admin-only by construction and
+   * also drops the stored colour — so re-adding the same name later starts from
+   * the default rather than inheriting the old one's colour.
+   *
+   * The `onRemove` handlers are only ever passed for an admin, and the picker
+   * additionally requires usage === 0. That is a UI convenience, not the
+   * enforcement: this endpoint independently answers 403 for a non-admin, 400
+   * for a built-in and 409 while clients still hold the value.
+   */
+  const removeOption = async (kind: RefKind, label: string) => {
+    const res = await fetch("/api/options", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, label }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      showToast(apiErrorMessage(t, res ? await readApiError(res) : undefined));
+      return;
+    }
+    // Re-read from the same source the picker draws from, so the deleted value
+    // disappears and the remaining ones keep their trash icons and counts.
+    const refresh: Record<RefKind, () => Promise<unknown>> = {
+      statuses: async () => {
+        const r = await fetch("/api/crm/clients").then((x) => x.json()).catch(() => ({}));
+        setCustomStatuses(r.statuses ?? []);
+        setRemovableStatuses(r.removable ?? []);
+        setStatusUsage(r.usage ?? {});
+      },
+      channels: async () => {
+        const r = await fetch("/api/channels").then((x) => x.json()).catch(() => ({}));
+        setChannels(r.channels ?? []);
+        setRemovableChannels(r.removable ?? []);
+        setChannelUsage(r.usage ?? {});
+      },
+      locations: async () => {
+        const r = await fetch("/api/locations").then((x) => x.json()).catch(() => ({}));
+        setLocations(r.locations ?? []);
+        setRemovableLocations(r.removable ?? []);
+        setLocationUsage(r.usage ?? {});
+      },
+    };
+    await refresh[kind]();
+    showToast(t(`refData.removed${kind === "statuses" ? "Status" : kind === "channels" ? "Channel" : "Location"}`, { value: label }));
   };
 
   if (loading) return <div className="page-center"><div className="spinner" /><p>{t("common.loading")}</p></div>;
   if (!client) return <div className="page-center"><AlertCircle size={48} color="#ef4444" /><p>{t("detail.notFound")}</p><button className="btn-primary" onClick={() => router.replace("/")}>{t("detail.back")}</button></div>;
 
   const statuses = [...PREDEFINED_STATUSES, ...customStatuses.filter((s) => !PREDEFINED_STATUSES.includes(s))];
-  const statusStyle = { ...getStatusStyle(client.status), label: localizeStatus(t, client.status) };
+  const statusStyle = { ...getStatusStyle(client.status, colors), label: localizeStatus(t, client.status) };
 
   return (
     <div className="detail-page">
@@ -185,13 +268,13 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
                 <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={draft.phoneNumber ?? ""} onChange={(e) => setDraft({ ...draft, phoneNumber: e.target.value })} /></Field>
                 <Field label={t("form.project")} wide><textarea rows={3} value={draft.project ?? ""} onChange={(e) => setDraft({ ...draft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
                 <Field label={t("form.location")}>
-                  <RefPicker value={draft.location ?? ""} options={locations} onAdd={addLocation} onChange={(v) => setDraft({ ...draft, location: v })} placeholder={t("form.locationPh")} t={t} />
+                  <RefPicker kind="locations" value={draft.location ?? ""} options={locations} onAdd={addLocation} onChange={(v) => setDraft({ ...draft, location: v })} onRemove={isAdmin ? (v) => void removeOption("locations", v) : undefined} removable={removableLocations} removeUsage={locationUsage} placeholder={t("form.locationPh")} t={t} />
                 </Field>
                 <Field label={t("form.channel")}>
-                  <RefPicker value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} render={(v) => channelLabel(t, v)} placeholder={t("form.channelPh")} t={t} />
+                  <RefPicker kind="channels" value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} render={(v) => channelLabel(t, v)} onRemove={isAdmin ? (v) => void removeOption("channels", v) : undefined} removable={removableChannels} removeUsage={channelUsage} placeholder={t("form.channelPh")} t={t} />
                 </Field>
                 <Field label={t("form.status")}>
-                  <RefPicker value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} render={(v) => localizeStatus(t, v)} placeholder={t("form.statusPh")} t={t} />
+                  <RefPicker kind="statuses" value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} render={(v) => localizeStatus(t, v)} onRemove={isAdmin ? (v) => void removeOption("statuses", v) : undefined} removable={removableStatuses} removeUsage={statusUsage} placeholder={t("form.statusPh")} t={t} />
                 </Field>
                 <Field label={t("form.firstContact")}><input value={draft.firstContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, firstContactPerson: e.target.value })} /></Field>
                 <Field label={t("form.secondContact")}><input value={draft.secondContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, secondContactPerson: e.target.value })} /></Field>
@@ -207,8 +290,8 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
               <InfoItem icon={<Tag size={14} />} label={t("form.status")}><StatusPill status={client.status} t={t} variant="badge" /></InfoItem>
               <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}><span><span className="ltr-num">{client.phoneNumber}</span></span></InfoItem>
               <InfoItem icon={<Tag size={14} />} label={t("form.project")}><span>{client.project}</span></InfoItem>
-              <InfoItem icon={<Tag size={14} />} label={t("form.channel")}><span>{channelLabel(t, client.acquisitionChannel)}</span></InfoItem>
-              <InfoItem icon={<TrendingUp size={14} />} label={t("form.location")}><span>{client.location}</span></InfoItem>
+              <InfoItem icon={<Tag size={14} />} label={t("form.channel")}><span className="chan-tag-inline"><i className="dot" style={{ background: optionColor("channels", client.acquisitionChannel, colors) }} />{channelLabel(t, client.acquisitionChannel)}</span></InfoItem>
+              <InfoItem icon={<TrendingUp size={14} />} label={t("form.location")}><span className="loc-tag"><i className="dot" style={{ background: optionColor("locations", client.location, colors) }} />{client.location}</span></InfoItem>
               <InfoItem icon={<Edit3 size={14} />} label={t("form.operation")}><span>{client.operationToTake}</span></InfoItem>
               <InfoItem icon={<UserRound size={14} />} label={t("form.firstContact")}><span>{client.firstContactPerson}</span></InfoItem>
               <InfoItem icon={<UserRound size={14} />} label={t("form.secondContact")}><span>{client.secondContactPerson || "—"}</span></InfoItem>
