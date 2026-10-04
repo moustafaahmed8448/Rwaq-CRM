@@ -372,10 +372,16 @@ function known(list: string[], value: string): boolean {
  * Resolves a sheet channel to a stored value.
  *
  * Runs through the app's own `parseChannel`, so `TikTok` -> `TIKTOK` and
- * `Whatsapp` -> `WHATSAPP` land on the existing built-ins, and `منصة فرصة`
- * normalizes to `منصة_فرصة` — which already exists in this workspace. Anything
- * else (`Website call`, `Email Info`, `المبيعات`, `الشركة`) is kept and
+ * `Whatsapp` -> `WHATSAPP` land on the existing built-ins, `المبيعات` -> `SALES`,
+ * and `منصة فرصة` normalizes to `منصة_فرصة` — which already exists in this
+ * workspace. Anything else (`Website call`, `Email Info`, `الشركة`) is kept and
  * registered as a custom channel.
+ *
+ * The Arabic-to-built-in mapping matters most here, because a sheet is written by
+ * hand in whatever language the team uses. Without it an Arabic channel column
+ * produced a second copy of a built-in that the rest of the workspace already
+ * stores in English — `المبيعات` alongside `SALES`, with filtering by one
+ * missing the rows under the other.
  */
 function resolveChannel(raw: string): string {
   return parseChannel(raw) ?? raw;
