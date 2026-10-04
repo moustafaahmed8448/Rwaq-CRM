@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import RefPicker from "@/components/RefPicker";
 import { useLang } from "@/lib/i18n";
-import { dateLocale } from "@/lib/format";
+import { dateInputValue, dateLocale, isOverdue } from "@/lib/format";
 import { canWrite } from "@/lib/auth";
 import StatusPill from "@/components/StatusPill";
 import { activityFieldLabel, activityValueLabel, channelLabel, describeActivity, PIPELINE_STAGES, statusLabel as localizeStatus } from "@/lib/reporting";
@@ -16,6 +16,20 @@ import { apiErrorMessage, readApiError } from "@/lib/api-errors";
 import type { ActivityEntry, ClientData } from "@/lib/types";
 
 const PREDEFINED_STATUSES = PIPELINE_STAGES.map((s) => s.value);
+
+/**
+ * Quick offsets beside the follow-up date input: +1, +3, +7, +30 days.
+ *
+ * The same list the clients-table edit modal offers (src/app/page.tsx), repeated
+ * rather than imported because that one is a local const inside the dashboard page
+ * module. Four lines each, and the two must agree.
+ */
+const FOLLOW_UP_PRESETS = [
+  { days: 1, key: "followUp.in1Day" },
+  { days: 3, key: "followUp.in3Days" },
+  { days: 7, key: "followUp.in7Days" },
+  { days: 30, key: "followUp.in30Days" },
+] as const;
 
 /**
  * Badge colours resolve through the shared `optionColor`, so a stage can never
@@ -285,6 +299,35 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
                   <Field label={t("form.firstContact")}><input value={draft.firstContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, firstContactPerson: e.target.value })} /></Field>
                   <Field label={t("form.secondContact")}><input value={draft.secondContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, secondContactPerson: e.target.value })} /></Field>
                   <Field label={t("form.operation")} wide><input value={draft.operationToTake ?? ""} onChange={(e) => setDraft({ ...draft, operationToTake: e.target.value })} /></Field>
+                  {/* Follow-up was missing from this form entirely, so the one field the
+                      clients table filters and buckets on could only be set from the
+                      table — and the value shown here under Client info could not be
+                      edited from here at all. Mirrors the edit modal in src/app/page.tsx,
+                      including the quick presets: typing a date three days out is the
+                      common case and a date input is the slowest way to express it.
+                      An empty input writes null, which is how a follow-up is cleared. */}
+                  <Field label={t("form.nextFollowUp")} wide>
+                    <div className="followup-field">
+                      <input
+                        type="date"
+                        value={dateInputValue(draft.nextFollowUpAt)}
+                        onChange={(e) => setDraft({ ...draft, nextFollowUpAt: e.target.value ? new Date(`${e.target.value}T00:00:00`).toISOString() : null })}
+                      />
+                      <div className="followup-presets">
+                        {FOLLOW_UP_PRESETS.map(p => (
+                          <button key={p.days} type="button" className="btn-ghost btn-sm"
+                            onClick={() => setDraft({ ...draft, nextFollowUpAt: new Date(Date.now() + p.days * 86400000).toISOString() })}>
+                            {t(p.key)}
+                          </button>
+                        ))}
+                        {draft.nextFollowUpAt && (
+                          <button type="button" className="btn-ghost btn-sm" onClick={() => setDraft({ ...draft, nextFollowUpAt: null })}>
+                            {t("common.clear")}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </Field>
                   <Field label={t("form.notes")} wide><textarea value={draft.notes ?? ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3} placeholder={t("form.notesPh")} /></Field>
                 </div>
                 <div className="edit-form-actions">
@@ -301,6 +344,14 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
                 <InfoItem icon={<Edit3 size={14} />} label={t("form.operation")}><span>{client.operationToTake}</span></InfoItem>
                 <InfoItem icon={<UserRound size={14} />} label={t("form.firstContact")}><span>{client.firstContactPerson}</span></InfoItem>
                 <InfoItem icon={<UserRound size={14} />} label={t("form.secondContact")}><span>{client.secondContactPerson || "—"}</span></InfoItem>
+                {client.nextFollowUpAt && (
+                  <InfoItem icon={<Clock size={14} />} label={t("form.nextFollowUp")}>
+                    <span className={isOverdue(client.nextFollowUpAt) ? "followup-panel is-overdue" : "followup-panel"}>
+                      {new Date(client.nextFollowUpAt).toLocaleDateString(dateLocale(lang))}
+                      {isOverdue(client.nextFollowUpAt) && <em className="followup-overdue">{t("followUp.overdue")}</em>}
+                    </span>
+                  </InfoItem>
+                )}
                 {client.notes && <InfoItem icon={<MessageSquare size={14} />} label={t("form.notes")}><p className="notes-display">{client.notes}</p></InfoItem>}
               </dl>
             )}
@@ -348,9 +399,9 @@ function ActivityItem({ entry, t, lang }: { entry: ActivityEntry; t: (key: strin
         {entry.field && (
           <div className="timeline-field-change">
             <span className="field-name">{activityFieldLabel(t, entry.field)}</span>
-            {entry.oldValue !== undefined && <span className="old-value">{activityValueLabel(t, entry.field, entry.oldValue)}</span>}
+            {entry.oldValue !== undefined && <span className="old-value">{activityValueLabel(t, entry.field, entry.oldValue, lang)}</span>}
             {entry.oldValue !== undefined && <span className="arrow">{t("common.arrow")}</span>}
-            {entry.newValue !== undefined && <span className="new-value">{activityValueLabel(t, entry.field, entry.newValue)}</span>}
+            {entry.newValue !== undefined && <span className="new-value">{activityValueLabel(t, entry.field, entry.newValue, lang)}</span>}
           </div>
         )}
       </div>

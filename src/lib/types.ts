@@ -57,6 +57,15 @@ export interface ClientData {
   firstContactPerson: string;
   secondContactPerson: string;
   notes?: string;
+  /**
+   * Next follow-up as a timestamp.
+   *
+   * Absent from this type until now, which is why the single-client page could
+   * neither show nor edit it: the read-only info list and the edit form both read
+   * it off `ClientData`, and neither could name the property. The API has been
+   * returning it all along.
+   */
+  nextFollowUpAt?: string | null;
   createdAt: string;
   lastUpdateDate: string;
   activityLog: ActivityEntry[];

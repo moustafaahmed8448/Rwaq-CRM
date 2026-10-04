@@ -339,6 +339,22 @@ button { cursor: pointer; }
 .badge-count { background: #0379b4; color: #fff; border-radius: 10px; padding: 1px 6px; font-size: 10px; margin-left: 4px; font-weight: 700; }
 @media(max-width:900px){.detail-panel{width:100vw}}
 
+/* Settings tab strip. Reuses the import modal's tab look rather than inventing a
+   second one; only the spacing and the button size are page-specific. */
+.settings-tabs { margin-bottom: 14px; }
+.settings-tabs .imp-tab { padding: 7px 16px; font-size: 12px; }
+/* The banner now sits above the tab panels, so it needs its own spacing instead
+   of the trailing one it inherited at the foot of the page. */
+.settings-banner { margin: 0 0 14px; }
+/* Read-only identity fields. Same box as an input so the row reads as a field,
+   without pretending to be editable. */
+.settings-static {
+  min-height: 34px; display: flex; align-items: center;
+  padding: 0 10px; border: 1px dashed var(--line); border-radius: 6px;
+  background: var(--glass-bg); color: var(--ink); font-size: 12px;
+}
+.settings-readonly { margin-top: 12px; }
+
 /* ── Client detail page ───────────────────────────────────────
    The page frame and heading are the standard `.content` + `.page-header` pair
    every other page uses. It previously rolled its own `.detail-page` /

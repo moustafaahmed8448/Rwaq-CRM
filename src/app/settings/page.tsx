@@ -13,7 +13,26 @@ import Select from "@/components/Select";
 /** Assignable roles, shared by the add-user and edit-user forms. */
 const ROLES = ["Admin", "Sales", "CRM", "Visitor"];
 
-type User = { name: string; initials: string; role: string; email?: string; avatar?: string };
+/**
+ * The four groups the settings page is split into.
+ *
+ * It used to be one 640px column of six stacked sections, so reaching "Change
+ * password" meant scrolling past the profile photo, the language switch and the
+ * whole team list. Grouping by intent is what the reader is actually doing.
+ *
+ * `adminOnly` hides Team for non-admins. The Team tab is still skipped rather
+ * than rendered-empty, so a rep opening Settings never lands on a blank page.
+ */
+type SettingsTab = "profile" | "security" | "team" | "appearance";
+
+const SETTINGS_TABS: { key: SettingsTab; labelKey: string; adminOnly?: boolean }[] = [
+  { key: "profile", labelKey: "settings.tabProfile" },
+  { key: "security", labelKey: "settings.tabSecurity" },
+  { key: "team", labelKey: "settings.tabTeam", adminOnly: true },
+  { key: "appearance", labelKey: "settings.tabAppearance" },
+];
+
+type User = { name: string; initials: string; role: string; email?: string; avatar?: string; username?: string };
 /* `avatar` was missing here, so this list drew initials for everyone — including
    people whose photo /users and the header were already showing. /api/users has
    always returned it; the local type was the only thing dropping it. */
@@ -31,7 +50,7 @@ export default function SettingsPage() {
   const [saveMsg, setSaveMsg] = useState("");
   const [error, setError] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
-  const [savingAvatar, setSavingAvatar] = useState(false);
+  const [tab, setTab] = useState<SettingsTab>("profile");
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({ name: "", username: "", email: "", password: "", role: "Sales" as string });
@@ -88,7 +107,6 @@ export default function SettingsPage() {
     e.target.value = "";
     if (!file) return;
     setError("");
-    setSavingAvatar(true);
     try {
       // Downscale in the browser, then store it on the ACCOUNT.
       //
@@ -125,13 +143,11 @@ export default function SettingsPage() {
         ? t("settings.errAvatarTooBig")
         : t("users.photoInvalid"));
     } finally {
-      setSavingAvatar(false);
     }
   };
 
   const removeAvatar = async () => {
     setError("");
-    setSavingAvatar(true);
     try {
       const res = await fetch("/api/auth/me", {
         method: "PATCH",
@@ -151,7 +167,6 @@ export default function SettingsPage() {
       setUser(u => u ? { ...u, avatar: "" } : null);
       window.dispatchEvent(new Event("rwaq-avatar-changed"));
     } finally {
-      setSavingAvatar(false);
     }
   };
 
@@ -304,32 +319,31 @@ export default function SettingsPage() {
         </div>
 
         <div className="settings-container">
-        {/* ── Preferences ── */}
-        <section className="settings-section">
-          <div className="section-header">
-            <h2>{t("settings.preferences")}</h2>
-            <span className="section-sub">{t("settings.language")}</span>
-          </div>
-          <div className="lang-switch" dir="ltr" role="group" aria-label={t("settings.language")}>
+        {/* Tab strip. Reuses the `.imp-tabs` treatment already used by the import
+            modal rather than inventing a second tab look for the app. */}
+        <div className="imp-tabs settings-tabs" role="tablist">
+          {SETTINGS_TABS.filter(x => !x.adminOnly || user.role === "Admin").map(x => (
             <button
+              key={x.key}
+              role="tab"
               type="button"
-              className={lang === "ar" ? "active" : ""}
-              aria-pressed={lang === "ar"}
-              onClick={() => setLang("ar")}
+              aria-selected={tab === x.key}
+              className={`imp-tab ${tab === x.key ? "active" : ""}`}
+              onClick={() => setTab(x.key)}
             >
-              العربية
+              {t(x.labelKey)}
             </button>
-            <button
-              type="button"
-              className={lang === "en" ? "active" : ""}
-              aria-pressed={lang === "en"}
-              onClick={() => setLang("en")}
-            >
-              English
-            </button>
-          </div>
-        </section>
+          ))}
+        </div>
+
+        {/* Success and error, directly under the tabs rather than at the bottom of
+            a long scroll. Under tabs the old position would have been invisible
+            for every panel except the last one the user happened to visit. */}
+        {error && <div className="settings-error settings-banner">{error}</div>}
+        {saveMsg && <div className="settings-success settings-banner">{saveMsg}</div>}
+
         {/* ── Profile ── */}
+        {tab === "profile" && (
         <section className="settings-section">
           <div className="section-header">
             <h2>{t("settings.profile")}</h2>
@@ -349,17 +363,32 @@ export default function SettingsPage() {
             <div className="avatar-info">
               <p className="avatar-hint">{t("settings.avatarHint")}</p>
               {avatarUrl && <button className="btn-text-danger" onClick={removeAvatar}><X size={13}/>{t("settings.remove")}</button>}
-              {savingAvatar && <span className="saving-indicator">{t("settings.saving")}</span>}
+              {/* No "Saving…" here on purpose. The photo appears the moment it lands,
+                  so a progress line told the user nothing they could not see — and it
+                  lingered for a beat after the row had already changed, which read as
+                  the page being busy rather than the picture being saved. An ERROR
+                  still shows below: silence on a failed upload is exactly what hid
+                  the original bug, where the file was written to localStorage and
+                  never sent anywhere. */}
             </div>
           </div>
           <div className="form-grid-2">
             <Field label={t("settings.field.fullName")}><input value={editName} onChange={e=>setEditName(e.target.value)} /></Field>
             <Field label={t("settings.field.email")}><input type="email" value={editEmail} onChange={e=>setEditEmail(e.target.value)} placeholder={user.email || t("settings.noEmail")} /></Field>
           </div>
+          {/* Read-only identity. Username and role are shown rather than left to be
+              discovered: they are what an admin needs when someone reports a login
+              problem, and neither is editable from here by design. */}
+          <div className="form-grid-2 settings-readonly">
+            <Field label={t("settings.field.username")}><div className="settings-static">{user.username || "—"}</div></Field>
+            <Field label={t("settings.field.role")}><div className="settings-static"><span className={`role-badge ${user.role.toLowerCase()}`}>{roleLabel(t, user.role)}</span></div></Field>
+          </div>
           <button className="btn-primary" onClick={saveProfile}><Save size={15}/>{t("settings.saveProfile")}</button>
         </section>
+        )}
 
-        {/* ── Change Password ── */}
+        {/* ── Security ── */}
+        {tab === "security" && (
         <section className="settings-section">
           <div className="section-header">
             <h2>{t("settings.changePassword")}</h2>
@@ -381,10 +410,18 @@ export default function SettingsPage() {
             </div>
           </div>
           <button className="btn-outline" onClick={changePassword}>{t("settings.updatePassword")}</button>
+
+          {/* Sign out moved here from the Danger zone. It is an account action, and
+              leaving it alone at the foot of the page kept it looking like the
+              destructive one next to it. */}
+          <div className="danger-actions">
+            <button className="btn-ghost" onClick={logout}><LogOut size={15}/>{t("settings.signOut")}</button>
+          </div>
         </section>
+        )}
 
         {/* ── Team Members (admin only) ── */}
-        {user.role === "Admin" && (
+        {tab === "team" && user.role === "Admin" && (
           <section className="settings-section">
             <div className="section-header">
               <h2><Users size={14} style={{display:"inline",verticalAlign:"middle",marginRight:6}}/>{t("settings.teamMembers")}</h2>
@@ -447,8 +484,23 @@ export default function SettingsPage() {
           </section>
         )}
 
-        {/* ── Dashboard logo (admin only) ── */}
-        {user.role === "Admin" && (
+        {/* ── Appearance ──
+    Language moved here from the top of the page, where it sat above the profile
+    photo and pushed the thing people actually came for off the screen. */}
+        {tab === "appearance" && (
+          <>
+            <section className="settings-section">
+              <div className="section-header">
+                <h2>{t("settings.preferences")}</h2>
+                <span className="section-sub">{t("settings.language")}</span>
+              </div>
+              <div className="lang-switch" dir="ltr" role="group" aria-label={t("settings.language")}>
+                <button type="button" className={lang === "ar" ? "active" : ""} aria-pressed={lang === "ar"} onClick={() => setLang("ar")}>العربية</button>
+                <button type="button" className={lang === "en" ? "active" : ""} aria-pressed={lang === "en"} onClick={() => setLang("en")}>English</button>
+              </div>
+            </section>
+            {/* ── Dashboard logo (admin only) ── */}
+            {user.role === "Admin" && (
           <section className="settings-section">
             <div className="section-header">
               <h2>{t("settings.logoSection")}</h2>
@@ -471,24 +523,15 @@ export default function SettingsPage() {
                 {logoErr && <div className="settings-error">{logoErr}</div>}
               </div>
             </div>
+          {/* The Danger zone is gone entirely: it held only "Clear local data", which
+              called `localStorage.clear()` and reloaded — one click could throw away the
+              language, the dark-mode choice and the cached avatar of every open tab, and
+              it sat beside Sign out looking like the destructive option. Sign out now
+              lives under Security, where an account action belongs. */}
           </section>
+            )}
+          </>
         )}
-
-        {/* ── Danger zone ── */}
-        <section className="settings-section danger-zone">
-          <div className="section-header">
-            <h2>{t("settings.dangerZone")}</h2>
-            <span className="section-sub">{t("settings.dangerZoneSubtitle")}</span>
-          </div>
-          <p>{t("settings.clearLocalBody")}</p>
-          <div className="danger-actions">
-            <button className="btn-danger" onClick={()=>{if(confirm(t("settings.clearLocalConfirm"))){localStorage.clear();window.location.reload();}}}><Trash2 size={15}/>{t("settings.clearLocal")}</button>
-            <button className="btn-ghost" onClick={logout}><LogOut size={15}/>{t("settings.signOut")}</button>
-          </div>
-        </section>
-
-        {error&&<div className="settings-error">{error}</div>}
-        {saveMsg&&<div className="settings-success">{saveMsg}</div>}
       </div>
       </div>
     </main>

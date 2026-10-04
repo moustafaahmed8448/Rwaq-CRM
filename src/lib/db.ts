@@ -6,6 +6,7 @@ import { identityKey, type BaselineClient } from "./import-clients";
 import { sanitizePrefs, type ColumnPrefs } from "./client-columns";
 import { sanitizeMarketingPrefs } from "./marketing-columns";
 import { sanitizeUserPrefs } from "./user-columns";
+import { addBusinessDays, businessDayKey, startOfBusinessDay, startOfBusinessToday } from "./business-days";
 
 /**
  * Postgres is the single source of truth. Every read and write in the app goes
@@ -414,11 +415,17 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
   if (filters.archived) where.archived = true;
   else if (!filters.includeArchived) where.archived = false;
   if (filters.createdFrom || filters.createdTo) {
-    // Local midnight, not UTC: Client.createdAt is a timestamp, so "the 1st"
-    // should mean the user's own 1st, not 00:00 UTC on the 1st.
+    /* Business-day midnights, not this host's. `new Date(y, m, d)` resolved to
+       UTC on Vercel, three hours later than the day the user meant, which is why
+       the header badge and this count disagreed on the same filter.
+       See src/lib/business-days.ts. */
     where.createdAt = {
-      ...(filters.createdFrom ? { gte: startOfLocalDay(filters.createdFrom) } : {}),
-      ...(filters.createdTo ? { lt: startOfLocalDay(filters.createdTo) } : {}),
+      ...(filters.createdFrom ? { gte: startOfBusinessDay(filters.createdFrom) } : {}),
+      /* The upper bound is the start of the day AFTER `to`, so the end date is
+         included in full. This used to be `lt: startOfLocalDay(to)`, which
+         compared against midnight ON the end date and so silently dropped every
+         client registered during it — "1st to 5th" really meant "1st to 4th". */
+      ...(filters.createdTo ? { lt: startOfBusinessDay(addBusinessDays(filters.createdTo, 1)) } : {}),
     };
   }
   /* Follow-up buckets.
@@ -427,13 +434,12 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
      returned rows matters: the paged table needs a `total` for the pager, and a
      count taken after paging would report only the rows on screen. */
   if (filters.followUp) {
-    /* LOCAL midnights, computed here rather than through `startOfLocalDay`
-       (which takes a "YYYY-MM-DD" string, not a Date). These have to be local to
-       agree with how the form writes the date and how `isOverdue` reads it back —
-       a UTC boundary would put a Riyadh user's morning in the previous day. */
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+    /* Business-day midnights, computed in BUSINESS_TZ rather than the host's
+       clock. On Vercel, `setHours(0,0,0,0)` meant UTC midnight — three hours
+       into the previous Riyadh day — so "due today" started at 21:00Z and
+       disagreed with the browser's own `isOverdue`, which reads the user's day. */
+    const todayStart = startOfBusinessToday();
+    const tomorrowStart = startOfBusinessDay(addBusinessDays(businessDayKey(todayStart), 1));
     switch (filters.followUp) {
       case "overdue":
         // Strictly before today. A follow-up for later TODAY is still ahead of
@@ -1088,17 +1094,10 @@ export type MarketingMetricRow = MarketingMetric;
 const dateOnly = (value: Date | string): string =>
   typeof value === "string" ? value.slice(0, 10) : new Date(value).toISOString().slice(0, 10);
 
-/** UTC midnight — correct for `@db.Date` columns, which Prisma stores as UTC. */
-const startOfDay = (value: string): Date => new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
-
 /**
- * Local midnight — correct for timestamp columns such as Client.createdAt, so a
- * date the user picked means that day in their own timezone.
+ * UTC midnight — correct for `@db.Date` columns, which Prisma stores as UTC.
  */
-const startOfLocalDay = (value: string): Date => {
-  const [y, m, d] = value.slice(0, 10).split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1, 0, 0, 0, 0);
-};
+const startOfDay = (value: string): Date => new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
 
 type MetricDb = Prisma.MarketingMetricGetPayload<Record<string, never>>;
 

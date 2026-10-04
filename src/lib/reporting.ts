@@ -3,6 +3,9 @@
 // These are plain strings rather than Prisma enums so the app can store
 // user-defined channels (e.g. FORSA) and custom statuses (e.g. NEW).
 
+import { addBusinessDays, businessDayKey, startOfBusinessDay, startOfNextBusinessDay } from "./business-days";
+import { dateLocale } from "./format";
+
 export const channelLabels: Record<string, string> = {
   FACEBOOK: "Facebook",
   INSTAGRAM: "Instagram",
@@ -366,6 +369,9 @@ const FIELD_KEYS: Record<string, string> = {
   firstContactPerson: "client.field.firstContact",
   secondContactPerson: "client.field.secondContact",
   notes: "client.field.notes",
+  /* Follow-up was missing here, so the history printed the raw column name —
+     `nextFollowUpAt` — in the timeline instead of a translated label. */
+  nextFollowUpAt: "client.field.followUp",
   Name: "client.field.name",
   Phone: "client.field.phone",
   Status: "client.field.status",
@@ -386,6 +392,7 @@ const FIELD_KEYS: Record<string, string> = {
 const CANONICAL_FIELDS = new Set([
   "name", "phoneNumber", "status", "acquisitionChannel", "project",
   "location", "operationToTake", "firstContactPerson", "secondContactPerson", "notes",
+  "nextFollowUpAt",
 ]);
 
 function fieldKey(field: string): string {
@@ -400,14 +407,24 @@ export function activityFieldLabel(t: TranslateFn, field: string): string {
 
 /**
  * Localized value for an activity change. Status and channel values are
- * translated; every other value is user data and is returned untouched.
+ * translated; dates are rendered as dates; every other value is user data and is
+ * returned untouched.
  */
-export function activityValueLabel(t: TranslateFn, field: string, value: string | undefined): string {
+export function activityValueLabel(t: TranslateFn, field: string, value: string | undefined, lang = "en"): string {
   if (value === undefined) return "";
   if (value.trim() === "") return t("form.unassigned");
   const key = fieldKey(field);
   if (key === "status") return statusLabel(t, value);
   if (key === "acquisitionChannel") return channelLabel(t, value);
+  /* A follow-up is stored as a timestamp, so the raw value is an ISO string.
+     Rendering it verbatim put `2026-09-24T00:30:00.000Z` in the timeline — the
+     column's storage format, in a place meant for a person to read.
+     `lang` is optional because only date-bearing fields need it; the callers
+     that show dates pass the viewer's, and the rest fall back to English. */
+  if (key === "nextFollowUpAt") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString(dateLocale(lang));
+  }
   return value;
 }
 
@@ -504,30 +521,25 @@ export function parseStatus(value: unknown): string | undefined {
 }
 
 export const startOfWeek = (date = new Date()) => {
-  const value = new Date(date);
-  const day = value.getDay();
-  value.setDate(value.getDate() + (day === 0 ? -6 : 1 - day));
-  value.setHours(0, 0, 0, 0);
-  return value;
+  /* The weekday is read from the BUSINESS day's key, not `getDay()`. On a UTC
+     server late in the evening, `getDay()` names tomorrow while the user's
+     calendar still says today, which would start the week a day out. */
+  const key = businessDayKey(date);
+  const weekday = new Date(`${key}T00:00:00Z`).getUTCDay();
+  return startOfBusinessDay(addBusinessDays(key, weekday === 0 ? -6 : 1 - weekday));
 };
 
-export const endOfWeek = (date = new Date()) => {
-  const value = startOfWeek(date);
-  value.setDate(value.getDate() + 7);
-  return value;
-};
+export const endOfWeek = (date = new Date()) =>
+  startOfBusinessDay(addBusinessDays(businessDayKey(startOfWeek(date)), 7));
 
 export const startOfMonth = (date = new Date()) => {
-  const value = new Date(date);
-  value.setDate(1);
-  value.setHours(0, 0, 0, 0);
-  return value;
+  const key = businessDayKey(date);
+  return startOfBusinessDay(addBusinessDays(key, -(Number(key.slice(8, 10)) - 1)));
 };
 
 export const endOfMonth = (date = new Date()) => {
-  const value = startOfMonth(date);
-  value.setMonth(value.getMonth() + 1);
-  return value;
+  const key = businessDayKey(date);
+  return startOfBusinessDay(addBusinessDays(key, Number(key.slice(8, 10))));
 };
 
 export type PeriodKind =
@@ -559,18 +571,10 @@ export interface ResolvedPeriod {
  * concrete bounds. 1970-01-01 predates any client this app can hold, so every
  * row falls inside it.
  */
-const EPOCH = new Date(1970, 0, 1);
+const EPOCH = startOfBusinessDay("1970-01-01");
 
-/**
- * YYYY-MM-DD in the viewer's own calendar.
- *
- * Deliberately NOT `toISOString()`, which converts to UTC: in any timezone
- * east of Greenwich, local midnight serializes to the *previous* day. That
- * silently shifted every reporting boundary a day early (a custom 1st–30th range
- * became 31st-of-previous → 30th) and dropped the final day from the query.
- */
-const dayKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** YYYY-MM-DD in BUSINESS_TZ. Alias of businessDayKey, kept local for brevity. */
+const dayKey = businessDayKey;
 
 /**
  * Resolves the dashboard reporting window.
@@ -586,16 +590,13 @@ const dayKey = (d: Date) =>
  */
 export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now = new Date()): ResolvedPeriod {
   if (kind === "custom" && from && to) {
-    const a = new Date(from);
-    const b = new Date(to);
-    if (!Number.isNaN(a.getTime()) && !Number.isNaN(b.getTime()) && a <= b) {
-      // `to` is exclusive in the internal helpers (endOfWeek is start + 7), but a
-      // user-supplied end date is inclusive, so widen it to the start of the next
-      // day and keep every downstream comparison a simple gte/lt.
-      const inclusiveEnd = new Date(b);
-      inclusiveEnd.setDate(inclusiveEnd.getDate() + 1);
-      a.setHours(0, 0, 0, 0);
-      inclusiveEnd.setHours(0, 0, 0, 0);
+    /* A user-supplied end date is INCLUSIVE, so the upper bound becomes the start
+       of the next day. Both bounds are business-day midnights, not this host's:
+       `new Date("2026-09-05")` parses as UTC midnight, three hours into the
+       previous Riyadh day. */
+    if (!Number.isNaN(new Date(from).getTime()) && !Number.isNaN(new Date(to).getTime()) && from <= to) {
+      const a = startOfBusinessDay(from);
+      const inclusiveEnd = startOfNextBusinessDay(to);
       return { kind, from: a, to: inclusiveEnd, fromStr: dayKey(a), toStr: dayKey(inclusiveEnd) };
     }
   }
@@ -603,9 +604,7 @@ export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now 
   // bound is EXCLUSIVE everywhere it is consumed (`createdAt: { lt }` in
   // clientWhere), so `today` would drop clients registered earlier the same day.
   if (kind === "all") {
-    const to = new Date(now);
-    to.setDate(to.getDate() + 1);
-    to.setHours(0, 0, 0, 0);
+    const to = startOfNextBusinessDay(dayKey(now));
     const from = new Date(EPOCH);
     return { kind, from, to, fromStr: dayKey(from), toStr: dayKey(to) };
   }
@@ -627,8 +626,9 @@ export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now 
   }
 
   if (kind === "year") {
-    const from = new Date(now.getFullYear(), 0, 1);
-    const to = new Date(now.getFullYear() + 1, 0, 1);
+    const year = Number(dayKey(now).slice(0, 4));
+    const from = startOfBusinessDay(`${year}-01-01`);
+    const to = startOfBusinessDay(`${year + 1}-01-01`);
     return { kind, from, to, fromStr: dayKey(from), toStr: dayKey(to) };
   }
 
@@ -712,11 +712,7 @@ export const PERIOD_KINDS = [
  * the window, which is how a "last 7 days" view quietly covered only 6.
  */
 function rollingWindow(days: number, now: Date): ResolvedPeriod {
-  const from = new Date(now);
-  from.setHours(0, 0, 0, 0);
-  from.setDate(from.getDate() - (days - 1));
-  const to = new Date(now);
-  to.setDate(to.getDate() + 1);
-  to.setHours(0, 0, 0, 0);
+  const from = startOfBusinessDay(addBusinessDays(dayKey(now), -(days - 1)));
+  const to = startOfNextBusinessDay(dayKey(now));
   return { from, to, fromStr: dayKey(from), toStr: dayKey(to) } as ResolvedPeriod;
 }

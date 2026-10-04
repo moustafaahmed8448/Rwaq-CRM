@@ -339,7 +339,7 @@ function ProfileView() {
     <main className="shell">
       <AppHeader
         user={user}
-        active="settings"
+        active="profile"
         darkMode={darkMode}
         onToggleDark={() => setDarkMode(d => !d)}
         onNavigate={(tab) => {

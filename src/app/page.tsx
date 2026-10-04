@@ -27,6 +27,7 @@ import {
 } from "@/lib/reporting";
 import { downloadFile, exportQuery, EXPORT_FAILED } from "@/lib/download";
 import { dateInputValue, isOverdue, localDayKey, num, sar, dateLocale } from "@/lib/format";
+import { addBusinessDays, businessDayKey } from "@/lib/business-days";
 import { useLogo } from "@/lib/logo";
 import StatusPill, { StatusDot } from "@/components/StatusPill";
 import RefPicker from "@/components/RefPicker";
@@ -67,19 +68,16 @@ const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "W
 
 
 /**
- * YYYY-MM-DD in the LOCAL calendar.
+ * `daysAgo` and the presets below name days in BUSINESS_TZ, because they produce
+ * the `startDate` the server then interprets — the two have to mean the same day.
  *
- * Deliberately not `toISOString()`, which converts to UTC and is a day off
- * east of Greenwich — the same trap documented on `dayKey` in reporting.ts.
+ * They used to be built from the browser's own calendar. That was invisible
+ * locally (dev server and browser share a timezone) and wrong on Vercel, where
+ * the server's clock is UTC: the header badge counted "last 30 days" from the
+ * user's midnight while the paged table counted from 21:00Z the evening before,
+ * putting clients created in the gap on one side only. 188 against 182.
  */
-const localDay = (d: Date): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-const daysAgo = (n: number): string => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return localDay(d);
-};
+const daysAgo = (n: number): string => addBusinessDays(businessDayKey(new Date()), -n);
 
 /**
  * The first day of a window that INCLUDES today and spans `n` days.
@@ -105,10 +103,7 @@ const rollingStart = (n: number): string => daysAgo(n - 1);
  * and the rolling set reads more consistently.
  */
 const buildDatePresets = (): DatePreset[] => {
-  const firstOfMonth = new Date();
-  firstOfMonth.setDate(1);
-  const firstOfYear = new Date();
-  firstOfYear.setMonth(0, 1);
+  const todayKey = businessDayKey(new Date());
 
   // No "This week": "Last 7 days" covers the same ground and the rolling set
   // reads more consistently. The Monday computation that backed it is gone, so
@@ -120,14 +115,17 @@ const buildDatePresets = (): DatePreset[] => {
   // (This month, This year) are unaffected: they are bounded by the month or
   // year, not by a day count.
   return [
-    { label: "date.today", startDate: localDay(new Date()) },
+    { label: "date.today", startDate: todayKey },
     { label: "date.last3", startDate: rollingStart(3) },
     { label: "date.last7", startDate: rollingStart(7) },
     { label: "date.last14", startDate: rollingStart(14) },
     { label: "date.last30", startDate: rollingStart(30) },
     { label: "date.last90", startDate: rollingStart(90) },
-    { label: "date.thisMonth", startDate: localDay(firstOfMonth) },
-    { label: "date.thisYear", startDate: localDay(firstOfYear) },
+    /* Straight from the key: "the 1st" is a calendar fact, not a moment, and
+       building it through a Date could land on the previous business day when
+       the instant fell on the wrong side of midnight. */
+    { label: "date.thisMonth", startDate: `${todayKey.slice(0, 8)}01` },
+    { label: "date.thisYear", startDate: `${todayKey.slice(0, 4)}-01-01` },
   ];
 };
 
@@ -136,6 +134,8 @@ const FIELD_KEYS: Record<string, string> = {
   name: "form.name", phoneNumber: "form.phone", project: "form.project", location: "form.location",
   acquisitionChannel: "form.channel", status: "form.status", firstContactPerson: "form.firstContact",
   secondContactPerson: "form.secondContact", operationToTake: "form.operation", notes: "form.notes",
+  /* Without this the toast printed the raw column name, `nextFollowUpAt`. */
+  nextFollowUpAt: "form.nextFollowUp",
 };
 
 
@@ -170,7 +170,12 @@ function matchesFilters(client: Client, filters: Filters) {
    * same screen. The server's reading is the correct one (a timestamp's day
    * should be the user's day), so the browser is corrected to match it.
    */
-  const date = client.createdAt ? localDay(new Date(client.createdAt)) : "";
+  /* `businessDayKey`, not this browser's own calendar. The badge counts in the
+     browser while the table counts in SQL, so if the two read "a day" from
+     different clocks they drift: the browser in Riyadh said 188 for "last 30
+     days" where the UTC server said 182. Both sides now name days in BUSINESS_TZ,
+     so they agree by construction rather than by coincidence. */
+  const date = businessDayKey(client.createdAt);
   // Ignore spaces/dashes/parentheses so phone numbers match with or without
   // formatting, e.g. "1018240912" finds "+20 101 824 0912".
   const norm = (s: string) => s.replace(/[\s\-().]/g, "").toLowerCase();

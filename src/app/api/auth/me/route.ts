@@ -29,6 +29,11 @@ export async function GET(request: NextRequest) {
           user: {
             name: user.name,
             initials: user.name.slice(0, 2).toUpperCase(),
+            /* Your own login name, shown read-only on the settings Profile tab.
+               It was never sent, so that field could only ever render empty. It is
+               the caller's own identifier — the users admin table already lists it
+               for every member — not something being exposed about anyone else. */
+            username: user.username,
             role: normalizeRole(user.role, user.username),
             email: user.email ?? "",
             language: user.language,

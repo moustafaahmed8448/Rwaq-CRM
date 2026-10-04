@@ -4,6 +4,8 @@
  * sar(12.5, 2)     -> "SAR 12.50"
  * sar("12.50")     -> "SAR 12.50"  (already-formatted values like CPM strings)
  */
+import { businessDayKey } from "./business-days";
+
 export function sar(value: number | string, decimals = 0): string {
   if (typeof value === "string") return `SAR ${value}`;
   return `SAR ${value.toLocaleString("en-US", {
@@ -35,9 +37,20 @@ export function dateLocale(lang: string): string {
   return lang === "ar" ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB";
 }
 
-/** YYYY-MM-DD in the LOCAL calendar. Mirrors `localDay` in src/app/page.tsx. */
+/**
+ * YYYY-MM-DD that a `Date` belongs to, in BUSINESS_TZ.
+ *
+ * Was the browser's own calendar (`getFullYear`/`getMonth`/`getDate`). That made
+ * "a day" mean something different on each side of the wire: the follow-up
+ * buckets counted here in the browser and there in SQL, and on Vercel — whose
+ * clock is UTC — the two disagreed for three hours a day. Everything that wants
+ * a business day now goes through this one function.
+ *
+ * The name is kept so the many existing call sites read naturally; `businessDayKey`
+ * in src/lib/business-days.ts is the implementation.
+ */
 export function localDayKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return businessDayKey(d);
 }
 
 /**
