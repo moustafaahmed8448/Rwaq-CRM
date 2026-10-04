@@ -1,9 +1,11 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "./prisma";
 import { type ActivityEntry, type ClientData, type MarketingMetric, makeActivityEntry } from "./types";
 import { normalizeStatus } from "./reporting";
 import { identityKey, type BaselineClient } from "./import-clients";
 import { sanitizePrefs, type ColumnPrefs } from "./client-columns";
+import { sanitizeMarketingPrefs } from "./marketing-columns";
+import { sanitizeUserPrefs } from "./user-columns";
 
 /**
  * Postgres is the single source of truth. Every read and write in the app goes
@@ -35,7 +37,7 @@ export function databaseErrorMessage(error: unknown): string {
 
 /* ── Reference data (channels / statuses / locations) ─────────────────────── */
 
-export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "optionColors";
+export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "optionColors" | "statusBuckets";
 
 export async function readSetting(key: SettingKey): Promise<string[]> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -222,6 +224,8 @@ export type ClientRow = {
   firstContactPerson: string;
   secondContactPerson: string;
   notes: string | null;
+  /** ISO string, or null when no follow-up is set. Matches createdAt/lastUpdateDate. */
+  nextFollowUpAt: string | null;
   archived: boolean;
   archivedAt: string | null;
   activityLog: ActivityEntry[];
@@ -247,6 +251,11 @@ export function toClientRow(row: ClientRecordDb): ClientRow {
     firstContactPerson: row.firstContactPerson,
     secondContactPerson: row.secondContactPerson,
     notes: row.notes,
+    // `iso` so the row shape matches `createdAt` / `lastUpdateDate`, which are
+    // strings for the JSON API. Emitting a raw Date here would serialize the
+    // same either way, but the two representations differing is exactly the kind
+    // of drift that later breaks a comparison.
+    nextFollowUpAt: iso(row.nextFollowUpAt),
     archived: Boolean(row.archived),
     archivedAt: iso(row.archivedAt),
     activityLog: Array.isArray(row.activityLog)
@@ -254,6 +263,9 @@ export function toClientRow(row: ClientRecordDb): ClientRow {
       : [],
   };
 }
+
+/** The four follow-up buckets the clients filter offers. */
+export type FollowUpFilter = "overdue" | "today" | "upcoming" | "none";
 
 export type ClientFilters = {
   /**
@@ -290,6 +302,26 @@ export type ClientFilters = {
   createdTo?: string;
   archived?: boolean;
   includeArchived?: boolean;
+  /**
+   * Follow-up bucket: `overdue` (a date has passed), `today` (due on the current
+   * day, including anything already late today), `upcoming` (a future date), or
+   * `none` (no date set at all).
+   *
+   * Deliberately a closed set rather than a raw date range: every one of these is
+   * a question the user asks in the course of a day ("what did I miss?", "what's
+   * on for today?"), and expressing them as ranges in the query string would put
+   * the boundary arithmetic in the caller, where it would be recomputed per
+   * request and could disagree with the count the header shows.
+   */
+  followUp?: FollowUpFilter;
+  /**
+   * Which contact ROLE the assignee holds on the client: `first`, `second`, or
+   * neither. Only meaningful alongside `assignee`.
+   *
+   * Narrowing to a role rather than to a name is what makes "clients I own" and
+   * "clients I support" answerable without the caller restating the assignee.
+   */
+  contact?: "first" | "second";
   /**
    * Free-text search over name / phone / project / notes.
    *
@@ -359,6 +391,13 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
   if (firstContacts.length > 0) where.firstContactPerson = { in: firstContacts };
   const secondContacts = asList(filters.secondContact);
   if (secondContacts.length > 0) where.secondContactPerson = { in: secondContacts };
+  /* Which ROLE the assignee holds: `first`, `second`, or neither.
+     Deliberately separate from the two filters above. Those narrow to a NAMED
+     person's clients; this narrows to a ROLE within the book already scoped by
+     `assignee`, which is what the profile page's tiles need — "clients I own"
+     and "clients I support" are different questions from "clients of X". */
+  if (filters.contact === "first") where.firstContactPerson = { equals: filters.assignee ?? "" };
+  else if (filters.contact === "second") where.secondContactPerson = { equals: filters.assignee ?? "" };
   if (filters.assignee) {
     // AND, not OR: this has to compose with an explicit salesperson filter
     // rather than overwrite it.
@@ -381,6 +420,36 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
       ...(filters.createdFrom ? { gte: startOfLocalDay(filters.createdFrom) } : {}),
       ...(filters.createdTo ? { lt: startOfLocalDay(filters.createdTo) } : {}),
     };
+  }
+  /* Follow-up buckets.
+     Boundaries are LOCAL midnights, matching how the form writes the date and how
+     `isOverdue` reads it back. Doing this in SQL rather than filtering the
+     returned rows matters: the paged table needs a `total` for the pager, and a
+     count taken after paging would report only the rows on screen. */
+  if (filters.followUp) {
+    /* LOCAL midnights, computed here rather than through `startOfLocalDay`
+       (which takes a "YYYY-MM-DD" string, not a Date). These have to be local to
+       agree with how the form writes the date and how `isOverdue` reads it back —
+       a UTC boundary would put a Riyadh user's morning in the previous day. */
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+    switch (filters.followUp) {
+      case "overdue":
+        // Strictly before today. A follow-up for later TODAY is still ahead of
+        // the user, so it belongs in "due today", not here.
+        where.nextFollowUpAt = { lt: todayStart };
+        break;
+      case "today":
+        where.AND = [...existingAnd(where), { nextFollowUpAt: { gte: todayStart, lt: tomorrowStart } }];
+        break;
+      case "upcoming":
+        where.AND = [...existingAnd(where), { nextFollowUpAt: { gte: tomorrowStart } }];
+        break;
+      case "none":
+        where.nextFollowUpAt = null;
+        break;
+    }
   }
   if (filters.search) {
     const q = filters.search.trim();
@@ -531,6 +600,30 @@ export async function countClients(where: Prisma.ClientWhereInput = {}): Promise
   return prisma.client.count({ where });
 }
 
+/**
+ * Counts for all four follow-up buckets, under the same filters as the list.
+ *
+ * The four chips in the clients filter bar render these, and the point of that is
+ * legibility: a chip showing nothing beside "Overdue" is indistinguishable from
+ * one that is not filtering. With 0 of 343 clients carrying a date, Overdue and
+ * Due today are legitimately empty, and the number is what makes that obvious
+ * rather than looking broken.
+ *
+ * Each bucket is counted by running `clientWhere` with that bucket applied, so a
+ * badge can never disagree with the rows the filter returns — the boundaries are
+ * local midnights, exactly as the list uses them. Four cheap COUNTs, one request.
+ */
+export async function countClientsByFollowUp(
+  filters: ClientFilters = {},
+): Promise<Record<FollowUpFilter, number>> {
+  const buckets: FollowUpFilter[] = ["overdue", "today", "upcoming", "none"];
+  const counts = {} as Record<FollowUpFilter, number>;
+  for (const bucket of buckets) {
+    counts[bucket] = await countClients(clientWhere({ ...filters, followUp: bucket }));
+  }
+  return counts;
+}
+
 export type NewClientInput = {
   name: string;
   phoneNumber: string;
@@ -542,6 +635,15 @@ export type NewClientInput = {
   firstContactPerson: string;
   secondContactPerson: string;
   notes?: string;
+  /**
+   * When the client should next be chased.
+   *
+   * Accepts an ISO string or a Date because the two arrive from different
+   * places: a JSON body from the browser carries the former, an importer or a
+   * seed script naturally builds the latter. Stored as timestamptz; cleared by
+   * passing null.
+   */
+  nextFollowUpAt?: string | Date | null;
 };
 
 /**
@@ -794,6 +896,16 @@ export type UpdateClientOptions = {
    * who never made the change.
    */
   notify?: boolean;
+  /**
+   * Database handle to run against. Defaults to the shared `prisma`.
+   *
+   * Exists for `bulkUpdateClients`, which needs every row in the batch to share
+   * one transaction. Passing the transactional handle is the only way the writes
+   * actually enlist — Prisma's callback form gives you a client bound to the
+   * transaction, and a function that closes over the global `prisma` would
+   * silently run outside it, which is the bug this option exists to prevent.
+   */
+  db?: PrismaClient;
 };
 
 export async function updateClient(
@@ -802,7 +914,8 @@ export async function updateClient(
   actor: string,
   options: UpdateClientOptions = {},
 ): Promise<UpdateClientResult> {
-  const existing = await prisma.client.findUnique({ where: { id } });
+  const db = options.db ?? prisma;
+  const existing = await db.client.findUnique({ where: { id } });
   if (!existing) return { outcome: "not_found" };
 
   const { archived, ...rest } = patch;
@@ -813,7 +926,18 @@ export async function updateClient(
   for (const [key, value] of Object.entries(rest)) {
     if (value === undefined) continue;
     const oldValue = (existing as unknown as Record<string, unknown>)[key];
-    if (String(oldValue ?? "") === String(value ?? "")) continue;
+    /* `nextFollowUpAt` is the one field whose STORED and INCOMING forms differ:
+       the column reads back as a Date, while a browser sends an ISO string. A
+       plain `String()` comparison would therefore never match, so re-saving the
+       same date would log a phantom change and append a pointless activity entry
+       every single time. Both sides are normalized to the same representation
+       first — and `iso` maps null and undefined alike to null, so "cleared"
+       compares equal to "never set", which is the intended reading. */
+    const unchanged = key === "nextFollowUpAt"
+      ? iso(typeof value === "string" ? new Date(value) : (value as Date | null))
+        === iso(oldValue as Date | null)
+      : String(oldValue ?? "") === String(value ?? "");
+    if (unchanged) continue;
     (updates as Record<string, unknown>)[key] = value;
     // Store the raw column key (e.g. "acquisitionChannel") so the timeline can
     // localize the field name; never the English label.
@@ -851,7 +975,7 @@ export async function updateClient(
     ),
   ];
 
-  const row = await prisma.client.update({
+  const row = await db.client.update({
     where: { id },
     data: { ...updates, activityLog: nextLog as unknown as Prisma.InputJsonValue },
   });
@@ -873,6 +997,79 @@ export async function updateClient(
   }
 
   return { outcome: "updated", client: toClientRow(row) };
+}
+
+/**
+ * Applies one patch to many clients, atomically.
+ *
+ * Calls `updateClient` per id inside a single transaction rather than using
+ * `prisma.client.updateMany`, and the reason is the activity log. `updateMany`
+ * writes one UPDATE with no row access, so it cannot append the per-client
+ * `STATUS_CHANGE` timeline entry or resolve each client's name for the
+ * notification — both of which are part of what a status change IS in this app.
+ * Reusing `updateClient` keeps one code path, so bulk and single edits cannot
+ * drift apart in what they record.
+ *
+ * The transaction is what makes the batch all-or-nothing: 30 clients where one
+ * is missing from the book should not leave 29 silently updated. Note the
+ * per-id `updateClient` calls each issue their own find+update, so the
+ * transaction guards atomicity, not round-trip count — which is the right
+ * trade at the sizes this UI allows (one page of rows, or one filter match).
+ */
+export async function bulkUpdateClients(
+  ids: string[],
+  patch: ClientPatch,
+  actor: string,
+): Promise<{ updated: number; skipped: number }> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return { updated: 0, skipped: 0 };
+
+  /* Callback form, not the array form: the array form demands PrismaPromise
+     query builders, and `updateClient` is an async function that awaits its own
+     reads, so it returns a plain Promise. The callback form hands us a client
+     already bound to the transaction, which is what `options.db` exists to
+     accept — closing over the global `prisma` here would run every write
+     outside the transaction and make the atomicity claim false.
+
+     `notify: false` inside, deliberately. `createNotification` writes through the
+     shared client, so it could not enlist even if we wanted it to, and a
+     notification announcing a change that later rolls back is worse than one
+     that never arrives. They are sent after the commit instead. */
+  const outcomes = await prisma.$transaction(async (tx) => {
+    const results: UpdateClientResult[] = [];
+    for (const id of unique) {
+      results.push(await updateClient(id, patch, actor, { db: tx as unknown as PrismaClient, notify: false }));
+    }
+    return results;
+  });
+
+  const changed = outcomes.filter((o) => o.outcome === "updated");
+  const updated = changed.length;
+
+  // Post-commit notifications. Only contact reassignment produces them — the
+  // same rule `updateClient` applies — so a bulk STATUS change, which is the
+  // common case, sends nothing.
+  for (const outcome of changed) {
+    if (outcome.outcome !== "updated") continue;
+    const contacts: Array<["1st" | "2nd", string | undefined]> = [
+      ["1st", patch.firstContactPerson],
+      ["2nd", patch.secondContactPerson],
+    ];
+    for (const [role, person] of contacts) {
+      if (!person) continue;
+      await createNotification({
+        recipient: person,
+        type: `ASSIGNED:${role}`,
+        message: `You were assigned “${outcome.client.name}”`,
+        clientId: outcome.client.id,
+        clientName: outcome.client.name,
+      });
+    }
+  }
+
+  // "not_found" AND "no_changes" both mean this client did not move, for
+  // different reasons: one is gone, the other was already on that status.
+  return { updated, skipped: unique.length - updated };
 }
 
 export async function deleteClient(id: string): Promise<boolean> {
@@ -1000,6 +1197,25 @@ export async function deleteMetric(id: string): Promise<boolean> {
   }
 }
 
+/**
+ * Deletes a batch of metrics in ONE statement.
+ *
+ * "Delete selected" on the entries table used to be the only alternative to
+ * issuing one DELETE per row — a 25-row page would have meant 25 round trips and
+ * 25 chances to fail halfway. Returns how many rows actually went, so a selection
+ * containing an id someone else already removed reports honestly instead of
+ * looking like a total failure.
+ *
+ * Unlike `deleteMetric`, errors propagate: a silent `false` here would tell the
+ * caller "0 deleted" without saying why.
+ */
+export async function deleteMetrics(ids: string[]): Promise<number> {
+  const clean = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (clean.length === 0) return 0;
+  const { count } = await prisma.marketingMetric.deleteMany({ where: { id: { in: clean } } });
+  return count;
+}
+
 /* ── Notifications ──────────────────────────────────────────────────────── */
 
 export type NotificationRecord = {
@@ -1106,17 +1322,44 @@ export type UserRecord = {
    * gaps from the registry defaults.
    */
   clientColumns: ColumnPrefs;
+  /** Saved marketing-table layout. Same sparse shape as `clientColumns`. */
+  marketingColumns: ColumnPrefs;
+  /** Saved users-table layout. Same sparse shape again — one blob per table. */
+  userColumns: ColumnPrefs;
+  /** Downscaled PNG data URL, or undefined when no photo is set. */
+  avatar?: string;
+  phone?: string;
+  jobTitle?: string;
+  notes?: string;
+  /** ISO string. Undefined on the raw-SQL fallbacks, which do not select it. */
+  createdAt?: string;
 };
 
 type UserDb = Prisma.AppUserGetPayload<Record<string, never>> & {
   language?: unknown;
   clientColumns?: unknown;
+  marketingColumns?: unknown;
+  userColumns?: unknown;
+};
+
+/**
+ * Which sanitizer each stored blob is read through.
+ *
+ * Every layout is sanitized against ITS OWN registry. `spend` is a marketing
+ * column and `role` is a users column — neither is known to the clients
+ * registry, so reading them with the clients rules would silently drop those
+ * widths the moment the row was read back.
+ */
+const PREF_SANITIZERS: Record<LayoutField, (input: unknown) => ColumnPrefs> = {
+  clientColumns: sanitizePrefs,
+  marketingColumns: sanitizeMarketingPrefs,
+  userColumns: sanitizeUserPrefs,
 };
 
 /** Reads the stored JSON layout, tolerating NULL and any junk shape. */
-const toColumnPrefs = (raw: unknown): ColumnPrefs => {
+const toColumnPrefs = (raw: unknown, field: LayoutField): ColumnPrefs => {
   if (!raw || typeof raw !== "object") return {};
-  return sanitizePrefs(raw);
+  return PREF_SANITIZERS[field](raw);
 };
 
 const toUserRecord = (row: UserDb): UserRecord => ({
@@ -1125,8 +1368,15 @@ const toUserRecord = (row: UserDb): UserRecord => ({
   email: row.email ?? undefined,
   role: row.role,
   hash: row.hash,
+  avatar: row.avatar ?? undefined,
+  phone: row.phone ?? undefined,
+  jobTitle: row.jobTitle ?? undefined,
+  notes: row.notes ?? undefined,
+  createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : undefined,
   language: typeof row.language === "string" && row.language === "en" ? "en" : "ar",
-  clientColumns: toColumnPrefs(row.clientColumns),
+  clientColumns: toColumnPrefs(row.clientColumns, "clientColumns"),
+  marketingColumns: toColumnPrefs(row.marketingColumns, "marketingColumns"),
+  userColumns: toColumnPrefs(row.userColumns, "userColumns"),
 });
 
 function isMissingLanguageColumn(error: unknown): boolean {
@@ -1178,7 +1428,7 @@ export async function countUsers(): Promise<number> {
 }
 
 export async function createUser(
-  input: Omit<UserRecord, "language" | "clientColumns"> & { language?: string; clientColumns?: ColumnPrefs },
+  input: Omit<UserRecord, "language" | "clientColumns" | "marketingColumns" | "userColumns" | "createdAt"> & { language?: string; clientColumns?: ColumnPrefs },
 ): Promise<UserRecord> {
   try {
     const row = await prisma.appUser.create({
@@ -1189,6 +1439,10 @@ export async function createUser(
         role: input.role,
         hash: input.hash,
         language: input.language ?? "ar",
+        avatar: input.avatar ?? null,
+        phone: input.phone ?? null,
+        jobTitle: input.jobTitle ?? null,
+        notes: input.notes ?? null,
         clientColumns: (input.clientColumns ?? {}) as Prisma.InputJsonValue,
       },
     });
@@ -1204,6 +1458,10 @@ export async function createUser(
         role: input.role,
         hash: input.hash,
         language: input.language ?? "ar",
+        avatar: input.avatar ?? null,
+        phone: input.phone ?? null,
+        jobTitle: input.jobTitle ?? null,
+        notes: input.notes ?? null,
         clientColumns: (input.clientColumns ?? {}) as Prisma.InputJsonValue,
       },
     });
@@ -1211,30 +1469,55 @@ export async function createUser(
   }
 }
 
+/**
+ * Which saved-layout blob to write.
+ *
+ * The clients and marketing tables have unrelated column sets, so they keep
+ * separate columns. Taking the field as a union rather than hard-coding
+ * `clientColumns` is what lets one function serve both without the caller being
+ * able to name an arbitrary column.
+ */
+export type LayoutField = "clientColumns" | "marketingColumns" | "userColumns";
+
 export async function saveUserColumnPrefs(
   username: string,
+  field: LayoutField,
   prefs: unknown,
 ): Promise<ColumnPrefs> {
   // Sanitize before persisting: unknown keys are dropped and widths clamped to
   // the registry, so a hand-crafted payload cannot store junk the UI would then
-  // have to defend against on every render.
-  const clean = sanitizePrefs(prefs);
+  // have to defend against on every render. Which registry depends on the field —
+  // see toColumnPrefs above for why they cannot share one.
+  const clean = PREF_SANITIZERS[field](prefs);
   await prisma.appUser.update({
     where: { username: username.toLowerCase() },
-    data: { clientColumns: clean as Prisma.InputJsonValue },
+    // Computed rather than `data: { [field]: clean }` only so the key stays
+    // typed against the union above — a typo becomes a compile error, not a
+    // runtime "unknown argument".
+    data: { [field]: clean as Prisma.InputJsonValue },
   });
   return clean;
 }
 
 export async function updateUser(
   username: string,
-  patch: { newUsername?: string; name?: string; email?: string; role?: string; language?: string },
+  patch: {
+    newUsername?: string; name?: string; email?: string; role?: string; language?: string;
+    avatar?: string | null; phone?: string | null; jobTitle?: string | null; notes?: string | null;
+  },
 ): Promise<UserRecord | null> {
   const data: Prisma.AppUserUpdateInput = {};
   if (patch.name !== undefined) data.name = patch.name;
   if (patch.email !== undefined) data.email = patch.email;
   if (patch.role !== undefined) data.role = patch.role;
   if (patch.language !== undefined) data.language = patch.language;
+  // `null` clears a field; `undefined` means "not part of this patch". The
+  // distinction is what lets the profile form blank one field without having to
+  // resend the whole row.
+  if (patch.avatar !== undefined) data.avatar = patch.avatar;
+  if (patch.phone !== undefined) data.phone = patch.phone;
+  if (patch.jobTitle !== undefined) data.jobTitle = patch.jobTitle;
+  if (patch.notes !== undefined) data.notes = patch.notes;
   if (patch.newUsername !== undefined) data.username = patch.newUsername.toLowerCase();
 
   // Language-only updates (from the header switch) must not fail on databases

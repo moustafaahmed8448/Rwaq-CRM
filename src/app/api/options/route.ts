@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canWrite, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
-import { BUILTIN_LOCATION_KEYS, PREDEFINED_STATUSES, channelValues } from "@/lib/reporting";
+import {
+  BUILTIN_LOCATION_KEYS,
+  BUCKETS_SETTING_KEY,
+  PREDEFINED_STATUSES,
+  channelValues,
+  coerceStatusBuckets,
+  STATUS_OUTCOMES,
+  type StatusBuckets,
+  type StatusOutcome,
+} from "@/lib/reporting";
 import {
   addSettingValue,
   countClients,
@@ -120,6 +129,21 @@ async function setOptionColor(kind: RefKind, label: string, color: string | null
   await writeSettingObject(COLORS_SETTING_KEY, { ...stored, [kind]: group });
 }
 
+/**
+ * Writes one status's bucket, or clears the assignment when `bucket` is null.
+ *
+ * Read-modify-write for the same reason as `setOptionColor`: the row is one
+ * JSON blob, so a partial update would need a path Prisma's `set` does not
+ * expose for a nested key. Clearing removes the entry, which hands the status
+ * back to its built-in outcome.
+ */
+async function setStatusBucket(status: string, bucket: StatusBuckets[string] | null) {
+  const stored = coerceStatusBuckets(await readSettingObject(BUCKETS_SETTING_KEY));
+  if (bucket) stored[status] = bucket;
+  else delete stored[status];
+  await writeSettingObject(BUCKETS_SETTING_KEY, stored);
+}
+
 /** Validates `kind` and the normalized `label` from a request body. */
 function parseTarget(
   body: Record<string, unknown>,
@@ -143,9 +167,10 @@ function parseTarget(
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   try {
-    const [clients, colors] = await Promise.all([
+    const [clients, colors, buckets] = await Promise.all([
       listClients({ includeArchived: true }),
       readSettingObject(COLORS_SETTING_KEY),
+      readSettingObject(BUCKETS_SETTING_KEY),
     ]);
     const resolved = {} as Record<RefKind, { values: string[]; removable: string[]; usage: Record<string, number> }>;
     for (const kind of REF_KINDS) {
@@ -157,6 +182,11 @@ export async function GET(request: NextRequest) {
       // Coerced, so a hand-edited row carrying a bad colour is dropped here
       // rather than reaching a style attribute further down.
       colors: coerceColors(colors),
+      /* Readable by every signed-in role for the same reason the colours are:
+         the dashboard renders its KPI cards, funnel and stage panel from it, so
+         gating it would leave non-admins seeing numbers that disagree with the
+         admin's configuration. Only the WRITE is admin-only. */
+      buckets: coerceStatusBuckets(buckets),
       role: (await getSessionUser(request))?.role ?? null,
     });
   } catch (error) {
@@ -304,11 +334,32 @@ export async function PATCH(request: NextRequest) {
   if (target instanceof NextResponse) return target;
   const { kind, label } = target;
 
+  /* The bucket assignment is only meaningful for statuses — it decides which
+     KPI card a client is counted in. Sending one for a channel or location is a
+     caller bug, and rejecting it is better than storing an entry nothing reads. */
+  if (body.bucket !== undefined && kind !== "statuses") {
+    return NextResponse.json({ error: "Buckets apply to statuses only" }, { status: 400 });
+  }
+  // null clears the assignment; a string must be one of the four real buckets.
+  const bucket = body.bucket === null || body.bucket === undefined
+    ? undefined
+    : STATUS_OUTCOMES.includes(body.bucket as StatusOutcome)
+      ? (body.bucket as StatusOutcome)
+      : null;
+  if (bucket === null) {
+    return NextResponse.json({ error: "Invalid bucket" }, { status: 400 });
+  }
+
   // An explicit null CLEARS the override, handing the value back to its
   // built-in colour — which is why the payload allows null and not just a string.
   const color = body.color === null ? null : normalizeColor(body.color);
   if (color === null && body.color !== null) {
     return NextResponse.json({ error: "Invalid color" }, { status: 400 });
+  }
+  // A PATCH that carries neither field would otherwise report success while
+  // changing nothing, which reads as "saved" on a screen that shows a spinner.
+  if (bucket === undefined && color === null && body.color === undefined) {
+    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
   try {
@@ -319,8 +370,14 @@ export async function PATCH(request: NextRequest) {
     const stored = values.find((v) => v.toLowerCase() === label.toLowerCase());
     if (!stored) return NextResponse.json({ error: "Option not found" }, { status: 404 });
 
-    await setOptionColor(kind, stored, color);
-    return NextResponse.json({ ok: true });
+    if (body.color !== undefined) await setOptionColor(kind, stored, color);
+    // The whole map is returned, not just the entry that changed: the dashboard
+    // rebuilds its cards, funnel and stage panel from it, and a partial reply
+    // would leave the client holding a stale map.
+    const buckets = bucket === undefined
+      ? coerceStatusBuckets(await readSettingObject(BUCKETS_SETTING_KEY))
+      : await setStatusBucket(stored, bucket).then(async () => coerceStatusBuckets(await readSettingObject(BUCKETS_SETTING_KEY)));
+    return NextResponse.json({ ok: true, buckets });
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }

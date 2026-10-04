@@ -45,7 +45,7 @@ export function assigneeScope(user: SessionUser | null): string | undefined {
 }
 
 export const SESSION_COOKIE = "rwaq_session";
-const SESSION_PREFIX = "rwaq-session-";
+export const SESSION_PREFIX = "rwaq-session-";
 export const DEMO_SESSION = "rwaq-demo-session";
 
 /** Cookie value for a given username. */

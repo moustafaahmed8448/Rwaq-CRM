@@ -228,89 +228,96 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
   const statusStyle = { ...getStatusStyle(client.status, colors), label: localizeStatus(t, client.status) };
 
   return (
-    <div className="detail-page">
+    <>
       {user && <AppHeader user={user} active="clients" darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />}
-      {/* Top bar */}
-      <div className="detail-topbar">
-        <button className="btn-ghost" onClick={() => router.back()}><ArrowLeft size={16} /> {t("detail.back")}</button>
-        <div className="detail-title">
-          <StatusPill status={client.status} t={t} variant="badge" />
-          <span className="id-cell" title={t("th.id")}>#{client.id}</span>
-          <h1>{client.name}</h1>
-        </div>
-        <div className="detail-actions">
-          {canWrite(user?.role) && <button className="btn-outline" onClick={() => setEditMode(!editMode)}>{editMode ? <Check size={15} /> : <Edit3 size={15} />}{editMode ? t("common.cancel") : t("detail.edit")}</button>}
-          {user?.role === "Admin" && <button className="btn-danger" onClick={deleteClient}><Trash2 size={15} />{t("detail.delete")}</button>}
-        </div>
-      </div>
-
-      <div className="detail-grid">
-        {/* Recent activity (first) */}
-        <section className="detail-section timeline-panel">
-          <h2>{t("detail.timeline")}</h2>
-          <div className="timeline">
-            {(client.activityLog ?? []).length === 0 && (
-              <div className="empty-timeline">{t("client.noActivity")}</div>
-            )}
-            {[...(client.activityLog ?? [])].reverse().map((entry) => (
-              <ActivityItem key={entry.id} entry={entry} t={t} lang={lang} />
-            ))}
+      {/* The standard page frame and heading, same as every other page. This used
+          to be a bespoke `.detail-page` + `.detail-topbar` pair — see the note in
+          globals.css. The status pill and #id move below the name into the
+          subtitle slot, which is what the other pages put there. */}
+      <main className="content">
+        <div className="page-header">
+          <div>
+            <button className="btn-ghost detail-back" onClick={() => router.back()}><ArrowLeft size={16} /> {t("detail.back")}</button>
+            <h1>{client.name}</h1>
+            <p className="detail-meta">
+              <StatusPill status={client.status} t={t} variant="badge" />
+              <span className="id-cell" title={t("th.id")}>#{client.id}</span>
+            </p>
           </div>
-        </section>
+          <div className="detail-page-actions">
+            {canWrite(user?.role) && <button className="btn-outline" onClick={() => setEditMode(!editMode)}>{editMode ? <Check size={15} /> : <Edit3 size={15} />}{editMode ? t("common.cancel") : t("detail.edit")}</button>}
+            {user?.role === "Admin" && <button className="btn-danger" onClick={deleteClient}><Trash2 size={15} />{t("detail.delete")}</button>}
+          </div>
+        </div>
 
-        {/* Client info */}
-        <section className="detail-section info-panel">
-          <h2>{t("detail.details")}</h2>
-          {editMode ? (
-            <div className="edit-form">
-              <div className="form-grid-2">
-                <Field label={t("form.name")}><input value={draft.name ?? ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
-                <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={draft.phoneNumber ?? ""} onChange={(e) => setDraft({ ...draft, phoneNumber: e.target.value })} /></Field>
-                <Field label={t("form.project")} wide><textarea rows={3} value={draft.project ?? ""} onChange={(e) => setDraft({ ...draft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
-                <Field label={t("form.location")}>
-                  <RefPicker kind="locations" value={draft.location ?? ""} options={locations} onAdd={addLocation} onChange={(v) => setDraft({ ...draft, location: v })} onRemove={isAdmin ? (v) => void removeOption("locations", v) : undefined} removable={removableLocations} removeUsage={locationUsage} placeholder={t("form.locationPh")} t={t} />
-                </Field>
-                <Field label={t("form.channel")}>
-                  <RefPicker kind="channels" value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} render={(v) => channelLabel(t, v)} onRemove={isAdmin ? (v) => void removeOption("channels", v) : undefined} removable={removableChannels} removeUsage={channelUsage} placeholder={t("form.channelPh")} t={t} />
-                </Field>
-                <Field label={t("form.status")}>
-                  <RefPicker kind="statuses" value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} render={(v) => localizeStatus(t, v)} onRemove={isAdmin ? (v) => void removeOption("statuses", v) : undefined} removable={removableStatuses} removeUsage={statusUsage} placeholder={t("form.statusPh")} t={t} />
-                </Field>
-                <Field label={t("form.firstContact")}><input value={draft.firstContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, firstContactPerson: e.target.value })} /></Field>
-                <Field label={t("form.secondContact")}><input value={draft.secondContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, secondContactPerson: e.target.value })} /></Field>
-                <Field label={t("form.operation")} wide><input value={draft.operationToTake ?? ""} onChange={(e) => setDraft({ ...draft, operationToTake: e.target.value })} /></Field>
-                <Field label={t("form.notes")} wide><textarea value={draft.notes ?? ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3} placeholder={t("form.notesPh")} /></Field>
-              </div>
-              <div className="edit-form-actions">
-                <button className="btn-primary" onClick={saveEdit}><Check size={15} />{t("detail.saveChanges")}</button>
-              </div>
+        <div className="detail-grid">
+          {/* Recent activity (first) */}
+          <section className="detail-section timeline-panel">
+            <h2>{t("detail.timeline")}</h2>
+            <div className="timeline">
+              {(client.activityLog ?? []).length === 0 && (
+                <div className="empty-timeline">{t("client.noActivity")}</div>
+              )}
+              {[...(client.activityLog ?? [])].reverse().map((entry) => (
+                <ActivityItem key={entry.id} entry={entry} t={t} lang={lang} />
+              ))}
             </div>
-          ) : (
-            <dl className="info-list">
-              <InfoItem icon={<Tag size={14} />} label={t("form.status")}><StatusPill status={client.status} t={t} variant="badge" /></InfoItem>
-              <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}><span><span className="ltr-num">{client.phoneNumber}</span></span></InfoItem>
-              <InfoItem icon={<Tag size={14} />} label={t("form.project")}><span>{client.project}</span></InfoItem>
-              <InfoItem icon={<Tag size={14} />} label={t("form.channel")}><span className="chan-tag-inline"><i className="dot" style={{ background: optionColor("channels", client.acquisitionChannel, colors) }} />{channelLabel(t, client.acquisitionChannel)}</span></InfoItem>
-              <InfoItem icon={<TrendingUp size={14} />} label={t("form.location")}><span className="loc-tag"><i className="dot" style={{ background: optionColor("locations", client.location, colors) }} />{client.location}</span></InfoItem>
-              <InfoItem icon={<Edit3 size={14} />} label={t("form.operation")}><span>{client.operationToTake}</span></InfoItem>
-              <InfoItem icon={<UserRound size={14} />} label={t("form.firstContact")}><span>{client.firstContactPerson}</span></InfoItem>
-              <InfoItem icon={<UserRound size={14} />} label={t("form.secondContact")}><span>{client.secondContactPerson || "—"}</span></InfoItem>
-              {client.notes && <InfoItem icon={<MessageSquare size={14} />} label={t("form.notes")}><p className="notes-display">{client.notes}</p></InfoItem>}
-            </dl>
-          )}
+          </section>
+
+          {/* Client info */}
+          <section className="detail-section info-panel">
+            <h2>{t("detail.details")}</h2>
+            {editMode ? (
+              <div className="edit-form">
+                <div className="form-grid-2">
+                  <Field label={t("form.name")}><input value={draft.name ?? ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+                  <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={draft.phoneNumber ?? ""} onChange={(e) => setDraft({ ...draft, phoneNumber: e.target.value })} /></Field>
+                  <Field label={t("form.project")} wide><textarea rows={3} value={draft.project ?? ""} onChange={(e) => setDraft({ ...draft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
+                  <Field label={t("form.location")}>
+                    <RefPicker kind="locations" value={draft.location ?? ""} options={locations} onAdd={addLocation} onChange={(v) => setDraft({ ...draft, location: v })} onRemove={isAdmin ? (v) => void removeOption("locations", v) : undefined} removable={removableLocations} removeUsage={locationUsage} placeholder={t("form.locationPh")} t={t} />
+                  </Field>
+                  <Field label={t("form.channel")}>
+                    <RefPicker kind="channels" value={draft.acquisitionChannel ?? ""} options={channels} onAdd={addChannel} onChange={(v) => setDraft({ ...draft, acquisitionChannel: v })} render={(v) => channelLabel(t, v)} onRemove={isAdmin ? (v) => void removeOption("channels", v) : undefined} removable={removableChannels} removeUsage={channelUsage} placeholder={t("form.channelPh")} t={t} />
+                  </Field>
+                  <Field label={t("form.status")}>
+                    <RefPicker kind="statuses" value={draft.status ?? ""} options={statuses} onAdd={addStatus} onChange={(v) => setDraft({ ...draft, status: v })} render={(v) => localizeStatus(t, v)} onRemove={isAdmin ? (v) => void removeOption("statuses", v) : undefined} removable={removableStatuses} removeUsage={statusUsage} placeholder={t("form.statusPh")} t={t} />
+                  </Field>
+                  <Field label={t("form.firstContact")}><input value={draft.firstContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, firstContactPerson: e.target.value })} /></Field>
+                  <Field label={t("form.secondContact")}><input value={draft.secondContactPerson ?? ""} onChange={(e) => setDraft({ ...draft, secondContactPerson: e.target.value })} /></Field>
+                  <Field label={t("form.operation")} wide><input value={draft.operationToTake ?? ""} onChange={(e) => setDraft({ ...draft, operationToTake: e.target.value })} /></Field>
+                  <Field label={t("form.notes")} wide><textarea value={draft.notes ?? ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3} placeholder={t("form.notesPh")} /></Field>
+                </div>
+                <div className="edit-form-actions">
+                  <button className="btn-primary" onClick={saveEdit}><Check size={15} />{t("detail.saveChanges")}</button>
+                </div>
+              </div>
+            ) : (
+              <dl className="info-list">
+                <InfoItem icon={<Tag size={14} />} label={t("form.status")}><StatusPill status={client.status} t={t} variant="badge" /></InfoItem>
+                <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}><span><span className="ltr-num">{client.phoneNumber}</span></span></InfoItem>
+                <InfoItem icon={<Tag size={14} />} label={t("form.project")}><span>{client.project}</span></InfoItem>
+                <InfoItem icon={<Tag size={14} />} label={t("form.channel")}><span className="chan-tag-inline"><i className="dot" style={{ background: optionColor("channels", client.acquisitionChannel, colors) }} />{channelLabel(t, client.acquisitionChannel)}</span></InfoItem>
+                <InfoItem icon={<TrendingUp size={14} />} label={t("form.location")}><span className="loc-tag"><i className="dot" style={{ background: optionColor("locations", client.location, colors) }} />{client.location}</span></InfoItem>
+                <InfoItem icon={<Edit3 size={14} />} label={t("form.operation")}><span>{client.operationToTake}</span></InfoItem>
+                <InfoItem icon={<UserRound size={14} />} label={t("form.firstContact")}><span>{client.firstContactPerson}</span></InfoItem>
+                <InfoItem icon={<UserRound size={14} />} label={t("form.secondContact")}><span>{client.secondContactPerson || "—"}</span></InfoItem>
+                {client.notes && <InfoItem icon={<MessageSquare size={14} />} label={t("form.notes")}><p className="notes-display">{client.notes}</p></InfoItem>}
+              </dl>
+            )}
+          </section>
+
+        </div>
+
+        {/* Stats */}
+        <section className="detail-section stats-row">
+          <StatCard label={t("detail.sinceCreation")} value={daysSinceCreated === 0 ? t("common.today") : t("detail.createdAgo", { n: daysSinceCreated })} />
+          <StatCard label={t("detail.activities")} value={String((client.activityLog ?? []).length)} />
+          <StatCard label={t("detail.lastUpdate")} value={client.lastUpdateDate ? formatTimeAgo(client.lastUpdateDate, t, lang) : "—"} />
         </section>
-
-      </div>
-
-      {/* Stats */}
-      <section className="detail-section stats-row">
-        <StatCard label={t("detail.sinceCreation")} value={daysSinceCreated === 0 ? t("common.today") : t("detail.createdAgo", { n: daysSinceCreated })} />
-        <StatCard label={t("detail.activities")} value={String((client.activityLog ?? []).length)} />
-        <StatCard label={t("detail.lastUpdate")} value={client.lastUpdateDate ? formatTimeAgo(client.lastUpdateDate, t, lang) : "—"} />
-      </section>
 
       {toast && <div className="toast-single">{toast}</div>}
-    </div>
+      </main>
+    </>
   );
 }
 

@@ -17,6 +17,42 @@ export const channelLabels: Record<string, string> = {
 export const channelValues = Object.keys(channelLabels);
 
 /**
+ * Built-in channels to drop from a filter list because a custom channel already
+ * stands in for them.
+ *
+ * The workspace's "Sales" channel is stored as the custom Arabic value
+ * `المبيعات`, which this label map renders as "Sales" too. Listing the built-in
+ * `SALES` next to it produced TWO "Sales" rows for one real channel, and picking
+ * the built-in one returned nothing, because no client stores that value.
+ *
+ * A built-in is dropped only when BOTH hold:
+ *   - no client actually stores it, and
+ *   - some other channel in the list renders to the same label.
+ *
+ * The second condition is what keeps this safe. Dropping every unused built-in
+ * would empty the dropdowns on a fresh workspace, and dropping by label alone
+ * would collapse two genuinely different channels that merely happen to share a
+ * display name. Neither is safe, so neither is done.
+ *
+ * `render` is the caller's label function (channelLabel), so this agrees with
+ * whatever the user actually sees in the list.
+ */
+export function redundantBuiltinChannels(
+  candidates: Iterable<string>,
+  usedChannels: Iterable<string>,
+  render: (value: string) => string,
+): string[] {
+  const used = new Set<string>();
+  for (const c of usedChannels) if (c) used.add(String(c).toUpperCase());
+  const list = [...candidates];
+  const labelsInUse = new Set(list.filter((v) => used.has(String(v).toUpperCase())).map(render));
+  return list.filter((v) => {
+    if (used.has(String(v).toUpperCase())) return false; // real data depends on it
+    return labelsInUse.has(render(v)); // another row already shows this label
+  });
+}
+
+/**
  * Built-in locations. This list used to be duplicated in src/app/page.tsx
  * (CUSTOM_LOCATIONS) and src/app/api/locations/route.ts (DEFAULT_LOCATIONS), so
  * the two could silently disagree about which values are built-ins — and
@@ -146,6 +182,66 @@ export type StatusOutcome = "won" | "lost" | "progress" | "other";
 export function classifyStatus(status: string): StatusOutcome {
   const outcome = pipelineStage(status)?.outcome;
   return outcome === "won" || outcome === "lost" || outcome === "progress" ? outcome : "other";
+}
+
+/**
+ * Admin-set bucket assignments: stored status value -> outcome.
+ *
+ * An admin decides this on the Options page, which is what lets "In progress" and
+ * "Other" be driven by the workspace's own statuses rather than by the built-in
+ * pipeline alone. A status the admin has NOT assigned falls back to
+ * `classifyStatus`, so an untouched workspace behaves exactly as before.
+ */
+export type StatusBuckets = Record<string, StatusOutcome>;
+
+/**
+ * Setting key holding those assignments.
+ *
+ * Declared here rather than in /api/options so the analytics route can read the
+ * same row without importing a route module: this module is deliberately free of
+ * `next/server`, which is what lets both the server routes and the client
+ * bundles import it.
+ */
+export const BUCKETS_SETTING_KEY = "statusBuckets";
+
+/** The four buckets, in the order the Options page offers them. */
+export const STATUS_OUTCOMES: readonly StatusOutcome[] = ["won", "lost", "progress", "other"];
+
+/**
+ * `classifyStatus` with the admin's overrides applied.
+ *
+ * Kept as a SEPARATE function rather than an optional argument on
+ * `classifyStatus` on purpose. `classifyStatus` is called on every read path —
+ * the API, the export, the kanban, the funnel — and threading an optional map
+ * through all of them invites a call site that silently forgets it, which would
+ * show one screen's numbers disagreeing with another's. Making the override an
+ * explicit, separately-named function means the call sites that must honour the
+ * admin's choice are exactly the ones that call this one.
+ */
+export function classifyStatusWith(status: string, buckets?: StatusBuckets | null): StatusOutcome {
+  const assigned = buckets?.[String(status ?? "").trim()];
+  // Guarded by the same membership test as the built-in branch below, so a
+  // hand-edited or stale setting cannot introduce a fifth bucket that every
+  // `switch` in the app would silently drop into `default`.
+  return assigned && STATUS_OUTCOMES.includes(assigned) ? assigned : classifyStatus(status);
+}
+
+/**
+ * Coerces a stored/hand-edited bucket map into a valid one.
+ *
+ * The row is user-editable through the API, so anything can end up in it. Entries
+ * that are not a known bucket are dropped here rather than at every call site,
+ * which is the same defence `coerceColors` applies to the colour map.
+ */
+export function coerceStatusBuckets(raw: unknown): StatusBuckets {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: StatusBuckets = {};
+  for (const [status, outcome] of Object.entries(raw as Record<string, unknown>)) {
+    if (status && typeof outcome === "string" && STATUS_OUTCOMES.includes(outcome as StatusOutcome)) {
+      out[status] = outcome as StatusOutcome;
+    }
+  }
+  return out;
 }
 
 /** True when the status is a terminal outcome (contracted / lost). */
@@ -540,6 +636,33 @@ export function resolvePeriod(kind: PeriodKind, from?: string, to?: string, now 
   const fromDate = kind === "month" ? startOfMonth(now) : startOfWeek(now);
   const toDate = kind === "month" ? endOfMonth(now) : endOfWeek(now);
   return { kind, from: fromDate, to: toDate, fromStr: dayKey(fromDate), toStr: dayKey(toDate) };
+}
+
+/**
+ * The window of identical length immediately BEFORE `period`.
+ *
+ * This is what the dashboard's KPI deltas compare against. "Identical length,
+ * immediately before" is chosen over a named prior period because it is the only
+ * rule that stays true for every tab: "last 30 days" compares against the 30
+ * before it, "last 90" against the 90 before that, "this year" against last
+ * year, and a custom range against the equivalent span before it.
+ *
+ * Returns null for "all time" — an unbounded window has no previous counterpart,
+ * and faking one would make the delta meaningless. The client uses the null to
+ * suppress the arrows rather than render a fake number.
+ *
+ * Built from day arithmetic on the resolved bounds, NOT by re-resolving a period
+ * kind, because `custom` has no kind to re-resolve and because deriving from the
+ * resolved dates is the only way the comparison can never drift out of step with
+ * the window actually being displayed.
+ */
+export function previousPeriod(period: ResolvedPeriod): ResolvedPeriod | null {
+  if (period.kind === "all") return null;
+  const lengthMs = period.to.getTime() - period.from.getTime();
+  if (lengthMs <= 0) return null;
+  const from = new Date(period.from.getTime() - lengthMs);
+  const to = new Date(period.from);
+  return { ...period, from, to, fromStr: dayKey(from), toStr: dayKey(to) };
 }
 
 /**

@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUpRight, ChevronDown, Download, Grid2X2,
+  Download, Grid2X2,
   LayoutDashboard, Pencil, Plus, Search, Trash2, UsersRound, X as XIcon,
   Check, AlertCircle, MessageSquare, Filter, Archive, Upload,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import ClientDetailPanel from "@/components/ClientDetailPanel";
 import { useLang } from "@/lib/i18n";
 import { canWrite } from "@/lib/auth";
 import { apiErrorMessage, readApiError } from "@/lib/api-errors";
@@ -16,16 +17,16 @@ import {
   PREDEFINED_STATUSES,
   PERIOD_KINDS,
   channelLabel,
-  isInProgress,
-  isLost,
-  isWon,
+  classifyStatusWith,
   BUILTIN_LOCATION_KEYS,
   locationLabel,
+  redundantBuiltinChannels,
   statusLabel,
   type PeriodKind,
+  type StatusBuckets,
 } from "@/lib/reporting";
 import { downloadFile, exportQuery, EXPORT_FAILED } from "@/lib/download";
-import { num, sar, dateLocale } from "@/lib/format";
+import { dateInputValue, isOverdue, localDayKey, num, sar, dateLocale } from "@/lib/format";
 import { useLogo } from "@/lib/logo";
 import StatusPill, { StatusDot } from "@/components/StatusPill";
 import RefPicker from "@/components/RefPicker";
@@ -33,40 +34,33 @@ import MultiSelect from "@/components/MultiSelect";
 import Select from "@/components/Select";
 import ImportClientsModal from "@/components/ImportClientsModal";
 import DashboardCharts, { type ChartView, type TrendPoint } from "@/components/DashboardCharts";
+import {
+  initialFilters,
+  SORT_LABELS,
+  type Client,
+  type DatePreset,
+  type Filters,
+  type SortField,
+  type TFn,
+} from "@/lib/client-types";
 import ColumnPicker from "@/components/ColumnPicker";
+import ClientFilterBar from "@/components/ClientFilterBar";
+import ClientTable from "@/components/ClientTable";
 import { useOptionColors } from "@/lib/option-colors";
 import { optionColor } from "@/lib/ref-options";
 import {
-  CLIENT_COLUMNS, resolveColumns, gridTemplate,
+  CLIENT_COLUMNS,
   type ColumnKey, type ResolvedColumn,
 } from "@/lib/client-columns";
+import { useColumnLayout } from "@/lib/use-column-layout";
 
-type Client = {
-  id: string; name: string; phoneNumber: string;
-  status: "WAITING" | "WON" | "LOST" | string;
-  project: string; location: string; acquisitionChannel: string;
-  operationToTake: string; firstContactPerson: string; secondContactPerson: string;
-  notes?: string; createdAt?: string; lastUpdateDate?: string;
-};
 type Metric = { channel: string; platform: string; spend: number; reach: number; totalClients: number; won: number; lost: number; waiting: number; cpa: number };
 type User = { name: string; initials: string; role: string };
-type Filters = { query: string; status: string[]; channel: string[]; location: string[]; firstContact: string[]; secondContact: string[]; startDate: string; endDate: string };
 type EditDraft = Partial<Client> & { id: string };
 type ConfirmDelete = { ids: string[]; names: string[] };
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
-type DatePreset = { label: string; startDate?: string; endDate?: string };
 /** One salesperson's outcome breakdown for a single contact role. */
 type SpRow = { name: string; won: number; lost: number; waiting: number; other: number; total: number; winRate: number | null };
-/** Which client date the table is ordered by. */
-type SortField = "recent" | "oldest" | "registered" | "registeredOldest";
-
-/** Sort options are a closed set, so the label key can be looked up by value. */
-const SORT_LABELS: Record<string, string> = {
-  recent: "clients.sortRecent",
-  oldest: "clients.sortOldest",
-  registered: "clients.sortRegistered",
-  registeredOldest: "clients.sortRegisteredOldest",
-};
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
@@ -144,7 +138,25 @@ const FIELD_KEYS: Record<string, string> = {
   secondContactPerson: "form.secondContact", operationToTake: "form.operation", notes: "form.notes",
 };
 
-const initialFilters: Filters = { query: "", status: [], channel: [], location: [], firstContact: [], secondContact: [], startDate: "", endDate: "" };
+
+
+/**
+ * Renders a stored follow-up timestamp as the `YYYY-MM-DD` a date input wants.
+ *
+ * Thin alias over `dateInputValue` in lib/format, kept as a named local so the
+ * form reads in domain terms rather than in formatting-library terms.
+ */
+function followUpInput(value?: string | null): string {
+  return dateInputValue(value);
+}
+
+/** Shortcuts offered beside the date input. Days are offsets from today. */
+const followUpPresets = [
+  { days: 1, key: "followUp.in1Day" },
+  { days: 3, key: "followUp.in3Days" },
+  { days: 7, key: "followUp.in7Days" },
+  { days: 30, key: "followUp.in30Days" },
+] as const;
 
 function matchesFilters(client: Client, filters: Filters) {
   /**
@@ -175,7 +187,30 @@ function matchesFilters(client: Client, filters: Filters) {
     (filters.firstContact.length === 0 || filters.firstContact.includes(client.firstContactPerson)) &&
     (filters.secondContact.length === 0 || filters.secondContact.includes(client.secondContactPerson)) &&
     (!filters.startDate || date >= filters.startDate) && (!filters.endDate || date <= filters.endDate) &&
+    matchesFollowUp(client.nextFollowUpAt, filters.followUp) &&
     haystack.includes(norm(filters.query));
+}
+
+/**
+ * The browser-side twin of the `followUp` clause in `clientWhere`.
+ *
+ * Present so the KANBAN board — which filters `clients` in memory rather than
+ * paging from the API — shows the same set as the table. Both sides compare
+ * whole DAYS, via the shared `isOverdue` / `dateInputValue` helpers, so "overdue"
+ * means the same thing in each.
+ */
+function matchesFollowUp(value: string | null | undefined, bucket: string): boolean {
+  if (!bucket) return true;
+  const key = dateInputValue(value);
+  const today = localDayKey(new Date());
+  const tomorrow = localDayKey(new Date(Date.now() + 86400000));
+  switch (bucket) {
+    case "overdue": return key !== "" && key < today;
+    case "today": return key === today;
+    case "upcoming": return key !== "" && key >= tomorrow;
+    case "none": return key === "";
+    default: return true;
+  }
 }
 
 let toastId = 0;
@@ -216,6 +251,17 @@ export default function Home() {
   const [view, setView] = useState<"dashboard" | "clients">("dashboard");
   const [mode, setMode] = useState<"table" | "kanban">("table");
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  /**
+   * How many clients each follow-up bucket holds in this book.
+   *
+   * Deliberately SCOPE-level, not filter-level: these describe the clients on
+   * screen before any other chip is applied, and they do not move as the other
+   * filters change. That is what makes them useful — a badge that recounted
+   * itself every time you touched a status filter would be noise. Counted by the
+   * API from the same `clientWhere` the table filters with, so they cannot
+   * disagree with the rows.
+   */
+  const [followUpCounts, setFollowUpCounts] = useState<Record<string, number>>({});
   const [exporting, setExporting] = useState(false);
   const [customStatuses, setCustomStatuses] = useState<string[]>([]);
   const [customChannels, setCustomChannels] = useState<string[]>([]);
@@ -273,12 +319,37 @@ export default function Home() {
   // Per-salesperson outcome report, split by contact role. Server-computed and
   // period-scoped, so it agrees with the KPI cards above it.
   const [spReports, setSpReports] = useState<{ first: SpRow[]; second: SpRow[] }>({ first: [], second: [] });
+  /* The admin's status -> bucket assignments, as resolved by the analytics route.
+     Held in state rather than re-fetched so the funnel and stage panel describe
+     exactly the same window and the same buckets as the KPI cards above them. */
+  const [statusBuckets, setStatusBuckets] = useState<StatusBuckets>({});
+  /* The comparison window's figures, for the KPI deltas. Null under "all time",
+     which is what makes every card show a dash instead of a fake 0%. */
+  const [previous, setPrevious] = useState<{
+    from: string; to: string;
+    totals: { total: number; won: number; lost: number; waiting: number; other: number };
+    spend: number; reach: number;
+  } | null>(null);
   // Outcome-split time series for the dashboard chart, from the same response.
   const [timeline, setTimeline] = useState<TrendPoint[]>([]);
   // Which chart the dashboard shows. Lifted here so the choice survives the
   // dashboard remounting when the period changes.
   const [chartView, setChartView] = useState<ChartView>("trend");
-  const [users, setUsers] = useState<{ username: string; name: string; role: string }[]>([]);
+  /* `avatar` is in the type because /api/users has always returned it and the
+     dashboard already fetches that response for the client table's contact
+     options — the panel below was just discarding the field and drawing
+     initials for reps whose photo the rest of the app was showing. */
+  const [users, setUsers] = useState<{ username: string; name: string; role: string; avatar?: string | null }[]>([]);
+  /* Rep name -> photo, for the Sales Performance rows. Those rows are keyed by
+     the assignee name on each client (see the analytics route), so the display
+     name is the only thing they share with a user record — which is also how the
+     lookup is done. Names without a stored photo are simply absent, and the panel
+     falls back to initials exactly as before. */
+  const userAvatars = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const u of users) if (u.avatar) map[u.name] = u.avatar;
+    return map;
+  }, [users]);
   const [adding, setAdding] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState("");
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -295,53 +366,13 @@ export default function Home() {
   const [sortBy, setSortBy] = useState<SortField>("recent");
   // Clients-table layout: column widths + visibility, saved to the user's own
   // row (see PATCH /api/auth/me). Defaults come from the registry until the
-  // signed-in user's layout arrives.
-  const [columns, setColumns] = useState<ResolvedColumn[]>(() => resolveColumns(null));
-  const [savingLayout, setSavingLayout] = useState(false);
+  // signed-in user's layout arrives. The debounced save chain lives in
+  // use-column-layout so /profile and /marketing cannot drift from it.
+  const { columns, commit: commitColumns, hydrate } = useColumnLayout(CLIENT_COLUMNS, "clientColumns");
   // Admin-set option colours, shared module-wide so every pill, dot and tag in
   // this file resolves the same value without prop-drilling them down.
   const colors = useOptionColors();
   const rtl = typeof document !== "undefined" && document.documentElement.dir === "rtl";
-
-  /**
-   * Persists the layout. Debounced through the caller's `savingLayout` flag so a
-   * drag (which fires on every pointer move) results in one request at the end,
-   * not one per pixel.
-   */
-  const commitColumns = useCallback((next: ResolvedColumn[]) => {
-    setColumns(next);
-    setSavingLayout(true);
-  }, []);
-
-  useEffect(() => {
-    if (!savingLayout) return;
-    const id = setTimeout(async () => {
-      try {
-        await fetch("/api/auth/me", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            // Sparse: only the columns that differ from the defaults, so a column
-            // added later still picks up its own default.
-            clientColumns: Object.fromEntries(
-              columns
-                .filter((c) => {
-                  const def = CLIENT_COLUMNS.find((d) => d.key === c.key)!;
-                  return c.w !== def.w || c.hidden;
-                })
-                .map((c) => [c.key, { w: c.w, hidden: c.hidden }]),
-            ),
-          }),
-        });
-      } catch {
-        // A failed save is not worth interrupting the user over; the layout still
-        // applies for this session.
-      } finally {
-        setSavingLayout(false);
-      }
-    }, 400);
-    return () => clearTimeout(id);
-  }, [columns, savingLayout]);
 
   /**
    * Re-reads the client list and the reference data after an import.
@@ -369,6 +400,7 @@ export default function Home() {
   };
   const [notifications, setNotifications] = useState<{ id: string; message: string; read: boolean; clientName?: string; createdAt: string; type: string }[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [newClient] = useState<Partial<Client>>({
     name: "", phoneNumber: "", project: "", location: "",
     acquisitionChannel: "FACEBOOK", operationToTake: "",
@@ -392,9 +424,11 @@ export default function Home() {
       setUser(d.user);
       // Adopt the signed-in user's saved column layout. The demo session has no
       // row, so it keeps the registry defaults.
-      if (d.user.clientColumns) setColumns(resolveColumns(d.user.clientColumns));
+      if (d.user.clientColumns) hydrate(d.user.clientColumns);
     });
-  }, [router]);
+    // `hydrate` is a stable useCallback (its only dep is the module-level
+    // registry), so listing it costs nothing and keeps the lint honest.
+  }, [router, hydrate]);
 
   useEffect(() => {
     const v = new URLSearchParams(window.location.search).get("view");
@@ -415,7 +449,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([fetch("/api/crm/clients"), fetch("/api/users")])
+    Promise.all([fetch("/api/crm/clients?followUpCounts=1"), fetch("/api/users")])
       .then(async ([c, u]) => {
         if (!c.ok) throw new Error("Unable to load workspace");
         return Promise.all([c.json(), u.json()]);
@@ -423,6 +457,7 @@ export default function Home() {
       .then(([crm, usersData]) => {
         setClients(crm.clients || []);
         setUsers(usersData.users ?? []);
+        setFollowUpCounts(crm.followUpCounts ?? {});
       })
       .catch(() => undefined);
     fetch("/api/crm/clients").then(r => r.json()).then(d => { setCustomStatuses(d.statuses ?? []); setRemovableStatuses(d.removable ?? []); setStatusUsage(d.usage ?? {}); }).catch(() => {});
@@ -475,6 +510,13 @@ export default function Home() {
           first: d.firstSalespersonReport ?? [],
           second: d.secondSalespersonReport ?? [],
         });
+        // Coerced server-side, so anything invalid was already dropped. Guarded
+        // here too because `statusBuckets` drives which clients land in which KPI
+        // card: an unexpected shape must degrade to the built-in pipeline, never
+        // to a thrown render.
+        setStatusBuckets(d.statusBuckets && typeof d.statusBuckets === "object" ? d.statusBuckets : {});
+        // Null under "all time" — the API omits the comparison window there.
+        setPrevious(d.previous ?? null);
         setTimeline(d.timeline ?? []);
       })
       .catch(() => undefined)
@@ -527,6 +569,7 @@ export default function Home() {
     if (filters.location.length) params.set("location", filters.location.join(","));
     if (filters.firstContact.length) params.set("firstContact", filters.firstContact.join(","));
     if (filters.secondContact.length) params.set("secondContact", filters.secondContact.join(","));
+    if (filters.followUp) params.set("followUp", filters.followUp);
     if (filters.startDate) params.set("from", filters.startDate);
     if (filters.endDate) params.set("to", filters.endDate);
     params.set("sort", sortBy);
@@ -622,6 +665,20 @@ export default function Home() {
     setMultiFilter("status", [status]);
   };
 
+  /**
+   * Opens the clients view narrowed to one follow-up bucket.
+   *
+   * Clears the OTHER follow-up filter rather than just setting the new one, and
+   * leaves every other filter alone: "show me what is overdue" should not quietly
+   * discard the status or channel the user had narrowed to, but two contradictory
+   * follow-up buckets would be a view with no rows and no obvious cause.
+   */
+  const showFollowUp = (bucket: string) => {
+    setView("clients");
+    setTablePage(1);
+    setFilters(cur => ({ ...cur, followUp: bucket }));
+  };
+
   const updateFilter = (key: "query" | "startDate" | "endDate", value: string) => {
     // Any filter change restarts at page 1: staying on page 7 of a now much
     // smaller result set shows an empty table and reads as a bug.
@@ -640,6 +697,13 @@ export default function Home() {
   const setMultiFilter = (key: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => {
     setTablePage(1);
     setFilters(cur => ({ ...cur, [key]: values }));
+  };
+
+  // The follow-up bucket is a single value, not a list, so it gets its own setter
+  // rather than being forced through setMultiFilter.
+  const setFollowUpFilter = (value: string) => {
+    setTablePage(1);
+    setFilters(cur => ({ ...cur, followUp: cur.followUp === value ? "" : value }));
   };
 
   const clearAllFilters = () => {
@@ -663,10 +727,24 @@ export default function Home() {
   const activeFilterCount =
     filters.status.length + filters.channel.length + filters.location.length +
     filters.firstContact.length + filters.secondContact.length +
+    (filters.followUp ? 1 : 0) +
     (filters.startDate ? 1 : 0) + (filters.endDate ? 1 : 0) + (filters.query ? 1 : 0);
 
   const allStatuses = [...PREDEFINED_STATUSES, ...customStatuses.filter(s => !PREDEFINED_STATUSES.includes(s))];
-  const allChannels = [...CHANNEL_VALUES, ...customChannels.filter(ch => !CHANNEL_VALUES.includes(ch as typeof CHANNEL_VALUES[number]))];
+  /**
+   * Channel options for the filter bar.
+   *
+   * Built-in channels are only offered while no custom channel already stands in
+   * for them under the same label. Without this the list showed two "Sales"
+   * rows — the built-in `SALES` and the workspace's custom `المبيعات` — and
+   * choosing the built-in one silently matched nothing, because no client stores
+   * that value. Only genuinely-unused duplicates are dropped; a built-in that
+   * clients actually use is always kept.
+   */
+  const allChannels = [
+    ...CHANNEL_VALUES.filter(ch => !redundantBuiltinChannels(CHANNEL_VALUES, clients.map(c => c.acquisitionChannel), v => channelLabel(t, v)).includes(ch)),
+    ...customChannels.filter(ch => !CHANNEL_VALUES.includes(ch as typeof CHANNEL_VALUES[number])),
+  ];
   const allLocations = [...BUILTIN_LOCATION_KEYS, ...customLocations.filter(l => !BUILTIN_LOCATION_KEYS.includes(l))];
 
   const addChannel = async (label: string): Promise<string> => {
@@ -801,7 +879,17 @@ export default function Home() {
     if (!editDraft.phoneNumber || editDraft.phoneNumber.trim().length < 5) { addToast("error", t("form.errPhoneMin")); return; }
 
     if (editDraft.id) {
-      await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editDraft) });
+      /* The response is checked, which it was not: a failed PATCH used to close
+         the dialog and toast "Saved" anyway, so a rejected field (a bad date, a
+         read-only role, a 500) looked identical to a successful save and the edit
+         vanished with no way to tell what went wrong. */
+      const res = await fetch("/api/crm/clients", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editDraft),
+      });
+      if (!res.ok) {
+        addToast("error", apiErrorMessage(t, await readApiError(res)));
+        return;
+      }
       setClients(prev => prev.map(c => c.id === editDraft.id ? { ...c, ...editDraft, lastUpdateDate: new Date().toISOString() } : c));
       if (detailClient?.id === editDraft.id) setDetailClient(prev => prev ? { ...prev, ...editDraft } : null);
       closeEdit();
@@ -811,11 +899,17 @@ export default function Home() {
 
     const res = await fetch("/api/crm/clients", {
       method: "POST", headers: { "Content-Type": "application/json" },
+      /* `nextFollowUpAt` was missing from this list, so the follow-up date a user
+         picked when ADDING a client was silently dropped on the floor — the server
+         accepted it all along, the browser just never sent it. With 0 of 343 clients
+         carrying a date, the four follow-up filter chips had nothing to match and
+         "Overdue / Due today / Upcoming" all read as broken filters. */
       body: JSON.stringify({
         name: editDraft.name, phoneNumber: editDraft.phoneNumber, status: editDraft.status,
         project: editDraft.project, location: editDraft.location, acquisitionChannel: editDraft.acquisitionChannel,
         operationToTake: editDraft.operationToTake, firstContactPerson: editDraft.firstContactPerson,
         secondContactPerson: editDraft.secondContactPerson, notes: editDraft.notes,
+        nextFollowUpAt: editDraft.nextFollowUpAt ?? null,
       }),
     });
     if (!res.ok) {
@@ -844,6 +938,47 @@ export default function Home() {
     if (!r.ok) { addToast("error", apiErrorMessage(t, await readApiError(r))); return; }
     setClients(prev => prev.filter(c => c.id !== id));
     addToast("info", t("clients.archivedToast"));
+  };
+
+  /**
+   * Moves every selected client to one status, in a single request.
+   *
+   * One call with an `ids` array, not a loop of single-client PATCHes: the
+   * server runs the batch inside one transaction, so a partial failure cannot
+   * leave half the selection moved. The client list is patched locally from the
+   * status the user chose rather than re-fetching, because the response reports
+   * counts and not rows — re-fetching a 25-row page to redraw 25 pills is a
+   * visible flash for no information.
+   */
+  const bulkSetStatus = async (status: string) => {
+    // Guards a double-click firing two batches. The trigger's value resets to ""
+    // after a pick, so without this the same status could be submitted twice.
+    if (bulkBusy) return;
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    const res = await fetch("/api/crm/clients", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, status }),
+    }).catch(() => null);
+    setBulkBusy(false);
+    if (!res || !res.ok) {
+      addToast("error", apiErrorMessage(t, res ? await readApiError(res) : undefined));
+      return;
+    }
+    const d = (await res.json().catch(() => ({}))) as { updated?: number; skipped?: number };
+    const stamp = new Date().toISOString();
+    setClients(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, status, lastUpdateDate: stamp } : c)));
+    setTableRows(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, status, lastUpdateDate: stamp } : c)));
+    setSelectedIds(new Set());
+    refreshNotifications();
+    // "skipped" carries two different causes (gone vs already on that status),
+    // so the message reports the moved count and says plainly that the rest did
+    // not change rather than inventing a reason.
+    addToast("success", (d.skipped ?? 0) > 0
+      ? t("clients.bulkStatusMixed", { n: d.updated ?? 0, skipped: d.skipped ?? 0 })
+      : t("clients.bulkStatusDone", { n: d.updated ?? 0 }));
   };
 
   const archiveSelected = async () => {
@@ -1045,6 +1180,7 @@ const exportDashboard = () => {
             clients={clients}
             salespeople={salespeople}
             spReports={spReports}
+userAvatars={userAvatars}
             timeline={timeline}
             chartView={chartView}
             onChartViewChange={setChartView}
@@ -1056,6 +1192,13 @@ const exportDashboard = () => {
             onToggleStageFilter={toggleStageFilter}
             periodKind={periodKind}
             periodInfo={periodInfo}
+            statusBuckets={statusBuckets}
+            previous={previous}
+            onShowFollowUp={showFollowUp}
+            /* Rep names in Sales Performance open that person's profile. Encoded
+               because the names are Arabic — an unencoded space or any reserved
+               character would truncate or reshape the query. */
+            onOpenProfile={(name) => router.push(`/profile?user=${encodeURIComponent(name)}`)}
             periodBreakdowns={periodBreakdowns}
             onPeriodChange={setPeriodKind}
             onCustomRange={(f, to) => { setCustomFrom(f); setCustomTo(to); }}
@@ -1066,13 +1209,19 @@ const exportDashboard = () => {
             setDashFilter={setDashFilter}
             clearDashFilters={clearDashFilters}
             dashFilterCount={dashFilterCount}
+            /* Clicking a name in "Recent clients" opens the SAME slide-in panel
+               the clients table opens. The panel is rendered by Home outside the
+               `view === "dashboard"` branch, so no extra state or markup is
+               needed — only this wiring. */
+            onOpenDetail={openDetail}
             t={t}
           />
         ) : (
           <ClientsView
             clients={mode === "table" ? tableRows : filteredClients} allClients={clients} mode={mode} setMode={setMode}
             filters={filters} updateFilter={updateFilter}
-            setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters}
+            setMultiFilter={setMultiFilter}
+            clearAllFilters={clearAllFilters}
             updateStatus={updateStatus} updateClientField={updateClientField}
             firstContacts={firstContacts} secondContacts={secondContacts}
             sortBy={sortBy} setSortBy={handleSortBy}
@@ -1088,6 +1237,9 @@ const exportDashboard = () => {
             canEdit={canEdit}
             onArchive={archiveClient}
             onArchiveSelected={archiveSelected}
+            onBulkStatus={bulkSetStatus}
+            onSetFollowUp={setFollowUpFilter}
+      followUpCounts={followUpCounts}
             onBulkDelete={() => { if (selectedIds.size === 0) return; setConfirmDelete({ ids: [...selectedIds], names: filteredClients.filter(c => selectedIds.has(c.id)).map(c => c.name) }); }}
             allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations}
             refData={{
@@ -1156,6 +1308,33 @@ const exportDashboard = () => {
                 </Field>
                 <Field label={t("form.operation")} wide><input value={editDraft.operationToTake ?? ""} onChange={e => setEditDraft({ ...editDraft, operationToTake: e.target.value })} placeholder={t("form.operationPh")} /></Field>
                 <Field label={t("form.notes")} wide><textarea value={editDraft.notes ?? ""} onChange={e => setEditDraft({ ...editDraft, notes: e.target.value })} rows={3} placeholder={t("form.notesPh")} /></Field>
+                {/* WHEN to chase, as opposed to `operationToTake` above which is WHAT to
+                    do. Kept as two separate fields on purpose: overwriting free text with a
+                    date picker would destroy the instruction it carries. Empty input writes
+                    null, which is how a follow-up gets cleared. */}
+                <Field label={t("form.nextFollowUp")} wide>
+                  <div className="followup-field">
+                    <input
+                      type="date"
+                      value={followUpInput(editDraft.nextFollowUpAt)}
+                      onChange={e => setEditDraft({ ...editDraft, nextFollowUpAt: e.target.value ? new Date(`${e.target.value}T00:00:00`).toISOString() : null })}
+                    />
+                    {/* Quick presets, because typing a date three days out is the most common
+                        case by far and a date input is the slowest way to express it. */}
+                    <div className="followup-presets">
+                      {followUpPresets.map(p => (
+                        <button key={p.days} type="button" className="btn-ghost btn-sm" onClick={() => setEditDraft({ ...editDraft, nextFollowUpAt: new Date(Date.now() + p.days * 86400000).toISOString() })}>
+                          {t(p.key)}
+                        </button>
+                      ))}
+                      {editDraft.nextFollowUpAt && (
+                        <button type="button" className="btn-ghost btn-sm" onClick={() => setEditDraft({ ...editDraft, nextFollowUpAt: null })}>
+                          {t("common.clear")}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Field>
               </div>
             </div>
             <div className="modal-footer"><button className="btn-ghost" onClick={closeEdit}>{t("common.cancel")}</button><button className="btn-primary" onClick={saveEdit}><Check size={15} />{editDraft.id ? t("clients.saveBtn") : t("clients.createBtn")}</button></div>
@@ -1185,60 +1364,37 @@ const exportDashboard = () => {
         </div>
       )}
 
-      {/* Client Detail Side Panel */}
+      {/* Client Detail Side Panel. Shared with the archived page so both routes
+          show exactly the same panel; the handlers it is given are what decide
+          which action buttons appear. */}
       {detailClient && (
-        <div className="detail-overlay" onClick={closeDetail}>
-          <div className="detail-panel" onClick={e => e.stopPropagation()}>
-            <div className="detail-header">
-              <div><div className="breadcrumb"><UsersRound size={14} />{t("detail.info")}</div><h2>{detailClient.name}</h2></div>
-              <button className="modal-close" onClick={closeDetail}><XIcon size={18} /></button>
-            </div>
-            <div className="detail-body">
-              <div className="detail-meta">
-                <div className="meta-item"><span className="meta-label">{t("form.phone")}</span><span className="meta-value"><span className="ltr-num">{detailClient.phoneNumber}</span></span></div>
-                <div className="meta-item"><span className="meta-label">{t("form.status")}</span>
-                  {canEdit ? (
-                    // Coloured from the registry, not a per-status CSS class:
-                    // .status-select.waiting never matched `status-no_response`,
-                    // so every new stage rendered as a bare unstyled select.
-                    <Select
-                      value={detailClient.status}
-                      options={allStatuses}
-                      onChange={v => updateStatus(detailClient.id, v)}
-                      render={v => statusLabel(t, v)}
-                      className="status-select"
-                      style={{
-                        background: optionColor("statuses", detailClient.status, colors) + "1f",
-                        color: optionColor("statuses", detailClient.status, colors),
-                      }}
-                      t={t}
-                      ariaLabel={t("form.status")}
-                    />
-                  ) : (
-                    <StatusPill status={detailClient.status} t={t} />
-                  )}
-                </div>
-                <div className="meta-item"><span className="meta-label">{t("form.channel")}</span><span className="chan-tag-inline"><i className="dot" style={{ background: optionColor("channels", detailClient.acquisitionChannel, colors) }} />{channelLabel(t, detailClient.acquisitionChannel)}</span></div>
-                <div className="meta-item"><span className="meta-label">{t("form.project")}</span><span className="meta-value">{detailClient.project}</span></div>
-                <div className="meta-item"><span className="meta-label">{t("form.location")}</span><span className="meta-value"><i className="dot" style={{ background: optionColor("locations", detailClient.location, colors) }} />{detailClient.location}</span></div>
-                <div className="meta-item"><span className="meta-label">{t("form.firstContact")}</span><span className="meta-value">{detailClient.firstContactPerson}</span></div>
-                <div className="meta-item"><span className="meta-label">{t("form.secondContact")}</span><span className="meta-value">{detailClient.secondContactPerson || "—"}</span></div>
-                <div className="meta-item full"><span className="meta-label">{t("form.operation")}</span><span className="meta-value op-value">{detailClient.operationToTake}</span></div>
-                {detailClient.notes && <div className="meta-item full"><span className="meta-label">{t("form.notes")}</span><p className="notes-text">{detailClient.notes}</p></div>}
-                <div className="meta-item full"><span className="meta-label">{t("client.field.created")}</span><span className="meta-value muted">{detailClient.createdAt ? new Date(detailClient.createdAt).toLocaleDateString(dateLocale(lang)) : "—"}</span></div>
-                <div className="meta-item full"><span className="meta-label">{t("detail.lastUpdate")}</span><span className="meta-value muted">{detailClient.lastUpdateDate ? new Date(detailClient.lastUpdateDate).toLocaleString(dateLocale(lang)) : "—"}</span></div>
-              </div>
-              <div className="detail-actions">
-                <button className="btn-outline" onClick={() => { openEdit(detailClient); closeDetail(); }}><Pencil size={14} />{t("detail.edit")}</button>
-                <button className="btn-outline" onClick={() => { closeDetail(); setTimeout(() => router.push(`/clients/${detailClient.id}`), 200); }}><ArrowUpRight size={14} />{t("detail.timeline")}</button>
-                {user.role === "Admin" && (<>
-                  <button className="btn-danger-outline" onClick={() => { closeDetail(); setTimeout(() => setConfirmDelete({ ids: [detailClient.id], names: [detailClient.name] }), 200); }}><Trash2 size={14} />{t("detail.delete")}</button>
-                  <button className="btn-outline" onClick={() => { closeDetail(); archiveClient(detailClient.id); }}><Archive size={14} />{t("nav.archived")}</button>
-                </>)}
-              </div>
-            </div>
-          </div>
-        </div>
+        <ClientDetailPanel
+          client={detailClient}
+          onClose={closeDetail}
+          onEdit={canEdit ? () => { openEdit(detailClient); closeDetail(); } : undefined}
+          onDelete={user.role === "Admin" ? () => { closeDetail(); setTimeout(() => setConfirmDelete({ ids: [detailClient.id], names: [detailClient.name] }), 200); } : undefined}
+          onArchive={user.role === "Admin" ? () => { closeDetail(); archiveClient(detailClient.id); } : undefined}
+          /* Coloured from the registry, not a per-status CSS class:
+             .status-select.waiting never matched `status-no_response`, so every
+             new stage rendered as a bare unstyled select. */
+          statusControl={canEdit ? (
+            <Select
+              value={detailClient.status}
+              options={allStatuses}
+              onChange={v => updateStatus(detailClient.id, v)}
+              render={v => statusLabel(t, v)}
+              className="status-select"
+              style={{
+                background: optionColor("statuses", detailClient.status, colors) + "1f",
+                color: optionColor("statuses", detailClient.status, colors),
+              }}
+              t={t}
+              ariaLabel={t("form.status")}
+            />
+          ) : undefined}
+          t={t}
+          lang={lang}
+        />
       )}
 
       <div className="toast-container">
@@ -1250,93 +1406,9 @@ const exportDashboard = () => {
 
 /* ── Sub-components ─────────────────────────────────────────── */
 
-type TFn = (key: string, vars?: Record<string, string | number>) => string;
-
-function FilterBar({ filters, updateFilter, setMultiFilter, clearAllFilters, firstContacts, secondContacts, datePresets, activeDatePreset, applyDatePreset, clearDatePreset, sortBy, setSortBy, filterCount, allStatuses, allChannels, allLocations, onRemoveStatus, onRemoveChannel, onRemoveLocation, removableStatuses, removableChannels, removableLocations, statusUsage, channelUsage, locationUsage, t }: {
-  filters: Filters;
-  updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void;
-  setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void;
-  clearAllFilters: () => void;
-  /** Distinct names per contact role, filtered independently. */
-  firstContacts: string[];
-  secondContacts: string[];
-  datePresets?: DatePreset[];
-  activeDatePreset?: string | null;
-  applyDatePreset?: (p: DatePreset) => void;
-  clearDatePreset?: () => void;
-  sortBy?: SortField;
-  setSortBy?: (s: SortField) => void;
-  filterCount?: number;
-  allStatuses?: string[];
-  allChannels?: string[];
-  allLocations?: string[];
-  onRemoveStatus?: (value: string) => void;
-  onRemoveChannel?: (value: string) => void;
-  onRemoveLocation?: (value: string) => void;
-  removableStatuses?: string[];
-  removableChannels?: string[];
-  removableLocations?: string[];
-  statusUsage?: Record<string, number>;
-  channelUsage?: Record<string, number>;
-  locationUsage?: Record<string, number>;
-  t: TFn;
-}) {
-  const hasPreset = activeDatePreset || filters.startDate || filters.endDate;
-  return (
-    <>
-      {datePresets && datePresets.length > 0 && (
-        <div className="date-presets">
-          {datePresets.map(p => (
-            <button key={p.label} className={`date-preset-btn ${activeDatePreset === p.label ? 'active' : ''}`}
-              onClick={() => applyDatePreset!(p)}>{t(p.label)}</button>
-          ))}
-          {hasPreset && <button className="date-preset-btn" onClick={clearDatePreset}>{t("filter.clear")}</button>}
-        </div>
-      )}
-      <div className="filter-row">
-        <div className="search-box"><Search size={15} /><input placeholder={t("filter.queryPh")} value={filters.query} onChange={e => updateFilter("query", e.target.value)} /></div>
-        <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} render={v => statusLabel(t, v)} onRemove={onRemoveStatus} removable={removableStatuses} removeUsage={statusUsage} t={t} />
-        <MultiSelect label={t("filter.allChannels")} options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => channelLabel(t, v)} onRemove={onRemoveChannel} removable={removableChannels} removeUsage={channelUsage} t={t} />
-        <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} render={v => locationLabel(t, v)} onRemove={onRemoveLocation} removable={removableLocations} removeUsage={locationUsage} t={t} />
-        {/* 1st and 2nd contact are separate dropdowns, and they AND together:
-            picking one of each narrows to that exact pairing. */}
-        <MultiSelect label={t("filter.firstContact")} options={firstContacts} selected={filters.firstContact} onChange={v => setMultiFilter("firstContact", v)} t={t} />
-        <MultiSelect label={t("filter.secondContact")} options={secondContacts} selected={filters.secondContact} onChange={v => setMultiFilter("secondContact", v)} t={t} />
-      </div>
-      <div className="date-bar">
-        <Filter size={13} /><span>{t("th.date")}</span><input type="date" value={filters.startDate} onChange={e => updateFilter("startDate", e.target.value)} /><span>–</span><input type="date" value={filters.endDate} onChange={e => updateFilter("endDate", e.target.value)} />
-        {setSortBy && sortBy && (
-          <label className="sort-picker">
-            <span>{t("clients.sortBy")}</span>
-            <Select
-              value={sortBy}
-              options={Object.keys(SORT_LABELS)}
-              onChange={v => setSortBy!(v as SortField)}
-              render={v => t(SORT_LABELS[v] ?? v)}
-              searchable={false}
-              t={t}
-            />
-          </label>
-        )}
-      </div>
-      {(filterCount ?? 0) > 0 && (
-        <div className="filter-chips">
-          {filters.query && <span className="filter-chip">&ldquo;{filters.query.slice(0, 24)}&rdquo;<button title={t("common.clear")} onClick={() => updateFilter("query", "")}>×</button></span>}
-          {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{statusLabel(t, s)}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
-          {filters.channel.map(c => <span key={`ch-${c}`} className="filter-chip">{channelLabel(t, c)}<button onClick={() => setMultiFilter("channel", filters.channel.filter(x => x !== c))}>×</button></span>)}
-          {filters.location.map(l => <span key={`lo-${l}`} className="filter-chip">{l}<button onClick={() => setMultiFilter("location", filters.location.filter(x => x !== l))}>×</button></span>)}
-          {filters.firstContact.map(p => <span key={`fc-${p}`} className="filter-chip">{t("filter.firstContact")}: {p}<button onClick={() => setMultiFilter("firstContact", filters.firstContact.filter(x => x !== p))}>×</button></span>)}
-          {filters.secondContact.map(p => <span key={`sc-${p}`} className="filter-chip">{t("filter.secondContact")}: {p}<button onClick={() => setMultiFilter("secondContact", filters.secondContact.filter(x => x !== p))}>×</button></span>)}
-          {filters.startDate && <span className="filter-chip">{t("common.from")} {filters.startDate}<button onClick={() => updateFilter("startDate", "")}>×</button></span>}
-          {filters.endDate && <span className="filter-chip">{t("common.to")} {filters.endDate}<button onClick={() => updateFilter("endDate", "")}>×</button></span>}
-          <button type="button" className="filter-chip clear-all-chip" onClick={clearAllFilters}>{t("filter.clear")} ×</button>
-        </div>
-      )}
-    </>
-  );
-}
-
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, periodBreakdowns, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, dashFilters, setDashFilter, clearDashFilters, dashFilterCount, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] }; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } };
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, userAvatars, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, periodBreakdowns, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, dashFilters, setDashFilter, clearDashFilters, dashFilterCount, statusBuckets, previous, onShowFollowUp, onOpenDetail, onOpenProfile, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] };
+  /** Rep display name -> stored photo, for the Sales Performance rows. */
+  userAvatars: Record<string, string>; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } };
   /**
    * Period-scoped per-status / per-location / per-channel counts, so the stage
    * panel, funnel, conversion rate and location bars describe the same window as
@@ -1349,6 +1421,38 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
   setDashFilter: (key: "status" | "channel" | "location", values: string[]) => void;
   clearDashFilters: () => void;
   dashFilterCount: number;
+  /**
+   * The admin's status -> bucket assignments from the Options page.
+   *
+   * The funnel and the fallbacks below must read these rather than the built-in
+   * `stage.outcome`, otherwise reassigning a status on the Options page would
+   * move the KPI cards but leave the funnel beside them unchanged — the two
+   * panels describing the same window with different rules.
+   */
+  statusBuckets: StatusBuckets;
+  /**
+   * The comparison window's figures, or null under "all time".
+   *
+   * Null is meaningful, not missing: it tells the KPI cards there is nothing to
+   * compare against, so they show a dash instead of a misleading 0%.
+   */
+  previous: {
+    from: string; to: string;
+    totals: { total: number; won: number; lost: number; waiting: number; other: number };
+    spend: number; reach: number;
+  } | null;
+  /** Opens the same slide-in detail panel the clients table uses. */
+  onOpenDetail: (c: Client) => void;
+  /**
+   * Opens `/profile?user=<name>` for one rep. Wired from `Home` so the dashboard
+   * still owns no navigation state of its own, matching `onShowFollowUp`.
+   */
+  onOpenProfile: (name: string) => void;
+  /**
+   * Switches to the clients view with one follow-up bucket pre-selected. Wired
+   * from `Home` so the dashboard owns no navigation state of its own.
+   */
+  onShowFollowUp: (bucket: string) => void;
   t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   // Same shared colour map the rest of the app resolves through.
@@ -1415,13 +1519,20 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
   // "Waiting" is the period total, so the funnel header and the KPI card it sits
   // beside cannot disagree.
   const inProgress = periodCounts?.totals?.waiting
-    ?? clients.filter((c) => isInProgress(c.status)).length;
+    ?? clients.filter((c) => classifyStatusWith(c.status, statusBuckets) === "progress").length;
 
   // Funnel: the active pipeline (everything up to "Contracted"), each step
   // showing its pass rate from the previous one. "Final loss" is terminal and
   // sits outside the funnel, so it is reported separately below.
   const funnelStages = useMemo(() => {
-    const active = PIPELINE_STAGES.filter((s) => s.outcome !== "lost");
+    /* Which stages are terminal is itself admin-configurable: a status the
+       Options page has filed as "lost" drops out of the funnel and into the
+       final-loss figure, and one filed as "won" stays in as the last step. This
+       used to read `s.outcome`, so the funnel was pinned to the built-in pipeline
+       while the cards beside it followed the admin's choice. */
+    const active = PIPELINE_STAGES.filter(
+      (s) => classifyStatusWith(s.value, statusBuckets) !== "lost",
+    );
     const counts = active.map((stage) => statusCountFor(stage.value));
     return active.map((stage, i) => ({
       stage,
@@ -1431,15 +1542,25 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
       rate: i === 0 || counts[i - 1] === 0 ? null : Math.round((counts[i] / counts[i - 1]) * 100),
       entering: i === 0,
     }));
-  }, [periodCounts]);
+  }, [periodCounts, statusBuckets]);
 
   // Same window as the cards above it, so the headline rate is not an all-time
   // figure sitting under a weekly funnel.
   const wonInPeriod = periodCounts?.totals?.won
-    ?? clients.filter((c) => isWon(c.status)).length;
+    ?? clients.filter((c) => classifyStatusWith(c.status, statusBuckets) === "won").length;
   const finalConversionRate = periodTotal > 0
     ? Math.round((wonInPeriod / periodTotal) * 100)
     : 0;
+
+  /* Follow-up counts over the whole book, not the reporting period — see the
+     strip's own comment. `isOverdue` and the "today" test are the same
+     definitions `matchesFollowUp` uses, so the tile and the filter it opens can
+     never disagree. */
+  const overdueCount = useMemo(() => clients.filter(c => isOverdue(c.nextFollowUpAt)).length, [clients]);
+  const dueTodayCount = useMemo(() => {
+    const today = localDayKey(new Date());
+    return clients.filter(c => dateInputValue(c.nextFollowUpAt) === today).length;
+  }, [clients]);
 
   return (
     <div className="page dashboard-page">
@@ -1571,14 +1692,55 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           plus spend, reach and CPA. `other` is what makes the outcome cards sum
           to the period total instead of quietly under-reporting. */}
       <section className="kpi-row kpi-row-7">
-        <KpiCard label={t("kpi.totalSpend")} value={sar(totalSpend)} sub={t("kpi.weeklyInvestment")} accent="#069de3"/>
-        <KpiCard label={t("kpi.totalReach")} value={MONEY.format(totalReach)} sub={t("kpi.acrossChannels")} accent="#0891b2"/>
-        <KpiCard label={t("kpi.won")} value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% ${t("kpi.winRate")}`} accent="#22c55e"/>
-        <KpiCard label={t("stage.lost")} value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% ${t("kpi.ofTotal")}`} accent="#ef4444"/>
-        <KpiCard label={t("funnel.inProgress")} value={String(waiting)} sub={t("kpi.awaiting")} accent="#f59e0b"/>
-        <KpiCard label={t("kpi.otherStatus")} value={String(unclassified)} sub={t("kpi.otherStatusSub")} accent="#94a3b8"/>
-        <KpiCard label={t("kpi.avgCpa")} value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"} sub={won>0?t("kpi.customersWon",{n:won}):t("kpi.noWins")} accent="#7c3aed"/>
+        {/* `previous` is null under "all time" (nothing to compare with), so every
+            card renders a dash instead of a fake 0% — see KpiCard. Spend and reach
+            compare against the previous window's spend/reach; the outcome cards
+            against its bucket totals, which come from the SAME status-classification
+            map as the cards themselves. */}
+        <KpiCard label={t("kpi.totalSpend")} value={sar(totalSpend)} sub={t("kpi.weeklyInvestment")} accent="#069de3"
+          delta={previous && { current: totalSpend, previous: previous.spend }} t={t}/>
+        <KpiCard label={t("kpi.totalReach")} value={MONEY.format(totalReach)} sub={t("kpi.acrossChannels")} accent="#0891b2"
+          delta={previous && { current: totalReach, previous: previous.reach }} t={t}/>
+        <KpiCard label={t("kpi.won")} value={String(won)} sub={`${won+lost?Math.round(won/(won+lost)*100):0}% ${t("kpi.winRate")}`} accent="#22c55e"
+          delta={previous && { current: won, previous: previous.totals.won }} t={t}/>
+        <KpiCard label={t("stage.lost")} value={String(lost)} sub={`${lost>0?Math.round(lost/(won+lost)*100):0}% ${t("kpi.ofTotal")}`} accent="#ef4444"
+          delta={previous && { current: lost, previous: previous.totals.lost }} t={t}/>
+        <KpiCard label={t("funnel.inProgress")} value={String(waiting)} sub={t("kpi.awaiting")} accent="#f59e0b"
+          delta={previous && { current: waiting, previous: previous.totals.waiting }} t={t}/>
+        <KpiCard label={t("kpi.otherStatus")} value={String(unclassified)} sub={t("kpi.otherStatusSub")} accent="#94a3b8"
+          delta={previous && { current: unclassified, previous: previous.totals.other }} t={t}/>
+        {/* Avg CPA is a RATIO, so it gets no delta: the change in a ratio is not
+            the change in either of its parts, and a -50% arrow beside a CPA that
+            only moved from 40 to 35 would be actively misleading. */}
+        <KpiCard label={t("kpi.avgCpa")} value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"}
+          sub={won>0?t("kpi.customersWon",{n:won}):t("kpi.noWins")} accent="#7c3aed" t={t}/>
       </section>
+
+      {/* Follow-up strip.
+          Counted from the FULL client list, not `periodClients`, on purpose: a
+          follow-up is a promise about a future date, so "which of these are due
+          today" is not a question about last week's registrations. Scoping it to
+          the reporting period would show zero for any window that has ended.
+          The tile switches to the clients view with the matching filter applied. */}
+      {(overdueCount > 0 || dueTodayCount > 0) && (
+        <section className="followup-strip">
+          {([
+            { key: "overdue" as const, n: overdueCount, tone: "danger" },
+            { key: "today" as const, n: dueTodayCount, tone: "warn" },
+          ]).map(({ key, n, tone }) => (
+            <button
+              key={key}
+              type="button"
+              className={`followup-tile is-${tone}`}
+              title={t("followUp.showTitle", { value: t(`followUp.${key}`) })}
+              onClick={() => onShowFollowUp(key)}
+            >
+              <strong>{num(n)}</strong>
+              <span>{t(`followUp.${key}`)}</span>
+            </button>
+          ))}
+        </section>
+      )}
 
       {/* Charts. Full width directly under the cards, so the trend has room to
           breathe and the y-axis is not squeezed into a half-column. */}
@@ -1671,8 +1833,22 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           {spRows.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>{t("sp.noData")}</div>}
           {spRows.map(sp => (
             <div className="sp-perf-row" key={sp.name}>
-              <div className="sp-perf-avatar">{sp.name.slice(0,2).toUpperCase()}</div>
-              <div className="sp-perf-name">{sp.name}</div>
+              <div className="sp-perf-avatar">
+                      {userAvatars[sp.name] ? <img src={userAvatars[sp.name]} alt="" /> : sp.name.slice(0, 2).toUpperCase()}
+                    </div>
+              {/* The name is the row's affordance: it opens that rep's profile, so a
+                  manager can go from "who is carrying what" to the actual book
+                  without filtering the clients page by hand. A <button>, not a
+                  <div>, so it is reachable by keyboard and announced as an
+                  action rather than as static text. */}
+              <button
+                type="button"
+                className="sp-perf-name sp-perf-link"
+                onClick={() => onOpenProfile(sp.name)}
+                title={t("sp.viewProfile", { name: sp.name })}
+              >
+                {sp.name}
+              </button>
               <div className="sp-perf-stats">
                 <span className="sp-won">{sp.won}</span>
                 <span className="sp-lost">{sp.lost}</span>
@@ -1722,7 +1898,14 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
               <div className="recent-row" key={c.id}>
                 <span className="recent-client">
                   <span className="rc-avatar">{c.name.slice(0,2).toUpperCase()}</span>
-                  <span className="recent-client-name">{c.name}</span>
+                  {/* A <button>, not a <span>: it opens the same slide-in detail
+                      panel the clients table opens, so the name behaves like a
+                      link instead of being decorative text. `.recent-client-name`
+                      keeps its own styling, and the shared `.recent-client-btn`
+                      rule below supplies the focus ring and hit area. */}
+                  <button type="button" className="recent-client-name recent-client-btn" onClick={() => onOpenDetail(c)}>
+                    {c.name}
+                  </button>
                 </span>
                 {/* The project is the point of this panel, so it is the value that
                     is emphasised — not the column header above it. */}
@@ -1813,21 +1996,65 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
   );
 }
 
-function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub: string; accent: string }) {
-  return (<div className="kpi-card" style={{borderTopColor:accent}}><div className="kpi-label"><span>{label}</span><span className="kpi-dot" style={{background:accent}}/></div><div className="kpi-value">{value}</div><div className="kpi-sub">{sub}</div></div>);}
+/**
+ * One KPI card, optionally carrying a change against the previous period.
+ *
+ * `delta` is deliberately nullable rather than defaulting to 0 — "unchanged" and
+ * "nothing to compare with" are different statements, and a flat 0% under "all
+ * time" would read as "nothing changed", which is a claim the data cannot
+ * support.
+ *
+ * A delta against a previous value of 0 also renders as a dash rather than a
+ * percentage: the ratio is undefined (or infinitely large), and inventing a
+ * number there is worse than admitting the comparison does not apply.
+ */
+function KpiCard({ label, value, sub, accent, delta, t }: {
+  label: string; value: string; sub: string; accent: string;
+  delta?: { current: number; previous: number | null } | null;
+  t: TFn;
+}) {
+  const pct = delta && delta.previous !== null && delta.previous !== 0
+    ? Math.round(((delta.current - delta.previous) / Math.abs(delta.previous)) * 100)
+    : null;
+  const dir = pct === null ? "none" : pct > 0 ? "up" : pct < 0 ? "down" : "flat";
+  return (
+    <div className="kpi-card" style={{ borderTopColor: accent }}>
+      <div className="kpi-label"><span>{label}</span><span className="kpi-dot" style={{ background: accent }} /></div>
+      <div className="kpi-value">{value}</div>
+      <div className="kpi-sub">{sub}</div>
+      {delta && (
+        <div className={`kpi-delta is-${dir}`} title={t("kpi.deltaTitle", { pct: pct ?? 0 })}>
+          {dir === "none"
+            ? <span>—</span>
+            : <><span className="kpi-delta-arrow">{dir === "up" ? "▲" : dir === "down" ? "▼" : "="}</span><span>{Math.abs(pct ?? 0)}%</span></>}
+        </div>
+      )}
+    </div>
+  );
+}
 
-function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, clearAllFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
+function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, onSetFollowUp, followUpCounts, clearAllFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
   applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation,
   onClearSelection,
   onSelectAllMatching,
+  onBulkStatus,
   pager, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; columns: ResolvedColumn[]; onColumnsChange: (c: ResolvedColumn[]) => void; rtl: boolean; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>;
   /** Clears the bulk selection. Always offered while anything is selected. */
   onClearSelection?: () => void;
   /** Ticks every client the current filter matches, across all pages. */
   onSelectAllMatching?: () => void;
+  /**
+   * Moves every selected client to one status. Supplied only when the viewer can
+   * edit, which is what the bulk bar gates the control on.
+   */
+  onBulkStatus?: (status: string) => void;
+  /** Toggles one follow-up bucket. Wired straight to the page-level setter. */
+  onSetFollowUp: (value: string) => void;
+  /** Per-bucket client counts for the follow-up chip badges. */
+  followUpCounts?: Record<string, number>;
   pager?: { page: number; pageCount: number; total: number; loading: boolean; onPage: (p: number) => void; t: TFn }; t: TFn }) {
   // Page controls for the paged table. Supplied only in table mode — kanban
   // renders the whole book at once, so a pager there would be meaningless.
@@ -1843,6 +2070,26 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
         <div><div className="breadcrumb"><UsersRound size={14}/>{t("clients.crm")}</div><h1>{t("clients.title")}</h1><p>{t("clients.subtitle")}</p></div>
         <div className="header-actions">
           {bulkCount>0&&<span className="selection-info">{t("clients.selectedCount",{n:bulkCount})}
+            {/* Bulk status change. Gated on `canEdit`, NOT `isAdmin`: a Sales or
+                CRM user can already move one client's status from the table or
+                the detail panel, so refusing them the same edit in bulk while
+                offering them Archive would be incoherent. Delete/Archive below
+                stay admin-only because those endpoints are. */}
+            {canEdit && onBulkStatus && (
+              <span className="bulk-status">
+                <span className="bulk-status-label">{t("clients.bulkStatus")}</span>
+                <Select
+                  value=""
+                  options={allStatuses}
+                  onChange={onBulkStatus}
+                  render={v => statusLabel(t, v)}
+                  searchable={false}
+                  className="status-select"
+                  t={t}
+                  ariaLabel={t("clients.bulkStatus")}
+                />
+              </span>
+            )}
             {isAdmin && <><button className="btn-danger-sm" onClick={onBulkDelete}>{t("clients.deleteSelected")}</button>
               <button className="btn-archive-sm" onClick={onArchiveSelected}>{t("clients.archiveSelected")}</button></>}
             {/* Always offered while anything is ticked. Selecting every visible row
@@ -1861,7 +2108,10 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>{t("clients.exportAll")}</button>
         </div>
       </div>
-      <FilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter} clearAllFilters={clearAllFilters} firstContacts={firstContacts} secondContacts={secondContacts} sortBy={sortBy} setSortBy={setSortBy} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveStatus={refData.onRemoveStatus} removableStatuses={refData.removableStatuses} statusUsage={refData.statusUsage} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
+      <ClientFilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter}
+        followUp={filters.followUp} setFollowUp={onSetFollowUp}
+        followUpCounts={followUpCounts}
+        clearAllFilters={clearAllFilters} firstContacts={firstContacts} secondContacts={secondContacts} sortBy={sortBy} setSortBy={setSortBy} datePresets={datePresets} activeDatePreset={activeDatePreset} applyDatePreset={applyDatePreset} clearDatePreset={clearDatePreset} filterCount={filterCount ?? 0} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} onRemoveStatus={refData.onRemoveStatus} removableStatuses={refData.removableStatuses} statusUsage={refData.statusUsage} onRemoveChannel={refData.onRemoveChannel} onRemoveLocation={refData.onRemoveLocation} removableChannels={refData.removableChannels} removableLocations={refData.removableLocations} channelUsage={refData.channelUsage} locationUsage={refData.locationUsage} t={t} />
       {/* One count for the whole page. This used to read `clients.length` and
           `allClients.length`, which in table mode are the PAGE and the WHOLE BOOK —
           so "last 30 days" rendered "25 of 337" while the pager underneath correctly
@@ -1921,201 +2171,6 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
  * drift out of column order — the grid assigns cells positionally, so one extra
  * or missing cell shifts every cell after it.
  */
-function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdit, onOpenDelete, onArchive }: {
-  col: ResolvedColumn;
-  c: Client;
-  t: TFn;
-  lang: string;
-  onOpenDetail: (c: Client) => void;
-  canEdit?: boolean;
-  isAdmin?: boolean;
-  onOpenEdit: (c: Client) => void;
-  onOpenDelete: (ids: string[], names: string[]) => void;
-  onArchive?: (id: string) => void | Promise<void>;
-}) {
-  // Same shared colour map as the rest of the app, so a channel recoloured on
-  // the options page shows here without this component knowing the option exists.
-  const colors = useOptionColors();
-  switch (col.key) {
-    case "id":
-      return <span className="id-cell" title={t("th.id")}>#{c.id}</span>;
-    case "client":
-      return (
-        <span className="person-cell" onClick={() => onOpenDetail(c)}>
-          <b>{c.name}</b>
-          <small><span className="ltr-num">{c.phoneNumber}</span></small>
-          {c.notes && <span className="notes-indicator"><MessageSquare size={10} /></span>}
-        </span>
-      );
-    case "status":
-      return <StatusPill status={c.status} t={t} />;
-    case "channel":
-      return <span className="chan-tag"><i className="dot" style={{ background: optionColor("channels", c.acquisitionChannel, colors) }} />{channelLabel(t, c.acquisitionChannel)}</span>;
-    case "project":
-      return <span>{c.project}</span>;
-    case "location":
-      // Locations gained a colour here for the first time; previously this cell
-      // was plain text with nothing to distinguish one city from another.
-      return <span className="loc-tag"><i className="dot" style={{ background: optionColor("locations", c.location, colors) }} />{c.location}</span>;
-    case "registeredAt":
-      return <span className="muted">{c.createdAt ? new Date(c.createdAt).toLocaleDateString(dateLocale(lang)) : "—"}</span>;
-    case "operation":
-      return <span className="op-text">{c.operationToTake}</span>;
-    case "firstContact":
-      return <span className="muted">{c.firstContactPerson || "—"}</span>;
-    case "secondContact":
-      return <span className="muted">{c.secondContactPerson || "—"}</span>;
-    case "lastUpdateDate":
-      return <span className="muted">{c.lastUpdateDate ? new Date(c.lastUpdateDate).toLocaleDateString(dateLocale(lang)) : "—"}</span>;
-    case "actions":
-      return (
-        <span className="actions-cell no-detail">
-          {canEdit && <button className="icon-btn" title={t("common.edit")} onClick={e => { e.stopPropagation(); onOpenEdit(c); }}><Pencil size={14} /></button>}
-          {isAdmin && <><button className="icon-btn danger" title={t("common.delete")} onClick={e => { e.stopPropagation(); onOpenDelete([c.id], [c.name]); }}><Trash2 size={14} /></button>
-            <button className="icon-btn" title={t("nav.archived")} onClick={e => { e.stopPropagation(); onArchive && onArchive(c.id); }}><Archive size={14} /></button></>}
-        </span>
-      );
-    default:
-      return null;
-  }
-}
-
-function ClientTable({ clients, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, columns, onColumnsChange, rtl, t }: {
-  clients: Client[];
-  selectedIds: Set<string>;
-  toggleSelect: (id: string) => void;
-  toggleSelectAll: () => void;
-  onOpenEdit: (c: Client) => void;
-  onOpenDelete: (ids: string[], names: string[]) => void;
-  onOpenDetail: (c: Client) => void;
-  isAdmin?: boolean;
-  canEdit?: boolean;
-  onArchive?: (id: string) => void | Promise<void>;
-  tableRef?: React.RefObject<HTMLDivElement> | null;
-  columns: ResolvedColumn[];
-  onColumnsChange: (c: ResolvedColumn[]) => void;
-  rtl: boolean;
-  t: TFn;
-}) {
-  const { lang } = useLang();
-  const allSelected = clients.length > 0 && clients.every(c => selectedIds.has(c.id));
-
-  // Width changes preview live during the drag and commit once on release —
-  // otherwise a drag would fire a save per pixel.
-  const [draft, setDraft] = useState<{ key: ColumnKey; w: number } | null>(null);
-  const drag = useRef<{ key: ColumnKey; startX: number; startW: number } | null>(null);
-  // Suppress text selection while dragging, or the drag selects the row text.
-  useEffect(() => {
-    if (!draft) return;
-    const prev = document.body.style.userSelect;
-    document.body.style.userSelect = "none";
-    return () => { document.body.style.userSelect = prev; };
-  }, [draft]);
-
-  const startResize = (e: React.PointerEvent, col: ResolvedColumn) => {
-    if (col.locked) return;
-    e.preventDefault();
-    e.stopPropagation();
-    drag.current = { key: col.key, startX: e.clientX, startW: col.w };
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    setDraft({ key: col.key, w: col.w });
-  };
-
-  const onMove = (e: React.PointerEvent) => {
-    const d = drag.current;
-    if (!d) return;
-    // In RTL the grid flows right-to-left, so moving the pointer RIGHT NARROWS
-    // the column. Without this inversion every drag runs backwards for Arabic
-    // users — the app's default language.
-    const delta = rtl ? d.startX - e.clientX : e.clientX - d.startX;
-    const col = columns.find(c => c.key === d.key);
-    if (!col) return;
-    setDraft({ key: d.key, w: Math.min(col.max, Math.max(col.min, d.startW + delta)) });
-  };
-
-  const endResize = () => {
-    const done = draft;
-    drag.current = null;
-    setDraft(null);
-    if (!done) return;
-    onColumnsChange(columns.map(c => (c.key === done.key ? { ...c, w: done.w } : c)));
-  };
-
-  /** Double-click a divider to restore that column's default width. */
-  const resetColumn = (col: ResolvedColumn) => {
-    const def = CLIENT_COLUMNS.find(d => d.key === col.key);
-    if (!def || col.locked) return;
-    onColumnsChange(columns.map(c => (c.key === col.key ? { ...c, w: def.w } : c)));
-  };
-
-  const onResizeKey = (e: React.KeyboardEvent, col: ResolvedColumn) => {
-    if (col.locked) return;
-    const step = e.shiftKey ? 24 : 8;
-    let w: number | null = null;
-    // Arrow keys are mirrored in RTL, same as the drag.
-    if (e.key === "ArrowRight") w = col.w + (rtl ? -step : step);
-    else if (e.key === "ArrowLeft") w = col.w + (rtl ? step : -step);
-    if (w === null) return;
-    e.preventDefault();
-    e.stopPropagation();
-    onColumnsChange(columns.map(c => (c.key === col.key ? { ...c, w: Math.min(col.max, Math.max(col.min, w)) } : c)));
-  };
-
-  // The live drag width, so the header and every body row move together.
-  const layout = draft ? columns.map(c => (c.key === draft.key ? { ...c, w: draft.w } : c)) : columns;
-  const shown = layout.filter(col => !col.hidden);
-
-  return (
-    <div className="table-scroll-wrapper">
-      <div className="scroll-indicator-left hidden" ref={(el) => { if (el) { const t2 = tableRef?.current; if (t2) { const check = () => { el.classList.toggle("hidden", t2.scrollLeft <= 0); }; check(); t2.addEventListener("scroll", check, { passive: true }); } } }} />
-      <div className="scroll-indicator-right hidden" />
-      <div
-        className="client-table"
-        ref={tableRef}
-        style={{ ["--ct-cols" as string]: gridTemplate(layout) }}
-      >
-        <div className="client-row client-head">
-          {shown.map(col => (
-            <span key={col.key} className="col-head-cell">
-              {col.key === "select"
-                ? <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="cb" />
-                : col.labelKey ? t(col.labelKey) : null}
-              {!col.locked && (
-                <span
-                  className="col-resizer"
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-label={t("cols.resize", { name: col.labelKey ? t(col.labelKey) : col.key })}
-                  aria-valuenow={col.w}
-                  aria-valuemin={col.min}
-                  aria-valuemax={col.max}
-                  tabIndex={0}
-                  title={t("cols.resizeHint")}
-                  onPointerDown={e => startResize(e, col)}
-                  onPointerMove={onMove}
-                  onPointerUp={endResize}
-                  onPointerCancel={endResize}
-                  onDoubleClick={e => { e.stopPropagation(); resetColumn(col); }}
-                  onKeyDown={e => onResizeKey(e, col)}
-                />
-              )}
-            </span>
-          ))}
-        </div>
-        {clients.map(c => (
-          <div className={`client-row client-row-clickable ${selectedIds.has(c.id) ? "selected" : ""}`} key={c.id} onClick={e => { (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "SELECT" && !(e.target as HTMLElement).closest(".no-detail") && onOpenDetail(c) }}>
-            {shown.map(col => (
-              col.key === "select"
-                ? <input key={col.key} type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="cb" onClick={e => e.stopPropagation()} />
-                : <ClientCell key={col.key} col={col} c={c} t={t} lang={lang} onOpenDetail={onOpenDetail} canEdit={canEdit} isAdmin={isAdmin} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onArchive={onArchive} />
-            ))}
-          </div>
-        ))}
-        {clients.length === 0 && <div className="empty-state">{t("clients.noResults")}</div>}
-      </div>
-    </div>
-  );
-}
 
 function Kanban({ clients, updateStatus, updateClientField, onAssigned, selectedIds, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, columns, allStatuses, allChannels, allLocations, users, onAddStatus, onAddChannel, onAddLocation, t }: { clients: Client[]; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; isAdmin?: boolean; canEdit?: boolean; onArchive?: (id: string) => void | Promise<void>; columns: ResolvedColumn[]; allStatuses?: string[]; allChannels?: string[]; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; t: TFn }) {
   const [draggedId, setDraggedId] = useState<string|null>(null);

@@ -29,8 +29,6 @@
 }
 [data-theme="dark"] .marketing-shell .mkt-preset { background: #101820; border-color: #344353; color: #b9d8d0; }
 [data-theme="dark"] .marketing-shell .mkt-preset.active { background: #0f766e; border-color: #0f766e; color: #fff; }
-.marketing-shell .mkt-hero h1 { font-size: clamp(26px, 3vw, 40px); letter-spacing: -1.4px; line-height: 1.15; max-width: 580px; margin: 16px 0 12px; }
-.marketing-shell .mkt-hero p { font-size: 14px; line-height: 1.7; max-width: 500px; }
 .marketing-shell .mkt-crumb { font-size: 10px; letter-spacing: 2px; color: #7fd0f4; }
 .marketing-shell .mkt-period { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 20px; padding: 7px 11px; font-size: 11px; color: #cfe4f2; }
 .marketing-shell .mkt-hero .header-actions { gap: 10px; }
@@ -58,21 +56,51 @@
 .marketing-shell .table-head-row, .marketing-shell .table-row { grid-template-columns: minmax(150px, 1.5fr) repeat(5, minmax(85px, 1fr)); min-width: 650px; gap: 16px; padding: 15px 12px; }
 .marketing-shell .table-head-row, .marketing-shell .recent-head { background: rgba(19, 34, 60, 0.04); border-radius: 8px; color: #617787; }
 .marketing-shell .table-row:hover, .marketing-shell .recent-row:not(.recent-head):hover { background: rgba(6, 157, 227, 0.06); }
-/* Recent entries: 7 columns, in the order the JSX renders them —
-   channel pill, campaign, period, spend, reach, notes, actions.
-   Explicit tracks rather than the inherited `.recent-row` template, which had 8
-   columns for the old leading dot-cell. Spend/reach get fixed minimums so the
-   figures stay readable as digits rather than being squeezed by a fr share. */
+/* Recent entries: tracks come from the column registry (src/lib/marketing-columns.ts)
+   and land on the table as `--mr-cols`, so the header and every body row share one
+   list of pixel widths and a drag only rewrites that variable. The fallback below
+   is the registry's own defaults, and applies only before the inline style lands.
+
+   `width: max-content` sizes the row to exactly its tracks + gaps, so the panel's
+   `overflow-x: auto` scrolls when the viewport is narrower; `min-width: 100%`
+   fills the panel when it is wider. A bare `min-width` (what this rule used to
+   have) would have sized the scroller instead of the row. */
 .marketing-shell .recent-row {
-  grid-template-columns: minmax(110px, 0.9fr) minmax(150px, 1.6fr) minmax(130px, 1.1fr) minmax(90px, 0.7fr) minmax(70px, 0.5fr) minmax(120px, 1.2fr) auto;
+  grid-template-columns: var(--mr-cols, 30px 120px 170px 150px 100px 85px 140px 62px);
   gap: 14px;
   padding: 11px 12px;
-  min-width: 780px;
+  width: max-content;
+  min-width: 100%;
   align-items: center;
 }
 .marketing-shell .recent-head { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
-/* Figures being compared, so: right-aligned and digit-width-stable. */
-.marketing-shell .r-num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Header cells. `overflow: visible` is not optional: the generic
+   `.recent-row > *` rule sets `overflow: hidden` to ellipsise long text, and
+   `.col-resizer` is positioned 5px OUTSIDE the cell so it straddles the divider —
+   clipping it would make the table look unresizable. Same reason the clients
+   table has the identical pair of declarations. `align-self: stretch` grows the
+   cell to the row's full height, so the handle is a comfortable drag target
+   rather than a strip as tall as the label. */
+.marketing-shell .recent-head .col-head-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  overflow: visible;
+}
+/* Mirrors the globals.css rule of the same name: the header is start-aligned so
+   it lines up with its own start-aligned figures, and with every other column. */
+.marketing-shell .recent-head .col-head-cell.r-num { justify-content: flex-start; }
+
+/* The heading-tools and selection-bar rules moved to globals.css: /metrics borrows
+   that markup and does not load marketing.css, so keeping them here left its bulk
+   bar rendering completely unstyled. */
+/* Figures being compared, so digit-width-stable. Start-aligned, to match the
+   header above it and every other column on the page — see the same rule in
+   globals.css. Logical `start` rather than the physical `right` this used, which
+   pinned the figures to the right in Arabic while the header went left. */
+.marketing-shell .r-num { text-align: start; font-variant-numeric: tabular-nums; }
 .marketing-shell .r-reach { color: var(--ink-soft); }
 .marketing-shell .r-notes { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Channel as a tinted pill. The tint is a fixed low-alpha teal rather than the
@@ -129,7 +157,6 @@
 @media (max-width: 600px) {
   .marketing-shell > .content { padding: 16px 12px 32px; }
   .marketing-shell .mkt-hero { padding: 24px 20px; border-radius: 18px; }
-  .marketing-shell .mkt-hero h1 { letter-spacing: -.8px; }
   .marketing-shell .mkt-hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .marketing-shell .mkt-stat { padding: 12px; }
   .marketing-shell .mkt-stat span { font-size: 21px; }

@@ -24,6 +24,7 @@ const COLUMNS: ExcelColumn[] = [
   { header: "2nd Contact", key: "second", width: 16 },
   { header: "Notes", key: "notes", width: 36 },
   { header: "Last Updated", key: "updated", width: 13 },
+  { header: "Next Follow-up", key: "followUp", width: 14 },
   { header: "Archived", key: "archived", width: 10 },
 ];
 
@@ -33,7 +34,7 @@ const list = (value: string | null): string[] =>
     .map((part) => part.trim())
     .filter(Boolean);
 
-const day = (value: string | undefined) => (value ?? "").slice(0, 10);
+const day = (value: string | null | undefined): string => (value ?? "").slice(0, 10);
 
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
@@ -115,6 +116,9 @@ export async function GET(request: NextRequest) {
       second: c.secondContactPerson,
       notes: c.notes ?? "",
       updated: day(c.lastUpdateDate),
+      // Bare YYYY-MM-DD via the same `day` helper the other dates use, so the
+      // column is sortable in Excel rather than being a formatted timestamp.
+      followUp: day(c.nextFollowUpAt),
       archived: c.archived ? "Yes" : "No",
     }));
 

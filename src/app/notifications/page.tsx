@@ -8,7 +8,7 @@ import { useLang } from "@/lib/i18n";
 import { dateLocale } from "@/lib/format";
 import { notificationMessage } from "@/lib/reporting";
 
-type Notif = { id: string; message: string; read: boolean; recipient?: string; createdAt: string; type?: string; clientName?: string };
+type Notif = { id: string; message: string; read: boolean; recipient?: string; createdAt: string; type?: string; clientName?: string; clientId?: string | null };
 
 export default function NotificationsPage() {
   const router = useRouter();
@@ -79,6 +79,26 @@ export default function NotificationsPage() {
     await mutate("DELETE", { id: n.id }, prev => prev.filter(x => x.id !== n.id));
   };
 
+  /**
+   * Opens the client a notification refers to.
+   *
+   * Marks it read on the way through, but does not block on that request: the
+   * navigation is what the user asked for, and a failed mark leaves an unread
+   * row — which is a far better outcome than a spinner over a page they wanted.
+   * The local list is updated first so the row is not still highlighted when the
+   * next render happens.
+   */
+  const openClient = (n: Notif) => {
+    if (!n.clientId) return;
+    setItems(prev => prev.map(x => (x.id === n.id ? { ...x, read: true } : x)));
+    void fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: n.id }),
+    }).catch(() => undefined);
+    router.push(`/clients/${n.clientId}`);
+  };
+
   const clearHistory = async () => {
     if (read.length === 0) return;
     if (!confirm(t("notif.clearConfirm", { n: read.length }))) return;
@@ -131,11 +151,26 @@ export default function NotificationsPage() {
             </div>
           )}
           {shown.map((n) => (
+            /* The message body is a button when the notification points at a
+               client, so the text itself opens them. `stopPropagation` on the
+               row buttons below is what keeps "Mark read" / "Delete" from also
+               navigating — they are siblings of this button, not ancestors, so
+               the guard is there purely so a future wrapper refactor cannot
+               accidentally make them trigger the row. */
             <div className={`notif-row ${n.read ? "is-read" : "is-unread"}`} key={n.id}>
               <span className="notif-new-dot" />
               <div className="notif-row-body">
-                <strong>{notificationMessage(t, n)}</strong>
-                <small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small>
+                {n.clientId ? (
+                  <button type="button" className="notif-open" onClick={() => openClient(n)}>
+                    <strong>{notificationMessage(t, n)}</strong>
+                    <small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small>
+                  </button>
+                ) : (
+                  <>
+                    <strong>{notificationMessage(t, n)}</strong>
+                    <small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small>
+                  </>
+                )}
               </div>
               {!n.read && <button className="btn-ghost btn-sm" disabled={busyId === n.id} onClick={() => markRead(n.id)}>{t("notif.markRead")}</button>}
               <button className="icon-btn-sm danger" title={t("notif.deleteTitle")} disabled={busyId === n.id} onClick={() => removeOne(n)}><Trash2 size={13} /></button>

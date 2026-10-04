@@ -168,6 +168,12 @@ button { cursor: pointer; }
 .topbar-left{display:flex;align-items:center;gap:9px}
 .brand-letter{background:var(--ink);color:var(--lime);width:28px;height:28px;display:grid;place-items:center;border-radius:7px;font-weight:800;font-size:15px}
 .brand-name{font-size:16px;font-weight:800;letter-spacing:-.6px}
+/* The brand is a button so it is keyboard-reachable, so every button reset has
+   to be undone here — otherwise the topbar picks up a UA border/background and
+   the logo stops looking like part of the bar. */
+.brand-home{display:inline-flex;align-items:center;gap:9px;border:0;background:transparent;padding:0;margin:0;cursor:pointer;color:inherit;font:inherit;border-radius:8px}
+.brand-home:hover .brand-name{opacity:.75}
+.brand-home:focus-visible{outline:2px solid var(--azure);outline-offset:3px}
 .topbar-nav{display:flex;gap:4px}
 .topbar-nav button{border:0;background:transparent;color:#777b84;padding:7px 13px;border-radius:20px;display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}
 .nav-active{background:#17181c!important;color:#fff!important}
@@ -227,12 +233,21 @@ button { cursor: pointer; }
 .field input,.field select,.field textarea{border:1px solid #dfe2e6;border-radius:6px;padding:9px 10px;font-size:12px;color:var(--ink);background:#fff;outline:none}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:#7c3aed;box-shadow:0 0 0 3px #ede9fe}
 .add-form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
-.modal-overlay{position:fixed;inset:0;z-index:50;background:rgba(15,23,42,.35);display:grid;place-items:center;padding:20px;backdrop-filter:blur(4px)}
-.modal{background:#fff;width:min(580px,100%);border-radius:14px;padding:24px;box-shadow:0 24px 70px rgba(15,23,42,.22)}
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+/* The overlay scrolls as a fallback for screens too short to show a 90dvh card,
+   and centres the card vertically when it fits. */
+.modal-overlay{position:fixed;inset:0;z-index:50;background:rgba(15,23,42,.35);display:grid;place-items:center;padding:20px;backdrop-filter:blur(4px);overflow-y:auto}
+/* A flex column capped to the viewport, so a form with more fields than fit
+   scrolls INSIDE the card instead of overflowing it. The client add/edit form
+   has eleven fields and used to run past both edges of a laptop screen with the
+   top and bottom unreachable — centred, overflowing, and with nothing to scroll. */
+.modal{background:#fff;width:min(580px,100%);max-height:calc(100vh - 40px);display:flex;flex-direction:column;border-radius:14px;padding:24px;box-shadow:0 24px 70px rgba(15,23,42,.22)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex:0 0 auto}
 .modal-header h2{margin:0;font-size:18px;letter-spacing:-.4px}
 .modal-close{border:0;background:#f3f4f6;border-radius:50%;width:28px;height:28px;display:grid;place-items:center;cursor:pointer;color:#6b7280}
-.modal-close:hover{background:#e5e7eb}.modal-body{margin-bottom:20px}
+.modal-close:hover{background:#e5e7eb}
+/* `min-height:0` is what actually lets a flex child shrink below its content
+   size; without it `overflow-y:auto` never engages and the card just grows. */
+.modal-body{margin-bottom:20px;flex:1 1 auto;min-height:0;overflow-y:auto}
 .delete-warning{display:flex;gap:12px;align-items:flex-start}
 .delete-warning strong{display:block;font-size:14px;margin-bottom:4px}.delete-warning p{margin:0;font-size:13px;color:#6b7280}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #eef0f2;padding-top:16px}
@@ -259,6 +274,26 @@ button { cursor: pointer; }
 @media(max-width:600px){.topbar{padding:0 16px}.content{padding:20px 16px 40px}.kpi-row{grid-template-columns:1fr}.filter-row{grid-template-columns:1fr}}
 
 .selection-info { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b7280; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 7px; padding: 6px 12px; }
+
+/* Bulk-selection chrome, shared by /marketing and /metrics.
+   These lived in marketing.css, which only the marketing page imports — so when
+   /metrics borrowed the same markup its bar rendered with no layout at all. The
+   record count is always shown; the bar appears only while rows are ticked, so an
+   unselected table's heading is unchanged. Wraps rather than pushing the panel
+   title off the edge. */
+.mkt-heading-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; min-width: 0; }
+.mkt-selection { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.mkt-selection .btn-sm { padding: 5px 10px; font-size: 11px; }
+/* Bulk status picker inside the selection bar. The shared .ms-trigger floor is
+   128px, which would bloat the bar; this only needs room for a short stage name.
+   The trigger is left unselected-looking (empty value) so it reads as a control
+   to operate, not as a field already holding a value. */
+.bulk-status { display: inline-flex; align-items: center; gap: 6px; }
+.bulk-status-label { font-size: 11px; color: #64748b; white-space: nowrap; }
+.bulk-status .ms-trigger { min-width: 0; width: auto; height: 28px; background: #fff; border-color: #bfdbfe; color: #1e40af; }
+.bulk-status .ms-trigger:hover { background: #eff6ff; }
+[data-theme="dark"] .bulk-status .ms-trigger { background: #18181b; border-color: #2c2c31; color: #93c5fd; }
+[data-theme="dark"] .bulk-status .ms-trigger:hover { background: #1e293b; }
 .btn-danger-sm { border: 0; background: #ef4444; color: #fff; border-radius: 5px; padding: 4px 10px; font-size: 11px; cursor: pointer; font-weight: 600; }
 .btn-danger-sm:hover { background: #dc2626; }
 .cb { width: 15px; height: 15px; cursor: pointer; accent-color: #069de3; }
@@ -304,12 +339,20 @@ button { cursor: pointer; }
 .badge-count { background: #0379b4; color: #fff; border-radius: 10px; padding: 1px 6px; font-size: 10px; margin-left: 4px; font-weight: 700; }
 @media(max-width:900px){.detail-panel{width:100vw}}
 
-/* ── Client detail page ───────────────────────────────────── */
-.detail-page { max-width: 1100px; margin: 0 auto; padding: 28px 32px 60px; }
-.detail-topbar { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
-.detail-title { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
-.detail-title h1 { font-size: 26px; letter-spacing: -.9px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.detail-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* ── Client detail page ───────────────────────────────────────
+   The page frame and heading are the standard `.content` + `.page-header` pair
+   every other page uses. It previously rolled its own `.detail-page` /
+   `.detail-topbar` / `.detail-title`, which is why this header looked like
+   nothing else in the app — different width, different title position, and a
+   `nowrap` + ellipsis rule that cut long client names off mid-word.
+   `.page-header h1` already sets the same 26px/-.9px title the bespoke rule did,
+   so nothing about the type changed, only where it sits. */
+.detail-page-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* The back button sits ABOVE the title rather than beside it, so the name keeps
+   the same position it has on every other page. */
+.detail-back { margin-bottom: 12px; }
+/* Status pill and #id under the name, on one line, as the standard subtitle. */
+.detail-meta { display: flex; align-items: center; gap: 8px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .detail-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
 .detail-section h2 { margin: 0 0 18px; font-size: 14px; font-weight: 700; letter-spacing: -.2px; color: var(--ink); display: flex; align-items: center; gap: 7px; }
@@ -552,7 +595,14 @@ button { cursor: pointer; }
 .ms-trigger:hover { border-color: #c4b5fd; color: #111827; }
 .ms-trigger.ms-active { border-color: #8b5cf6; color: #5b21b6; background: #faf5ff; font-weight: 600; }
 .ms-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ms-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 200px; max-height: 262px; overflow-y: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 10px 28px rgba(17,24,39,.13); z-index: 60; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+/* `inset-inline-start`, not `left`. The trigger sits at the START of the row, so
+   in Arabic (dir="rtl", toggled in i18n.tsx) the menu has to hang off the RIGHT
+   edge and grow leftwards. A physical `left: 0` anchored it to the opposite
+   edge, pushing the list off-screen exactly when Arabic was selected.
+
+   The max-width is the other half of that fix: `min-width` alone is a floor, so a
+   long custom status could still push past the window on either side. */
+.ms-menu { position: absolute; top: calc(100% + 4px); inset-inline-start: 0; min-width: 200px; max-width: min(220px, calc(100vw - 24px)); max-height: 262px; overflow-y: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 10px 28px rgba(17,24,39,.13); z-index: 60; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
 .ms-opt { border: 0; background: transparent; text-align: left; padding: 7px 9px; border-radius: 6px; font-size: 12px; color: #374151; cursor: pointer; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .ms-opt:hover { background: #f3f4f6; }
 /* Selected option. The state class sits on the ROW, not the button: .ms-opt is
@@ -792,9 +842,18 @@ button { cursor: pointer; }
 .avatar-row { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .avatar-wrapper { position: relative; flex-shrink: 0; }
 .avatar-img, .avatar-default { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; display: grid; place-items: center; font-size: 20px; font-weight: 800; color: #7664cf; background: #e7ddff; }
-.avatar-upload { position: absolute; bottom: 0; right: 0; width: 24px; height: 24px; background: #17181c; color: #fff; border-radius: 50%; display: grid; place-items: center; cursor: pointer; border: 2px solid #fff; transition: background .15s; }
-[data-theme="dark"] .avatar-upload { background: #3f3f46; border-color: #18181b; }
-.avatar-upload:hover { background: #069de3; }
+/* Settings' camera dot over the avatar. Named `.avatar-photo-dot` and NOT
+   `.avatar-upload`: the users form has its OWN `.avatar-upload` row (far below,
+   next to `.avatar-upload-actions`). One shared name made the two collide — this
+   rule sets `position`, `width`, `height`, `background`, `color`, `border`,
+   `border-radius` and `cursor`, and the users rule only ever set `display`,
+   `align-items`, `gap` and `flex-wrap`, so every property above survived onto
+   the users picker. The result was a flex row crammed into a 24x24 absolutely
+   positioned corner: the "Change photo" button measured 100x55px and wrapped
+   instead of sitting on one line. Two unrelated controls, two names. */
+.avatar-photo-dot { position: absolute; bottom: 0; right: 0; width: 24px; height: 24px; background: #17181c; color: #fff; border-radius: 50%; display: grid; place-items: center; cursor: pointer; border: 2px solid #fff; transition: background .15s; }
+[data-theme="dark"] .avatar-photo-dot { background: #3f3f46; border-color: #18181b; }
+.avatar-photo-dot:hover { background: #069de3; }
 .avatar-info { flex: 1; min-width: 0; }
 .avatar-hint { font-size: 12px; color: #9ca3af; margin: 0 0 6px; }
 
@@ -867,6 +926,16 @@ button { cursor: pointer; }
 .recent-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-client { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .recent-client-name { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+/* The name is a <button> so it can open the client detail panel, but it is
+   styled as plain text: a UA button would otherwise add a background, a border
+   and its own font. Resetting those keeps the row looking exactly as before,
+   then the hover/focus affordances are re-added deliberately so the name still
+   reads as clickable. `text-align:start` keeps it aligned in RTL, where the UA
+   default `center` would visually detach it from the name. */
+.recent-client-btn { background: transparent; border: 0; padding: 0; margin: 0; font: inherit; text-align: start; cursor: pointer; border-radius: 4px; }
+.recent-client-btn:hover { color: var(--azure); text-decoration: underline; text-underline-offset: 2px; }
+[data-theme="dark"] .recent-client-btn:hover { color: var(--azure-300); }
+.recent-client-btn:focus-visible { outline: 2px solid var(--azure); outline-offset: 2px; }
 /* The project is the point of this panel, so it is the value that carries the
    weight — not the header above it. */
 .recent-project { font-weight: 700; color: var(--ink); }
@@ -892,7 +961,11 @@ button { cursor: pointer; }
 .sp-perf-row { display: flex; align-items: center; gap: 8px; padding: 8px 18px; font-size: 12px; border-bottom: 1px solid #f3f4f6; }
 .sp-perf-row:last-child { border-bottom: 0; }
 [data-theme="dark"] .sp-perf-row { border-color: #27272a; }
-.sp-perf-avatar { width: 26px; height: 26px; background: #ede9fe; color: #7c3aed; border-radius: 50%; display: grid; place-items: center; font-size: 9px; font-weight: 800; flex-shrink: 0; }
+.sp-perf-avatar { width: 26px; height: 26px; background: #ede9fe; color: #7c3aed; border-radius: 50%; display: grid; place-items: center; font-size: 9px; font-weight: 800; flex-shrink: 0; overflow: hidden; }
+/* A rep's photo where one is stored, initials otherwise. `place-items: center`
+   already centres the fallback text, so only the image needs sizing — and it must
+   fill the circle rather than sit inside it, hence cover rather than contain. */
+.sp-perf-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .sp-perf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 600; }
 .sp-perf-stats { display: flex; gap: 6px; flex-shrink: 0; }
 .sp-perf-stats span { min-width: 18px; text-align: center; padding: 2px 5px; border-radius: 6px; font-size: 10px; font-weight: 700; }
@@ -913,7 +986,8 @@ button { cursor: pointer; }
 /* ── User management in settings ─────────────────── */
 .users-list { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--line); }
 .user-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f3f4f6; font-size: 13px; }
-.user-row-avatar { width: 32px; height: 32px; background: #ede9fe; color: #7c3aed; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+.user-row-avatar { width: 32px; height: 32px; background: #ede9fe; color: #7c3aed; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; flex-shrink: 0; overflow: hidden; }
+.user-row-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .user-row-info { flex: 1; min-width: 0; }
 .user-row-info strong { display: block; font-size: 13px; color: var(--ink); }
 .user-row-info small { display: block; font-size: 11px; color: #9ca3af; margin-top: 2px; }
@@ -964,6 +1038,15 @@ button { cursor: pointer; }
 .notif-new-dot { width: 7px; height: 7px; border-radius: 50%; background: transparent; margin-top: 5px; flex-shrink: 0; }
 .notif-item.unread .notif-new-dot { background: #069de3; }
 .notif-item strong { display: block; font-size: 12px; color: var(--ink); font-weight: 500; line-height: 1.4; }
+/* A notification that points at a client renders as a <button> so it can be
+   activated. Reset the UA button chrome — a background or border here would
+   fight the `.unread` tint above and make the whole dropdown look broken — then
+   re-add the affordances deliberately, including a dark hover so it does not
+   flash white. `text-align:start` keeps it aligned in RTL. */
+.notif-item-btn { width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line); font: inherit; text-align: start; cursor: pointer; }
+.notif-item-btn:hover { background: #eef4fb; }
+[data-theme="dark"] .notif-item-btn:hover { background: #23232a; }
+.notif-item-btn:focus-visible { outline: 2px solid var(--azure); outline-offset: -2px; }
 .notif-item small { display: block; font-size: 10px; color: #9ca3af; margin-top: 3px; }
 
 /* ─ Inline picker (saved list + add new) ─────────────── */
@@ -995,8 +1078,6 @@ button { cursor: pointer; }
 .mkt-hero{background:linear-gradient(135deg,#17181c 0%,#33344a 55%,#069de3 140%);color:#fff;border-radius:14px;padding:26px 28px 0;margin-bottom:20px;overflow:hidden;position:relative}
 .mkt-hero::after{content:"";position:absolute;inset:auto -60px -120px auto;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle,rgba(6, 157, 227,.24),transparent 70%)}
 .mkt-hero-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;position:relative;z-index:1}
-.mkt-hero h1{margin:6px 0 4px;font-size:26px;letter-spacing:-.8px;color:#fff}
-.mkt-hero p{margin:0;font-size:12.5px;color:rgba(255,255,255,.72)}
 .mkt-crumb{color:rgba(255,255,255,.6)}
 .mkt-hero-btn{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.24);color:#fff}
 .mkt-hero-btn:hover{background:rgba(255,255,255,.2)}
@@ -1049,6 +1130,14 @@ button { cursor: pointer; }
 .notif-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .notif-row-body strong { font-size: 13px; font-weight: 600; }
 .notif-row-body small { font-size: 11px; color: #9ca3af; }
+/* The message body becomes a button so a notification can open its client.
+   Reset the UA chrome — a default background/border would sit on top of the
+   `.is-unread` tint — then re-add the affordance plus a dark-mode hover, so it
+   cannot flash white like the other controls fixed earlier. */
+.notif-open { display: block; width: 100%; background: transparent; border: 0; padding: 0; font: inherit; text-align: start; cursor: pointer; border-radius: 5px; }
+.notif-open:hover strong { color: var(--azure); text-decoration: underline; text-underline-offset: 2px; }
+[data-theme="dark"] .notif-open:hover strong { color: var(--azure-300); }
+.notif-open:focus-visible { outline: 2px solid var(--azure); outline-offset: 2px; }
 .notif-allread { padding: 18px 14px; text-align: center; color: #16a34a; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .notif-footer { width: 100%; border: 0; border-top: 1px solid var(--line); background: #fff; color: #0379b4; font-size: 12px; font-weight: 600; padding: 11px; cursor: pointer; position: sticky; bottom: 0; }
 [data-theme="dark"] .notif-footer { background: #18181b; }
@@ -1079,8 +1168,14 @@ button { cursor: pointer; }
 .archive-filters.date-bar { margin-bottom: 10px; }
 .archive-filters.date-presets { margin-bottom: 16px; }
 .archive-filters.date-preset-btn.active { background: #8b5cf6; border-color: #8b5cf6; color: #fff; }
-[data-theme="dark"] .archive-filters.date-preset-btn.active { background: #6d28d9; border-color: #6d28d9; color: #c4b5fd; }
+[data-theme="dark"] .archive-filters.date-preset-btn.active { background: var(--azure); border-color: var(--azure); color: #fff; }
 [data-theme="dark"] .archive-note { background: #2a230b; border-color: #57470f; color: #fde68a; }
+/* An archived row now opens the client detail panel, so it has to LOOK
+   clickable and behave like one: the same hover tint as a clients-table row,
+   and a dark-theme override so the hover does not flash white. */
+.archive-row-clickable { cursor: pointer; }
+.archive-row-clickable:hover { background: #fafbff; }
+[data-theme="dark"] .archive-row-clickable:hover { background: #1e1e22; }
 
 /* ── Small button variant ─────────────────────────── */
 .btn-sm { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; border: 1px solid #dde1e6; background: #fff; color: #444; }
@@ -1211,9 +1306,68 @@ button { cursor: pointer; }
 [data-theme="dark"] .btn-danger:hover { background: #5c1010; }
 [data-theme="dark"] .btn-danger-outline { color: #fca5a5; border-color: #7f1d1d; }
 [data-theme="dark"] .btn-danger-outline:hover { background: #450a0a; }
-[data-theme="dark"] .detail-page { background: transparent; }
+/* (`.detail-page` was removed: the page now uses the standard `.content` frame,
+   which carries no background of its own.) */
 
 /* ── Login v2 (redesigned) ─────────────────────────── */
+/* The Sales Performance rep name is a button, so it has to shed the default
+   button chrome while keeping the row's existing type colour and sizing —
+   otherwise it renders as a grey box in the middle of the leaderboard. */
+.sp-perf-link { border: 0; background: transparent; padding: 0; text-align: start; cursor: pointer; font: inherit; border-radius: 4px; }
+.sp-perf-link:hover { color: var(--azure); text-decoration: underline; }
+.sp-perf-link:focus-visible { outline: 2px solid var(--azure); outline-offset: 2px; }
+[data-theme="dark"] .sp-perf-link:hover { color: var(--azure-300); }
+
+/* ---------- Profile page (/profile) ----------
+   The identity card plus the three count tiles.
+
+   The tiles are <button>s, not <div>s, because each one IS the filter for what
+   it counts: clicking "as 1st contact" narrows the table, clicking again clears
+   it. A non-interactive tile would have made the number a dead end. */
+.profile-summary { display: grid; grid-template-columns: minmax(250px, 1fr) 2fr; gap: 13px; margin-bottom: 15px; }
+.profile-card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: flex; align-items: center; gap: 14px; }
+/* The shared .profile-avatar is a 29px sidebar/header chip. On this page it is
+   the subject rather than a nav affordance, so it is scaled up and scoped to the
+   card rather than redefining the global rule. */
+.profile-card .profile-avatar { width: 46px; height: 46px; font-size: 15px; }
+/* The chip could only ever hold initials: it has no rule for an image at all, so
+   a photo inserted into it rendered at its natural size, spilling out of the
+   circle. Sized and clipped here, the same way `.user-avatar-lg img` already is. */
+.profile-avatar img,
+.top-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.profile-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.profile-id strong { font-size: 15px; font-weight: 700; color: var(--ink); }
+.profile-id small { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.profile-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+.profile-stat { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 4px; transition: border-color .12s, background .12s; }
+.profile-stat:hover { border-color: var(--azure-300); }
+.profile-stat strong { font-size: 24px; font-weight: 800; letter-spacing: -.8px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.profile-stat span { font-size: 11px; color: var(--muted); }
+.profile-stat.active { border-color: var(--azure); background: var(--azure-100); }
+/* The overdue tile is the one that needs action, so it is the only one that
+   carries a semantic colour rather than the brand accent. */
+.profile-stat.is-danger strong { color: #c85d4e; }
+.profile-stat.is-danger.active { border-color: #c85d4e; background: #fff0ed; }
+
+/* Pager for the profile table. Centred because it is the only control in the
+   panel footer here, unlike the clients page where it shares a row. */
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px 0 2px; }
+
+@media (max-width: 900px) { .profile-summary { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .profile-stats { grid-template-columns: 1fr; } }
+
+[data-theme="dark"] .profile-card,
+[data-theme="dark"] .profile-stat { background: #18181b; border-color: #2c2c31; }
+[data-theme="dark"] .profile-id strong,
+[data-theme="dark"] .profile-stat strong { color: var(--ink); }
+[data-theme="dark"] .profile-stat:hover { border-color: var(--azure); }
+[data-theme="dark"] .profile-stat.active { background: #0d2b3a; border-color: var(--azure); }
+[data-theme="dark"] .profile-stat.is-danger strong { color: #e08573; }
+[data-theme="dark"] .profile-stat.is-danger.active { background: #2d1414; border-color: #c85d4e; }
+
+/* "You are viewing X's profile" banner. The way-back button is pushed to the far
+   end with a logical margin so it lands on the correct side in Arabic too. */
+.profile-viewing .btn-outline { margin-inline-start: auto; }
 .login-v2-shell {
   min-height: 100vh;
   display: flex;
@@ -1895,6 +2049,22 @@ input.ltr-num { text-align: left; }
 }
 .kpi-value { color: var(--ink); }
 .kpi-label, .kpi-sub { color: var(--ink-faint); }
+/* Change against the previous period.
+   Green/red is the conventional signal for "more is better" — but two of the six
+   cards here are "Lost" and "Other", where more is WORSE. Inverting the colour
+   per card would leave two cards in the same row reading backwards against the
+   other four, so the ARROW carries the direction and the colour stays neutral.
+   The reader is never told "up" is good; they are told it went up.
+   `.is-none` is the dash shown when there is no comparison window ("all time")
+   or the previous value was 0, where a percentage is undefined. */
+.kpi-delta { display: inline-flex; align-items: center; gap: 4px; margin-top: 7px; font-size: 10px; font-weight: 700; }
+.kpi-delta-arrow { font-size: 8px; line-height: 1; }
+.kpi-delta.is-up { color: #16a34a; }
+.kpi-delta.is-down { color: #dc2626; }
+.kpi-delta.is-flat { color: var(--ink-faint); }
+.kpi-delta.is-none { color: var(--ink-faint); opacity: .6; }
+[data-theme="dark"] .kpi-delta.is-up { color: #4ade80; }
+[data-theme="dark"] .kpi-delta.is-down { color: #f87171; }
 .dashboard-page .kpi-card { padding: 18px 18px 14px; border-radius: 14px; }
 .dashboard-page .panel { border-radius: 18px; }
 
@@ -1931,10 +2101,20 @@ input.ltr-num { text-align: left; }
   .chart-tabs { width: 100%; overflow-x: auto; }
 }
 
-.modal,
+/* The glass treatment shared by overlays.
+
+   `position` is deliberately NOT in this group. It used to be, and setting it
+   to `relative` here silently overrode the `position: absolute` that .ms-menu
+   (line 571) and .dropdown-menu (line 444) each declare earlier. Both are
+   overlays: made relative they join normal layout flow instead of floating,
+   so they stretched their container and were clipped — which is what pushed the
+   Arabic filter dropdown off the right edge. Only .modal, which is genuinely
+   laid out in flow, takes a position from here. */
+.modal {
+  position: relative;
+}
 .ms-menu,
 .dropdown-menu {
-  position: relative;
   background: var(--glass-bg-strong);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
@@ -1984,18 +2164,136 @@ input.ltr-num { text-align: left; }
    single track. Header and body rows share `.client-row`, which is what keeps
    them aligned. The `fr` fallback below applies only before the inline style
    lands (e.g. server-rendered markup). */
+/* ── Metrics table (/metrics) ────────────────────────────────────────────
+   Spend and reach are columns of digits, so they get tabular figures — without
+   that the numbers jitter column to column as the digits change — and they are
+   START-aligned, header and figures together, so the column reads exactly like
+   CHANNEL / CAMPAIGN NAME / PERIOD / NOTES.
+
+   This alignment has been flipped end-ward twice chasing two different
+   complaints, and both mixed states were wrong: a label at the start with
+   right-aligned numbers reads as two unrelated things, and a label at the end
+   stops matching every other header. Start/end for both, and the resize handle
+   stays where it was (the trailing edge, where the drag maths needs it).
+   `tabular-nums` is kept either way so the digits still line up. */
+.r-num { text-align: start; font-variant-numeric: tabular-nums; }
+.client-head .col-head-cell.r-num { justify-content: flex-start; }
+/* The sort control inside a resizable column header.
+   Plain text, deliberately: `.btn-sm` is redefined at the bottom of this file to
+   an azure background (`background: var(--azure); color: #fff`), which beat the
+   transparent of the `.btn-ghost` it was combined with and painted the sortable
+   headers blue. This is a label that happens to be clickable, so it is styled
+   as one — muted text, no fill, a faint tint on hover/focus only.
+   The sort arrow lives in the ::after so the label text stays selectable-free. */
+.col-sort {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; border: 0; padding: 0;
+  font: inherit; font-weight: 600; letter-spacing: inherit;
+  color: var(--ink-faint); cursor: pointer; text-align: inherit;
+}
+.col-sort:hover { color: var(--ink); }
+.col-sort:focus-visible { outline: 2px solid var(--azure); outline-offset: 2px; border-radius: 3px; }
+/* User avatars. Three sizes, one look: the photo when there is one, tinted
+   initials otherwise. `.avatar-default` in settings is a different size and a
+   different tint, so these are declared here rather than reused — a member
+   should look the same in the table and in the panel. */
+.user-avatar-sm,
+.user-avatar-lg {
+  display: inline-grid; place-items: center; overflow: hidden;
+  background: #eef0ea; color: #676a5d; font-family: 'DM Mono', monospace;
+  border-radius: 50%; flex: 0 0 auto; line-height: 1;
+}
+.user-avatar-sm { width: 26px; height: 26px; font-size: 9px; }
+.user-avatar-lg { width: 60px; height: 60px; font-size: 18px; }
+.user-avatar-sm img,
+.user-avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
+/* Name cell: avatar beside the name, both on one baseline. */
+.user-name-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.user-name-cell b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Panel header: photo above the name, role badge below it. */
+.user-panel-head { display: flex; align-items: center; gap: 12px; margin: 6px 0 8px; }
+[data-theme="dark"] .user-avatar-sm,
+[data-theme="dark"] .user-avatar-lg { background: #232329; color: #9ca3af; }
+
+/* Photo picker in the users form. Its own classes rather than reusing settings'
+   `.avatar-row` / `.avatar-info`: those lay a hint PARAGRAPH out beside the
+   avatar, which here stacked the picker and the remove button vertically, and
+   `.btn-sm`'s fixed height + horizontal padding squeezed the label until its
+   text wrapped onto a second line under the icon.
+   `.avatar-upload-btn` deliberately does NOT carry `.btn-sm` — globals.css
+   redefines that to an azure fill, which made this a blue button. */
+.avatar-upload { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.avatar-upload-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+/* `.modal label { display: grid; gap: 7px; margin-bottom: 15px; color: …;
+   font-size: 11px }` (globals.css:95) is the generic form-label pattern — label
+   text stacked over its control. This button is a label that IS a control, and
+   `.modal label` outranks a bare class (one class plus a type beats one class),
+   so the camera icon and the caption were laid out as two grid ROWS: "Change
+   photo" rendered UNDER the icon in a 100x55px box, with `.modal label`'s colour,
+   font-size and 15px margin bleeding through too. Scoping these selectors under
+   `.avatar-upload` gives them two classes, which wins, and re-asserts exactly the
+   properties that rule was overriding. Verified: the button is now inline-flex at
+   its natural size, caption and icon side by side on one line. */
+.avatar-upload .avatar-upload-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  white-space: nowrap; cursor: pointer; margin: 0;
+  background: #fff; color: #444; border: 1px solid #dde1e6; border-radius: 7px;
+  padding: 8px 13px; font-size: 12px;
+}
+.avatar-upload .avatar-upload-btn:hover { background: #f9fafb; }
+[data-theme="dark"] .avatar-upload .avatar-upload-btn { background: #18181b; color: var(--ink); border-color: #3f3f46; }
+
+/* The two date inputs in the metrics filter bar. */
+.metrics-date { display: flex; flex-direction: column; gap: 5px; }
+.metrics-date label { font-size: 9px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); }
+.metrics-date input { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font-size: 12px; background: #fff; color: var(--ink); font-family: inherit; }
+/* Without this the inputs stayed white-on-white in dark mode: the rule above
+   hard-codes a light background, and native date inputs do not follow the
+   colour-scheme automatically. Same values marketing.css uses for the same
+   inputs on /marketing. */
+[data-theme="dark"] .metrics-date label { color: #94cdbf; }
+[data-theme="dark"] .metrics-date input { background: #101820; border-color: #344353; color: #e8eef5; }
+
 /* `width: max-content` makes the row exactly as wide as its tracks + gaps, so
    `.client-table` (overflow-x:auto) scrolls when the viewport is narrower. The
    old `min-width` on this rule would have sized the SCROLLER instead, letting
    the parent clip it rather than scroll. */
 .client-row { grid-template-columns: var(--ct-cols, 30px 42px 1.4fr .85fr .9fr 1fr 1fr .8fr 1.2fr .85fr .85fr .8fr .5fr); width: max-content; min-width: 100%; }
-.client-head .col-head-cell { position: relative; display: flex; align-items: center; min-width: 0; }
-/* The divider. A generous 10px hit area with a 2px line that only appears on
-   hover/focus, so a resting table does not look like a spreadsheet. */
+.client-head .col-head-cell { position: relative; display: flex; align-items: center; min-width: 0; /* MUST NOT be clipped. `.client-row > span` below sets `overflow:hidden` on
+      every cell to ellipsise long text, and `.col-head-cell` is one of those
+      spans. The resizer is positioned at `inset-inline-end:-5px` — deliberately
+      OUTSIDE the cell so it straddles the divider — so the generic rule sliced
+      the entire handle off and the table looked like it could not be resized
+      at all. This is the only cell type whose overflow must stay visible. */
+      overflow: visible; }
+/* The divider. A generous 10px hit area with a 3px line.
+   The line used to be `opacity: 0` and only appeared on hover, which read as
+   "this table cannot be resized" — the affordance was invisible until you
+   happened to drag over the exact 10px strip. It is now always visible in the
+   brand azure at a readable weight, and grows brighter on hover/focus, so the
+   resizable edges are discoverable without hunting for them.
+
+   `inset-inline-END`, not `-start`: the handle must sit on the column's
+   TRAILING edge — the right in English, the left in Arabic — because that is
+   the edge the drag maths moves. `delta = rtl ? startX - clientX : clientX -
+   startX` (ClientTable, UserTable, metrics, marketing) GROWS the column when
+   the pointer travels away from the trailing edge, mirroring the arrow keys,
+   so the strip the user grabs has to be the strip that travels with the cursor.
+   On the LEADING edge the handle landed on the PREVIOUS column's trailing edge
+   instead: the bar drawn after "Channel" belonged to the next column, the bar
+   for a right-aligned `.r-num` header such as Spend sat a whole column away
+   from its own label, and every drag moved a column the user had not grabbed —
+   it ran in reverse. An earlier revision flipped this to `-start` on the
+   mistaken premise that the trailing edge inverted the drag; it does the
+   opposite, and the maths has never changed. Leave this on `-end`. */
 .col-resizer { position: absolute; top: 0; bottom: 0; inset-inline-end: -5px; width: 10px; cursor: col-resize; touch-action: none; display: grid; place-items: center; z-index: 2; }
-.col-resizer::after { content: ""; width: 2px; height: 60%; border-radius: 2px; background: var(--azure); opacity: 0; transition: opacity .12s ease, height .12s ease; }
-.col-resizer:hover::after, .col-resizer:focus-visible::after { opacity: .85; height: 80%; }
+.col-resizer::after { content: ""; width: 3px; height: 70%; border-radius: 2px; background: var(--azure); opacity: .55; transition: opacity .12s ease, height .12s ease, box-shadow .12s ease; box-shadow: 0 0 0 1px rgba(255,255,255,.55); }
+.col-resizer:hover::after, .col-resizer:focus-visible::after { opacity: 1; height: 90%; box-shadow: 0 0 0 1px rgba(255,255,255,.8); }
 .col-resizer:focus-visible { outline: 2px solid var(--azure); outline-offset: -2px; border-radius: 3px; }
+/* The white keyline exists only so the divider stays legible against a light
+   header; on navy it would vanish, so it is dropped there. */
+[data-theme="dark"] .col-resizer::after { background: var(--azure-300); opacity: .75; box-shadow: none; }
+[data-theme="dark"] .col-resizer:hover::after, [data-theme="dark"] .col-resizer:focus-visible::after { background: var(--azure-300); opacity: 1; }
 /* Cells clip their text so a long project/operation cannot push the grid. */
 .client-row > span, .client-row > .status-pill { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
@@ -2162,7 +2460,18 @@ input.ltr-num { text-align: left; }
 
 /* Dropdown accents were still the retired purple, which read as a second brand
    next to the azure buttons. */
-.ms-trigger:hover { border-color: var(--azure-300); color: var(--ink); }
+/* Hover restated explicitly on BOTH themes.
+   The light-theme rule further down this file (in the v2 block) sets only
+   `color`, so a hovered chip kept whatever background the element already had —
+   in dark mode that meant light text on a dark surface, which read as a white
+   flash with invisible label text. Naming the background here is what fixes it. */
+.ms-trigger:hover { background: #f3f4f6; border-color: var(--azure-300); color: var(--ink); }
+[data-theme="dark"] .ms-trigger:hover,
+[data-theme="dark"] .picker-trigger:hover,
+[data-theme="dark"] .select-input:hover { background: #232328; border-color: #52525b; color: #e4e4e7; }
+[data-theme="dark"] .ms-trigger.ms-active:hover,
+[data-theme="dark"] .picker-trigger.ms-active:hover,
+[data-theme="dark"] .select-input.ms-active:hover { background: #2a2145; border-color: #7c3aed; color: #ddd6fe; }
 .ms-trigger.ms-active { border-color: var(--azure); color: var(--navy-700); background: var(--azure-100); }
 .picker-trigger:hover { border-color: var(--azure-300); }
 .ms-opt-row.ms-opt-on { background: var(--azure-100); }
@@ -2220,6 +2529,17 @@ input.ltr-num { text-align: left; }
   outline: none;
 }
 .options-name-input:focus { border-color: var(--azure); box-shadow: 0 0 0 3px rgba(6, 157, 227, .15); }
+/* The add-value field and the rename field both ship `color: var(--ink)` on a
+   hardcoded `background: #fff`, with no dark override anywhere — so in night
+   mode `--ink` resolves to #e8f1f8 and the typed text is near-white on a white
+   box: invisible. Every sibling row on this page (.options-section-toggle,
+   .options-row, .options-tag, .options-bulk-bar) got a dark rule; these two
+   inputs were simply missed. `::placeholder` is set too, because the UA default
+   grey is also too light against #18181b. */
+[data-theme="dark"] .options-name-input,
+[data-theme="dark"] .options-rename-input { background: #18181b; border-color: #2c2c31; color: var(--ink); }
+[data-theme="dark"] .options-name-input::placeholder,
+[data-theme="dark"] .options-rename-input::placeholder { color: #71717a; }
 
 /* The native <input type="color"> is visually replaced by a swatch. Opacity 0
    keeps it clickable and keyboard-focusable while the preview shows the value;
@@ -2246,6 +2566,21 @@ input.ltr-num { text-align: left; }
 }
 .options-color-input:focus-within .options-color-preview { box-shadow: 0 0 0 3px rgba(6, 157, 227, .25); }
 
+/* Saved-options disclosure. A full-width row between the built-in list and the
+   saved list, with the caret rotated by a class rather than a transform so the
+   rotation composes with the icon's own positioning. */
+.options-section-toggle {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  margin: 10px 0 6px; padding: 9px 10px;
+  background: var(--paper-2, #fafbfc); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+  color: #6b7280; cursor: pointer; text-align: start;
+}
+.options-section-toggle:hover { background: #f1f5f9; color: var(--ink); }
+.options-section-toggle svg { transition: transform .15s ease; flex: none; }
+.options-section-toggle .options-caret-open { transform: rotate(180deg); }
+[data-theme="dark"] .options-section-toggle { background: #18181b; border-color: #2c2c31; color: #a1a1aa; }
+[data-theme="dark"] .options-section-toggle:hover { background: #23232a; color: #e4e4e7; }
 .options-list { display: flex; flex-direction: column; }
 .options-row {
   display: flex;
@@ -2339,9 +2674,141 @@ input.ltr-num { text-align: left; }
 .options-actions .icon-btn-sm:disabled { opacity: .32; cursor: not-allowed; }
 .options-actions .icon-btn-sm:disabled:hover { background: transparent; color: #9ca3af; }
 
+/* Bucket picker on a status row: which dashboard card its clients count in.
+   Sits between the usage count and the action buttons, and is suppressed on
+   narrow screens exactly like the usage count — the row keeps its checkbox,
+   swatch, name and controls, which are what the page is actually for. */
+.options-bucket { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.options-bucket-label { font-size: 10px; color: var(--muted); white-space: nowrap; }
+/* The shared .ms-trigger floor is 128px, which is far wider than this control
+   needs and would push the row's action buttons out of view. */
+.options-bucket .ms-trigger { min-width: 0; width: auto; height: 26px; font-size: 11px; }
+
+/* Clients filter bar only (ClientFilterBar). The base .filter-row is a 5-column
+   grid, which fits the dashboard's search-plus-four-dropdown rows but not this one:
+   the bar holds seven items (search, five dropdowns, the follow-up chips), so the
+   sixth and seventh fell onto an implicit second row and the chips were squeezed
+   into a narrow 1fr track, where their own wrap stacked them into a ragged column.
+   Flex instead, with each chip group pinned to its natural width so it is never
+   crushed again; the other dropdowns keep the 128-220px range .ms-trigger allows.
+   Scoped to the modifier so the dashboard rows are untouched. */
+.filter-row--bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.filter-row--bar > .search-box { flex: 1 1 220px; }
+.filter-row--bar > .ms-wrap { flex: 1 1 150px; max-width: 220px; min-width: 0; }
+.filter-row--bar > .followup-filter { flex: 0 0 auto; }
+
+/* Follow-up bucket chips in the clients filter bar. Four small toggles that double
+   as their own off switch (re-clicking the active one clears it). Sized and spaced
+   to match the other controls in the same row (.ms-trigger and .search-box are both
+   36px tall), so the bar reads as one row of filters rather than a list. */
+.followup-filter { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.followup-chip {
+  /* Inline-flex, not a plain button: the count badge is set one point smaller in a
+     monospace face, so a normal inline box leaves it sitting slightly high against
+     the label. Centring both on one baseline is what makes the row look aligned. */
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  height: 36px; border: 1px solid #dfe2e6; background: #fff; color: #6b7280;
+  border-radius: 18px; padding: 0 12px;
+  font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.followup-chip:hover { background: #f3f4f6; color: #111827; border-color: #c9d1d9; }
+/* The count beside each chip. It exists so a bucket that is legitimately empty
+   says "0" instead of looking like a filter that is not filtering — which is
+   indistinguishable without it, and is why the chips read as broken while no
+   client carried a date. Muted so it never competes with the label, and inverted
+   to a translucent white when the chip is active so it stays legible on the
+   azure/red fill. */
+.followup-chip-count {
+  /* No margin-inline-start any more: the chip's `gap` spaces label and badge in
+     both directions, so this no longer needs a manual inset that RTL would flip. */
+  flex: 0 0 auto; white-space: nowrap;
+  padding: 1px 6px; border-radius: 9px;
+  background: #eef0f3; color: #6b7280;
+  font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.followup-chip.active .followup-chip-count { background: rgba(255, 255, 255, .22); color: inherit; }
+[data-theme="dark"] .followup-chip-count { background: #2c2c31; color: #a1a1aa; }
+[data-theme="dark"] .followup-chip.active .followup-chip-count { background: rgba(255, 255, 255, .2); color: #fff; }
+.followup-chip.active { background: var(--azure); border-color: var(--azure); color: #fff; }
+.followup-chip.is-overdue.active { background: #dc2626; border-color: #dc2626; }
+[data-theme="dark"] .followup-chip { background: #18181b; border-color: #2c2c31; color: #a1a1aa; }
+[data-theme="dark"] .followup-chip:hover { background: #232328; color: #e4e4e7; border-color: #52525b; }
+[data-theme="dark"] .followup-chip.active { background: var(--azure); border-color: var(--azure); color: #fff; }
+[data-theme="dark"] .followup-chip.is-overdue.active { background: #b91c1c; border-color: #b91c1c; }
+
+/* Dashboard follow-up strip. Only rendered when something is actually due, so it
+   costs no space on a quiet day. */
+.followup-strip { display: flex; gap: 10px; margin-bottom: 16px; }
+.followup-tile {
+  display: flex; align-items: baseline; gap: 8px; padding: 10px 16px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--glass-bg);
+  cursor: pointer; font: inherit; color: var(--ink);
+}
+.followup-tile strong { font-size: 20px; font-weight: 800; letter-spacing: -.5px; }
+.followup-tile span { font-size: 11px; color: var(--muted); }
+.followup-tile.is-danger strong { color: #dc2626; }
+.followup-tile.is-warn strong { color: #b45309; }
+.followup-tile:hover { border-color: var(--azure-300); }
+[data-theme="dark"] .followup-tile.is-danger strong { color: #f87171; }
+[data-theme="dark"] .followup-tile.is-warn strong { color: #fbbf24; }
+/* Follow-up date inside the shared detail panel. */
+.followup-panel { display: inline-flex; align-items: center; gap: 8px; }
+.followup-panel.is-overdue { color: #dc2626; font-weight: 600; }
+[data-theme="dark"] .followup-panel.is-overdue { color: #f87171; }
+.followup-overdue { font-style: normal; font-size: 10px; background: #fee2e2; color: #b91c1c; border-radius: 20px; padding: 2px 8px; }
+[data-theme="dark"] .followup-overdue { background: #450a0a; color: #fca5a5; }
+
+.followup-cell.is-overdue { color: #dc2626; font-weight: 600; }
+[data-theme="dark"] .followup-cell.is-overdue { color: #f87171; }
+/* Follow-up row in the edit modal: the date input plus its quick presets. */
+.followup-field { display: flex; flex-direction: column; gap: 8px; }
+.followup-field input { max-width: 220px; }
+.followup-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+
 @media (max-width: 700px) {
   .options-add-row { padding: 12px 14px; }
   .options-row { padding: 0 14px; }
   .options-usage { display: none; }
+  /* Dropped with the usage count for the same reason: the row keeps its
+     checkbox, swatch, name and controls, which are what the page is for. */
+  .options-bucket { display: none; }
 }
+/* ── Dark theme: hover states that light-flash ──────────────────────────────
+   Every rule here is a `:hover` background that was only ever defined for the
+   light theme, on a control whose dark-theme base colour is `var(--ink)`.
+
+   In dark, `--ink` resolves to #e8f1f8 — near-white. So a hover that paints a
+   light background (#f9fafb, #f3f4f6, #fff) under that text renders WHITE TEXT
+   ON A WHITE BACKGROUND: the label disappears instead of highlighting. That is
+   the "hover makes the background white and the text white" symptom.
+
+   These have to live at the END of the file rather than beside each control:
+   several of the base dark rules (e.g. `[data-theme="dark"] .btn-outline` at
+   the top of the file) share the same specificity as the light `:hover` rule
+   and would otherwise win by source order, leaving the flash in place. Grouped
+   here so the whole class of bug is fixed in one auditable place, and so a new
+   control has an obvious template to copy. */
+[data-theme="dark"] .btn-outline:hover { background: #1e1e22; color: var(--ink); }
+[data-theme="dark"] .btn-danger:hover { background: #450a0a; color: #fca5a5; }
+[data-theme="dark"] .btn-primary:hover { background: #2d2e34; }
+
+/* The dropdown in the header paints its own surface, so its items need their
+   own hover — `.dropdown-menu` only ever had a dark BACKGROUND, never a dark
+   item hover. */
+[data-theme="dark"] .dropdown-menu button:hover { background: #1e1e22; }
+[data-theme="dark"] .dropdown-menu .dropdown-danger:hover { background: #450a0a; color: #fca5a5; }
+
+/* The date presets shipped with `background:#fff` and never got a dark rule at
+   all, so they were white pills on a navy page even at rest — and hovering
+   painted #f3f4f6 with #111827 text on top. */
+[data-theme="dark"] .date-preset-btn { background: #18181b; color: #a1a1aa; border-color: #2c2c31; }
+[data-theme="dark"] .date-preset-btn:hover { background: #232328; color: #e4e4e7; border-color: #52525b; }
+[data-theme="dark"] .date-preset-btn.active { background: var(--azure); border-color: var(--azure); color: #fff; }
+[data-theme="dark"] .archive-filters.date-preset-btn.active { background: var(--azure); border-color: var(--azure); color: #fff; }
+
+/* Safety net for any control that pairs a light hover with `var(--ink)` text:
+   the search box and date inputs sit in the filter row beside these buttons. */
+[data-theme="dark"] .search-box:hover,
+[data-theme="dark"] .date-bar input:hover { background: #232328; border-color: #52525b; }
 

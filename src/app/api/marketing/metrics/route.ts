@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
-import { createMetric, databaseErrorMessage, deleteMetric, listMetrics, updateMetric } from "@/lib/db";
+import { createMetric, databaseErrorMessage, deleteMetric, deleteMetrics, listMetrics, updateMetric } from "@/lib/db";
 import { parseChannel } from "@/lib/reporting";
 
 /** Every method here is admin-only. */
@@ -135,6 +135,21 @@ export async function DELETE(request: NextRequest) {
   if (g.error) return g.error;
 
   const body = await request.json().catch(() => ({}));
+
+  /* Bulk form: `{ ids: [...] }`, checked first. "Delete selected" on the entries
+     table would otherwise need one request per row, with no way to report which
+     of them actually went if a later one failed. */
+  if (Array.isArray(body.ids)) {
+    const ids = body.ids.filter((id: unknown): id is string => typeof id === "string" && id.trim() !== "");
+    if (ids.length === 0) return NextResponse.json({ error: "Missing ids" }, { status: 400 });
+    try {
+      const deleted = await deleteMetrics(ids);
+      return NextResponse.json({ deleted, requested: ids.length });
+    } catch (error) {
+      return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
+    }
+  }
+
   const id = String(body.id ?? "").trim();
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 

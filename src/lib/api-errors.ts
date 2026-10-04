@@ -34,6 +34,10 @@ const MESSAGES: Record<string, string> = {
   "Client not found": "errors.clientNotFound",
   "Not found": "errors.notFound",
   "Invalid acquisition channel": "errors.channelInvalid",
+  // Schema rejections used to answer with Zod's `flatten()` object, which
+  // `apiErrorMessage` cannot read — every rejected field surfaced as
+  // "Something went wrong". The route now sends a plain string instead.
+  "Client details are incomplete": "errors.clientIncomplete",
   "Invalid channel": "errors.channelInvalid",
   "Only admins can archive or restore clients": "errors.adminArchiveOnly",
   "Only admins can permanently delete clients. Archive it instead.": "errors.adminDeleteOnly",

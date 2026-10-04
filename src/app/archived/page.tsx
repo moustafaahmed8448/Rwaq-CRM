@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Archive, ArchiveRestore, Trash2, Search, UsersRound, AlertCircle, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
+import ClientDetailPanel from "@/components/ClientDetailPanel";
 import MultiSelect from "@/components/MultiSelect";
 import { useLang } from "@/lib/i18n";
 import { apiErrorMessage } from "@/lib/api-errors";
@@ -56,6 +57,12 @@ export default function ArchivedPage() {
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  /* The client whose detail panel is open. The panel itself is the SAME
+     component the clients page uses (see components/ClientDetailPanel.tsx) —
+     an archived client is inspected the same way a live one is. It used to be
+     unreachable from here, so the only way to read an archived client's notes
+     or history was to restore them into the live book first. */
+  const [detailClient, setDetailClient] = useState<Client | null>(null);
 
   const isAdmin = user?.role === "Admin";
   // Shared colour map, so a recoloured channel or status matches everywhere.
@@ -262,7 +269,10 @@ export default function ArchivedPage() {
           )}
 
           {shown.map((c) => (
-            <div className="archive-row" key={c.id}>
+            /* Clickable, exactly like a row on the clients table: opens the same
+               detail panel. `cursor:pointer` comes from `.archive-row` in the
+               stylesheet so the affordance is visible before the click. */
+            <div className="archive-row archive-row-clickable" key={c.id} onClick={() => setDetailClient(c)}>
               <span className="id-cell" title={t("th.id")}>#{c.id}</span>
               <span className="rc-avatar">{c.name.slice(0, 2).toUpperCase()}</span>
               <div className="archive-info">
@@ -279,11 +289,11 @@ export default function ArchivedPage() {
                 {c.archivedAt ? t("common.archivedOn", { date: new Date(c.archivedAt).toLocaleDateString(dateLocale(lang)) }) : t("archive.archivedLabel")}
               </span>
               <div className="archive-actions">
-                {isAdmin && <button className="btn-outline btn-sm" disabled={busyId === c.id} onClick={() => restore(c)}>
+                {isAdmin && <button className="btn-outline btn-sm" disabled={busyId === c.id} onClick={e => { e.stopPropagation(); restore(c); }}>
                   <ArchiveRestore size={13} />{t("clients.restore")}
                 </button>}
                 {isAdmin && (
-                  <button className="icon-btn danger" title={t("archive.deleteTitle")} disabled={busyId === c.id} onClick={() => destroy(c)}>
+                  <button className="icon-btn danger" title={t("archive.deleteTitle")} disabled={busyId === c.id} onClick={e => { e.stopPropagation(); destroy(c); }}>
                     <Trash2 size={14} />
                   </button>
                 )}
@@ -292,6 +302,21 @@ export default function ArchivedPage() {
           ))}
         </section>
       </div>
+
+      {/* Same panel as the clients page. No `onEdit` and no `statusControl`: an
+          archived client is out of the book, so editing it here would be
+          misleading, and the panel falls back to a read-only status pill.
+          `onArchive` is omitted because the client is already archived — the
+          only lifecycle action left is Restore, which lives on the row. */}
+      {detailClient && (
+        <ClientDetailPanel
+          client={detailClient}
+          onClose={() => setDetailClient(null)}
+          onDelete={isAdmin ? () => { const target = detailClient; setDetailClient(null); destroy(target); } : undefined}
+          t={t}
+          lang={lang}
+        />
+      )}
 
       {toast && <div className="toast-single">{toast}</div>}
     </div>

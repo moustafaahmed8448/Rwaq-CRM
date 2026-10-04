@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart as BChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
   AreaChart, Area, PieChart, Pie, Cell,
 } from "recharts";
 import {
-  Plus, Download, Trash2, Edit3, X, Save, TrendingUp, TrendingDown, DollarSign,
+  Plus, Download, Trash2, Edit3, TrendingUp, TrendingDown, DollarSign,
   Eye as EyeIcon, MousePointer, Layers, ArrowUpRight, ArrowDownRight, Calendar,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
-import RefPicker from "@/components/RefPicker";
+import MetricFormModal from "@/components/MetricFormModal";
 import MultiSelect from "@/components/MultiSelect";
+import { useMetricEditor } from "@/lib/use-metric-editor";
+import { useMetricSelection } from "@/lib/use-metric-selection";
 import { useLang } from "@/lib/i18n";
 import type { MarketingMetric } from "@/lib/types";
 import { num, sar, dateLocale } from "@/lib/format";
@@ -21,6 +23,13 @@ import { optionColor } from "@/lib/ref-options";
 import { useOptionColors } from "@/lib/option-colors";
 import { apiErrorMessage } from "@/lib/api-errors";
 import { downloadFile, exportQuery } from "@/lib/download";
+import {
+  MARKETING_COLUMNS,
+  gridTemplate,
+  type MarketingColumnKey,
+  type ResolvedMarketingColumn,
+} from "@/lib/marketing-columns";
+import { useColumnLayout } from "@/lib/use-column-layout";
 import "./marketing.css";
 
 type User = { name: string; initials: string; role: string; email?: string };
@@ -89,25 +98,17 @@ export default function MarketingPage() {
   const [user, setUser] = useState<User | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [metrics, setMetrics] = useState<MarketingMetric[]>([]);
+  /* Entries table paging. Reset to 1 by every filter change below — see
+     `resetPage`, which the filter handlers call. */
+  const [page, setPage] = useState(1);
   const [customChannels, setCustomChannels] = useState<string[]>([]);
   // Only saved (custom) channels can be deleted; built-ins are code constants.
   const [removableChannels, setRemovableChannels] = useState<string[]>([]);
   const [channelUsage, setChannelUsage] = useState<Record<string, number>>({});
-  const [showForm, setShowForm] = useState(false);
   // Campaign figures are company-wide, so every role can view this page; only an
   // admin may add, edit or delete a metric. The API enforces that too, so this is
   // about matching the UI to what the server will actually allow.
   const canEdit = user?.role === "Admin";
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: "", channel: "FACEBOOK", startDate: "", endDate: "",
-    spend: "", reach: "", impressions: "", clicks: "", notes: "",
-    customChannelName: "",
-  });
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  // A failed save used to be completely silent: `if (res.ok)` had no else
-  // branch, so a 500 / 409 / 403 looked identical to clicking nothing.
-  const [saveError, setSaveError] = useState("");
   const [loading, setLoading] = useState(true);
   // Channel colours now resolve through the shared store, so a colour an admin
   // sets on the options page shows on this page's charts and tables too. The
@@ -124,13 +125,58 @@ export default function MarketingPage() {
   const [toDate, setToDate] = useState("");
   const [channelFilters, setChannelFilters] = useState<string[]>([]);
 
+  /* ── Entries table layout ──
+     Column widths are persisted per user (`marketingColumns` on AppUser) via the
+     SAME hook the clients and profile tables use, so drag-to-resize behaves
+     identically here and the save is one debounced PATCH rather than a request
+     per pixel. Hydrated when /api/auth/me resolves, below. */
+  const { columns, commit, hydrate } = useColumnLayout(MARKETING_COLUMNS, "marketingColumns");
+
+  /* ── Row selection ──
+     Cross-PAGE rather than per-page: the point of ticking rows is to export or
+     delete a specific set, which rarely fits inside one 25-row page. Cleared by
+     `resetView` whenever a filter changes, so the count in the bar always
+     describes rows you can actually see. */
+  const rtl = lang === "ar";
+
+  /* Live drag preview. Widths are applied to `layout` on every pointer move and
+     committed once on release, so a drag produces one save instead of one per
+     pixel — same split ClientTable uses. */
+  const [draft, setDraft] = useState<{ key: MarketingColumnKey; w: number } | null>(null);
+  const drag = useRef<{ key: MarketingColumnKey; startX: number; startW: number } | null>(null);
+
   const loadMetrics = async () => {
     setLoading(true);
     const res = await fetch("/api/marketing/metrics");
-    const d = await res.json() as { metrics?: MarketingMetric[] }; 
+    const d = await res.json() as { metrics?: MarketingMetric[] };
     setMetrics(d.metrics ?? []);
     setLoading(false);
   };
+
+  /* Add / edit / delete for a campaign row, and the modal that renders them, both
+     moved out to `@/lib/use-metric-editor` and `@/components/MetricFormModal`.
+     They lived here and nowhere else, which is exactly why /metrics could list
+     the same campaigns with no way to change one. `onChannelsChanged` hands back
+     all three channel fields, not just the names, so this page's filter-bar picker
+     does not go stale after a channel is created or removed inside the modal. */
+  const metricEditor = useMetricEditor({
+    t,
+    reload: loadMetrics,
+    onChannelsChanged: ({ channels, removable, usage }) => {
+      setCustomChannels(channels);
+      setRemovableChannels(removable);
+      setChannelUsage(usage);
+    },
+  });
+
+  /* Row selection, extracted to `@/lib/use-metric-selection` and shared with
+     /metrics. Destructured under the old names so the JSX below is unchanged;
+     the two "all" helpers now take the rows to act on, because "select all" means
+     all rows ON SCREEN and the hook cannot know what this page is showing. */
+  const {
+    selectedIds, deleting, toggleSelect, toggleSelectAll, pageAllSelected,
+    clearSelection, exportSelected, deleteSelected,
+  } = useMetricSelection({ t, reload: loadMetrics });
   useEffect(() => {
     fetch("/api/auth/me").then(async r => {
       if (!r.ok) { router.replace("/login"); return; }
@@ -140,14 +186,18 @@ export default function MarketingPage() {
       // figures, not per-rep. Writes stay admin-only — the API rejects them and
       // the controls are hidden below.
       setUser(d.user);
+      // Adopt this user's saved marketing-column widths, if any.
+      hydrate(d.user.marketingColumns);
       await loadMetrics();
       fetch("/api/channels").then(r => r.json()).then(d => { setCustomChannels(d.channels ?? DEFAULT_CHANNELS); setRemovableChannels(d.removable ?? []); setChannelUsage(d.usage ?? {}); }).catch(() => {});
     }).catch(() => {});
+    // `hydrate` is a stable useCallback (its only dep is the module-level
+    // registry), so listing it costs nothing and keeps the lint honest.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     const stored = localStorage.getItem("rwaq-dark");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stored === "1") setDarkMode(true);
-  }, [router]);
+  }, [router, hydrate]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
@@ -156,113 +206,32 @@ export default function MarketingPage() {
 
 
   const allChannels = [...DEFAULT_CHANNELS, ...customChannels.filter(ch => !DEFAULT_CHANNELS.includes(ch))];
-  const openAdd = () => {
-    setEditingId(null);
-    setForm({ name: "", channel: "FACEBOOK", startDate: "", endDate: "", spend: "", reach: "", impressions: "", clicks: "", notes: "", customChannelName: "" });
-    setFormErrors({});
-    setSaveError("");
-    setShowForm(true);
-  };
-  const openEdit = (m: MarketingMetric) => {
-    setEditingId(m.id);
-    setForm({ name: m.name ?? "", channel: m.channel, startDate: m.startDate, endDate: m.endDate, spend: String(m.spend), reach: String(m.reach), impressions: String(m.impressions), clicks: String(m.clicks), notes: m.notes ?? "", customChannelName: "" });
-    setFormErrors({});
-    setSaveError("");
-    setShowForm(true);
-  };
-  const closeForm = () => { setShowForm(false); setSaveError(""); setFormErrors({}); };
 
-  /** Editing a field clears just that field's error. */
-  const clearError = (key: string) => {
-    setFormErrors((prev) => (prev[key] ? { ...prev, [key]: "" } : prev));
-    setSaveError("");
-  };
-
-  /** Creates a new channel and returns its stored (upper-cased) value. */
-  const addChannel = async (label: string): Promise<string> => {
-    const ch = label.trim().toUpperCase().replace(/\s+/g, "_");
-    if (!ch) return label;
-    await fetch("/api/channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: ch }) }).catch(() => {});
-    const r = await fetch("/api/channels").then((x) => x.json() as { channels?: string[]; removable?: string[]; usage?: Record<string, number> }).catch((): { channels?: string[]; removable?: string[]; usage?: Record<string, number> } => ({}));
-    setCustomChannels(r.channels ?? customChannels);
+  /* The filter bar's channel picker deletes too, and its failure has to be
+     visible: the editor hook's error line only exists while the modal is open, so
+     this reports with the same `alert` the export button already uses rather than
+     failing silently. All three fields come back on the DELETE response, so one
+     request restores the page's channel state — the old inline version blanked
+     `removable`/`usage` instead, which is what made the remaining options' trash
+     icons disappear after one delete. */
+  const removeChannelFromFilter = async (label: string) => {
+    const res = await fetch("/api/channels", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      alert(t("mkt.saveFailed"));
+      return;
+    }
+    const r = (await res.json().catch(() => ({}))) as {
+      channels?: string[];
+      removable?: string[];
+      usage?: Record<string, number>;
+    };
+    setCustomChannels(r.channels ?? []);
     setRemovableChannels(r.removable ?? []);
     setChannelUsage(r.usage ?? {});
-    return ch;
-  };
-
-  /**
-   * Deletes a saved channel from the reference list.
-   *
-   * Only admins reach this (the button is not rendered otherwise), and the API
-   * independently refuses to delete a built-in or a channel still used by
-   * clients — the picker's own `used === 0` gate is the matching UI guard.
-   */
-  const removeChannel = async (label: string) => {
-    const res = await fetch("/api/channels", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label }) }).catch(() => null);
-    if (!res || !res.ok) {
-      const err = res ? await res.json().catch(() => ({})) : null;
-      setSaveError(apiErrorMessage(t, (err as { error?: unknown })?.error));
-      return;
-    }
-    const r = await res.json().catch(() => ({}));
-    setCustomChannels(r.channels ?? []);
-    setRemovableChannels([]);
-    setChannelUsage({});
-    // Drop it from the form if it was the selected channel.
-    setForm((f) => (f.channel === label ? { ...f, channel: "FACEBOOK" } : f));
-  };
-
-  const handleSubmit = async () => {
-    // The picker creates custom channels as you type them, so there is no
-    // separate "__custom__" branch to resolve here any more.
-    const channel = form.channel;
-    const errors: Record<string, string> = {};
-    if (!form.channel) errors.channel = t("form.required");
-    if (!form.startDate) errors.startDate = t("form.required");
-    if (!form.endDate) errors.endDate = t("form.required");
-    if (form.startDate && form.endDate && form.startDate > form.endDate) errors.endDate = t("form.afterStart");
-    if (!form.spend && form.spend !== "0") errors.spend = t("form.required");
-    if (Object.keys(errors).length > 0) {
-      setFormErrors(errors);
-      setSaveError(t("form.fixErrors"));
-      return;
-    }
-    setFormErrors({});
-    setSaveError("");
-
-    const body = { name: form.name, channel, startDate: form.startDate, endDate: form.endDate, spend: Number(form.spend), reach: Number(form.reach ?? 0), impressions: Number(form.impressions ?? 0), clicks: Number(form.clicks ?? 0), notes: form.notes };
-
-    const res = editingId
-      ? await fetch("/api/marketing/metrics", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingId, ...body }) })
-      : await fetch("/api/marketing/metrics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-
-    if (res.ok) {
-      await loadMetrics();
-      setShowForm(false);
-      setSaveError("");
-      setForm({ name: "", channel: "FACEBOOK", startDate: "", endDate: "", spend: "", reach: "", impressions: "", clicks: "", notes: "", customChannelName: "" });
-      return;
-    }
-
-    // The failure branch that used to be missing. Without it a 500, a 409
-    // "duplicate metric" and a 403 all looked like clicking nothing happened.
-    let detail: unknown;
-    try {
-      detail = (await res.json()) as { error?: unknown };
-    } catch {
-      detail = undefined;
-    }
-    setSaveError(
-      typeof (detail as { error?: unknown })?.error === "string"
-        ? apiErrorMessage(t, (detail as { error: string }).error)
-        : t("mkt.saveFailed"),
-    );
-  };
-
-  const deleteMetric = async (id: string) => {
-    if (!confirm(t("mkt.deleteConfirm"))) return;
-    await fetch("/api/marketing/metrics", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
-    await loadMetrics();
   };
 
   // The active window is the preset's, unless the admin typed a custom range —
@@ -289,6 +258,32 @@ export default function MarketingPage() {
     return true;
   }), [metrics, channelFilters, activeWindow]);
 
+  /* Entries table paging.
+
+     Newest FIRST, which is a behaviour change: this table used to render
+     `slice(-10).reverse()`, i.e. only the last ten rows, so anything older was
+     unreachable from this page. It is also the order the API returns them in, so
+     sorting here rather than reversing per-page keeps page 1 stable no matter
+     which page you come back to.
+
+     Slicing in the browser rather than paging the API: the whole point of the
+     KPI cards, the two charts and the export is that they describe every matching
+     row, so the page already needs the full filtered set in memory. One extra
+     slice is free by comparison. */
+  const PAGE_SIZE = 25;
+  const pagedMetrics = useMemo(() => {
+    const sorted = [...filteredMetrics].sort((a, b) => {
+      // endDate first so the most recently finished window is on top; id breaks
+      // ties because two channels in the same week share both dates, and without
+      // it the order would depend on the database's row order.
+      const byDate = String(b.endDate).localeCompare(String(a.endDate));
+      return byDate !== 0 ? byDate : a.id.localeCompare(b.id);
+    });
+    const start = (page - 1) * PAGE_SIZE;
+    return sorted.slice(start, start + PAGE_SIZE);
+  }, [filteredMetrics, page]);
+  const totalPages = Math.max(1, Math.ceil(filteredMetrics.length / PAGE_SIZE));
+
   /**
    * Whether anything is narrowing the view, which gates the clear button.
    *
@@ -297,13 +292,94 @@ export default function MarketingPage() {
    */
   const hasFilters = (activePreset?.kind ?? "all") !== "all" || Boolean(fromDate) || Boolean(toDate) || channelFilters.length > 0;
 
-  /** Back to the state the page opens in: all time, all channels. */
+  /**
+   * Paging and selection both describe "the view you are looking at", so every
+   * filter change resets both together. Keeping them as one helper means a filter
+   * added later cannot forget to clear the selection — which is how a bar ends up
+   * counting rows nobody can see.
+   */
+  const resetView = () => {
+    setPage(1);
+    // `clearSelection`, not the raw setter: the selection moved into
+    // `useMetricSelection`, and reaching past it would be the same coupling the
+    // extraction was meant to remove.
+    clearSelection();
+  };
+
+  /** Back to the state the page opens in: all time, all channels, first page. */
   const clearAllFilters = () => {
     setPreset(PRESETS[0].kind);
     setFromDate("");
     setToDate("");
     setChannelFilters([]);
+    resetView();
   };
+
+  /* Row selection, extracted to `@/lib/use-metric-selection` and shared with
+     /metrics. `pagedMetrics` is passed to the hook's two "all" helpers rather than
+     captured, so "select all" keeps meaning all rows ON SCREEN. */
+
+  /* ── Column resizing ─────────────────────────────────────────────────────
+     Mirrors ClientTable: preview while dragging, commit once on release. */
+  useEffect(() => {
+    if (!draft) return;
+    // Stop the drag from selecting the row text underneath it.
+    const prev = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    return () => { document.body.style.userSelect = prev; };
+  }, [draft]);
+
+  const startResize = (e: React.PointerEvent, col: ResolvedMarketingColumn) => {
+    if (col.locked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { key: col.key, startX: e.clientX, startW: col.w };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    setDraft({ key: col.key, w: col.w });
+  };
+
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    const col = columns.find(c => c.key === d.key);
+    if (!col) return;
+    // In RTL the grid flows right-to-left, so moving the pointer RIGHT NARROWS the
+    // column. Without the inversion every drag runs backwards in Arabic — the
+    // app's default language.
+    const delta = rtl ? d.startX - e.clientX : e.clientX - d.startX;
+    setDraft({ key: d.key, w: Math.min(col.max, Math.max(col.min, d.startW + delta)) });
+  };
+
+  const endResize = () => {
+    const done = draft;
+    drag.current = null;
+    setDraft(null);
+    if (!done) return;
+    commit(columns.map(c => (c.key === done.key ? { ...c, w: done.w } : c)));
+  };
+
+  /** Double-click a divider to put that column back to its registry default. */
+  const resetColumn = (col: ResolvedMarketingColumn) => {
+    const def = MARKETING_COLUMNS.find(d => d.key === col.key);
+    if (!def || col.locked) return;
+    commit(columns.map(c => (c.key === col.key ? { ...c, w: def.w } : c)));
+  };
+
+  const onResizeKey = (e: React.KeyboardEvent, col: ResolvedMarketingColumn) => {
+    if (col.locked) return;
+    const step = e.shiftKey ? 24 : 8;
+    let w: number | null = null;
+    if (e.key === "ArrowRight") w = col.w + (rtl ? -step : step);
+    else if (e.key === "ArrowLeft") w = col.w + (rtl ? step : -step);
+    if (w === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    commit(columns.map(c => (c.key === col.key ? { ...c, w: Math.min(col.max, Math.max(col.min, w)) } : c)));
+  };
+
+  /** The live drag width, so header and every body row move together. */
+  const layout = draft ? columns.map(c => (c.key === draft.key ? { ...c, w: draft.w } : c)) : columns;
+  const shown = layout.filter(c => !c.hidden);
 
   const totalSpend = useMemo(() => filteredMetrics.reduce((s, m) => s + Number(m.spend ?? 0), 0), [filteredMetrics]);
   const totalReach = useMemo(() => filteredMetrics.reduce((s, m) => s + Number(m.reach ?? 0), 0), [filteredMetrics]);
@@ -346,6 +422,73 @@ export default function MarketingPage() {
 
   if (!user) return <div className="shell-loading"><div className="spinner" /><p>{t("common.loading")}</p></div>;
 
+  /**
+   * One cell of the entries table, keyed by its registry column.
+   *
+   * A switch over the column KEY rather than a positional list. The previous
+   * markup emitted cells in a fixed order and relied on CSS to line them up, so
+   * hiding or reordering a column would have shifted every value one cell to the
+   * left; with this, the header and the row are driven by the same `shown` list
+   * and cannot disagree.
+   *
+   * Each element carries its own key because the array below is built by `.map`
+   * over a function call rather than over JSX.
+   */
+  const renderCell = (col: ResolvedMarketingColumn, m: MarketingMetric) => {
+    const key = col.key;
+    switch (key) {
+      case "select":
+        return (
+          <input
+            key={key}
+            type="checkbox"
+            className="cb"
+            checked={selectedIds.has(m.id)}
+            onChange={() => toggleSelect(m.id)}
+            aria-label={t("options.selectValue", { value: m.name || channelLabel(t, m.channel) })}
+          />
+        );
+      case "channel":
+        // Channel as a tinted pill rather than a bare dot: at this size a 6px dot
+        // carries no label, so the colour read as decoration. The dot still holds
+        // the channel's real colour; the tint is fixed so eight brand hues do not
+        // make the rows read as unrelated.
+        return (
+          <span key={key} className="mkt-chan-pill">
+            <i className="dot" style={{ background: optionColor("channels", m.channel, colors) }} />
+            {channelLabel(t, m.channel)}
+          </span>
+        );
+      case "campaign":
+        return <span key={key} className="r-campaign">{m.name || "—"}</span>;
+      case "period":
+        return (
+          <span key={key} className="r-period">
+            {new Date(m.startDate).toLocaleDateString(dateLocale(lang))} — {new Date(m.endDate).toLocaleDateString(dateLocale(lang))}
+          </span>
+        );
+      // tabular-nums so digits line up across rows, and both figures
+      // right-aligned: they are the two columns being compared.
+      case "spend":
+        return <span key={key} className="r-num r-spend">{sar(Number(m.spend))}</span>;
+      case "reach":
+        return <span key={key} className="r-num r-reach">{num(Number(m.reach))}</span>;
+      case "notes":
+        return <span key={key} className="r-notes muted">{m.notes ? m.notes.slice(0, 40) : "—"}</span>;
+      case "actions":
+        return (
+          <div key={key} className="r-actions no-detail">
+            {canEdit && <button className="icon-btn-sm" onClick={() => metricEditor.openEdit(m)} title={t("common.edit")}><Edit3 size={12} /></button>}
+            {canEdit && <button className="icon-btn-sm danger" onClick={() => void metricEditor.deleteMetric(m.id)} title={t("common.delete")}><Trash2 size={12} /></button>}
+          </div>
+        );
+      default:
+        // Unreachable while the switch covers MarketingColumnKey; returning null
+        // keeps a future registry entry from crashing the whole table.
+        return null;
+    }
+  };
+
   return (
     <div className="shell marketing-shell">
       <AppHeader user={user} active="marketing" darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />
@@ -356,8 +499,10 @@ export default function MarketingPage() {
           <div className="mkt-hero-top">
             <div>
               <div className="breadcrumb mkt-crumb"><Layers size={14} />{t("mkt.workspace")}</div>
-              <h1>{t("mkt.title")}</h1>
-              <p>{t("mkt.sub")}</p>
+              {/* The headline and sub-headline this block used to carry were pure
+                  copy — they restated what the KPI cards below already show. Kept
+                  here: the breadcrumb, the period badge, the actions and the four
+                  summary stats. */}
               <span className="mkt-period"><Calendar size={13} /> {activePreset ? t(activePreset.labelKey) : t("dash.allTime")}</span>
             </div>
             <div className="header-actions">
@@ -375,7 +520,7 @@ export default function MarketingPage() {
                 })}`, `marketing-${new Date().toISOString().slice(0, 10)}.xlsx`)
                   .catch(() => alert(t("mkt.exportFail")));
               }}><Download size={15} />{t("mkt.exportExcel")}</button>
-              {canEdit && <button className="btn-primary mkt-hero-primary" onClick={openAdd}><Plus size={15} />{t("mkt.addMetric")}</button>}
+              {canEdit && <button className="btn-primary mkt-hero-primary" onClick={metricEditor.openAdd}><Plus size={15} />{t("mkt.addMetric")}</button>}
             </div>
           </div>
           <div className="mkt-hero-stats">
@@ -410,7 +555,7 @@ export default function MarketingPage() {
                       type="button"
                       className={`mkt-preset${activePreset?.kind === p.kind ? " active" : ""}`}
                       aria-pressed={activePreset?.kind === p.kind}
-                      onClick={() => { setPreset(p.kind); setFromDate(""); setToDate(""); }}
+                      onClick={() => { setPreset(p.kind); setFromDate(""); setToDate(""); resetView(); }}
                     >
                       {t(p.labelKey)}
                     </button>
@@ -419,11 +564,11 @@ export default function MarketingPage() {
               </div>
               <div className="mkt-filter-field">
                 <label>{t("common.from")}</label>
-                <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+                <input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); resetView(); }} />
               </div>
               <div className="mkt-filter-field">
                 <label>{t("common.to")}</label>
-                <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
+                <input type="date" value={toDate} onChange={e => { setToDate(e.target.value); resetView(); }} />
               </div>
               <div className="mkt-filter-field">
                 <label>{t("form.channel")}</label>
@@ -433,9 +578,9 @@ export default function MarketingPage() {
                   label={t("filter.allChannels")}
                   options={allChannels}
                   selected={channelFilters}
-                  onChange={setChannelFilters}
+                  onChange={v => { setChannelFilters(v); resetView(); }}
                   render={v => channelLabel(t, v)}
-                  onRemove={canEdit ? removeChannel : undefined}
+                  onRemove={canEdit ? removeChannelFromFilter : undefined}
                   removable={removableChannels}
                   removeUsage={channelUsage}
                   t={t}
@@ -526,92 +671,124 @@ export default function MarketingPage() {
               {channelBreakdown.length === 0 && <div className="empty-state">{t("dash.breakdownEmpty")}</div>}
             </section>
 
-            {/* ── Recent entries ── */}
+            {/* ── All entries ──
+                Was "Recent entries" showing `slice(-10)`: only the newest ten, with
+                no way to reach the rest. Every matching row is now reachable, 25
+                to a page. */}
             <section className="panel">
               <div className="panel-heading">
                 <h3>{t("dash.recentEntries")}</h3>
-                <span className="muted" style={{ fontSize: 11 }}>{t("common.records", { n: filteredMetrics.length })}</span>
-              </div>
-              <div className="recent-row recent-head">
-                <span>{t("dash.thChannel")}</span><span>{t("mkt.campaignName")}</span><span>{t("dash.thPeriod")}</span><span className="r-num">{t("dash.thSpend")}</span><span className="r-num">{t("dash.thReach")}</span><span>{t("dash.thNotes")}</span><span />
-              </div>
-              {filteredMetrics.length === 0 && <div className="empty-state">{t("dash.noMetrics")}</div>}
-              {filteredMetrics.slice(-10).reverse().map(m => (
-                <div className="recent-row" key={m.id}>
-                  {/* Channel as a tinted pill rather than a bare dot: at this size a
-                      6px dot carries no label, so the colour read as decoration. */}
-                  <span className="mkt-chan-pill">
-                    <i className="dot" style={{ background: optionColor("channels", m.channel, colors) }} />
-                    {channelLabel(t, m.channel)}
-                  </span>
-                  <span className="r-campaign">{m.name || "—"}</span>
-                  <span className="r-period">{new Date(m.startDate).toLocaleDateString(dateLocale(lang))} — {new Date(m.endDate).toLocaleDateString(dateLocale(lang))}</span>
-                  {/* tabular-nums so digits line up across rows, and both figures
-                      right-aligned: they are the two columns being compared. */}
-                  <span className="r-num r-spend">{sar(Number(m.spend))}</span>
-                  <span className="r-num r-reach">{num(Number(m.reach))}</span>
-                  <span className="r-notes muted">{m.notes ? m.notes.slice(0, 40) : "—"}</span>
-                  <div className="r-actions no-detail">
-                    {canEdit && <button className="icon-btn-sm" onClick={() => openEdit(m)} title={t("common.edit")}><Edit3 size={12} /></button>}
-                    {canEdit && <button className="icon-btn-sm danger" onClick={() => deleteMetric(m.id)} title={t("common.delete")}><Trash2 size={12} /></button>}
-                  </div>
+                <div className="mkt-heading-tools">
+                  <span className="muted" style={{ fontSize: 11 }}>{t("common.records", { n: filteredMetrics.length })}</span>
+                  {/* Selection bar. Rendered beside the record count only while
+                      something is ticked, so the heading is unchanged when there
+                      is no selection. Export works for every role (spend data is
+                      company-wide); Delete stays behind `canEdit`, matching the
+                      per-row buttons and the API. */}
+                  {selectedIds.size > 0 && (
+                    <div className="mkt-selection">
+                      <span className="selection-info">{t("clients.selectedCount", { n: selectedIds.size })}</span>
+                      <button type="button" className="btn-outline btn-sm" onClick={exportSelected}>
+                        <Download size={13} />{t("mkt.exportSelected")}
+                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className="btn-danger-outline btn-sm"
+                          disabled={deleting}
+                          onClick={() => void deleteSelected()}
+                        >
+                          <Trash2 size={13} />{t("mkt.deleteSelected")}
+                        </button>
+                      )}
+                      <button type="button" className="btn-ghost btn-sm" onClick={clearSelection}>
+                        {t("clients.clearSelection")}
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))}
+              </div>
+
+              {/* The scroller. `--mr-cols` is the pixel track list derived from the
+                  registry, so ONE inline value drives the header and every row — a
+                  drag rewrites it and the whole table follows. It lives on the
+                  wrapper rather than on each row because custom properties inherit,
+                  and because the rows must scroll horizontally together. */}
+              <div className="recent-table" style={{ ["--mr-cols" as string]: gridTemplate(layout) }}>
+                <div className="recent-row recent-head">
+                  {shown.map(col => (
+                    <span
+                      key={col.key}
+                      className={`col-head-cell${col.key === "spend" || col.key === "reach" ? " r-num" : ""}`}
+                    >
+                      {col.key === "select"
+                        ? (
+                          <input
+                            type="checkbox"
+                            className="cb"
+                            checked={pageAllSelected(pagedMetrics)}
+                            onChange={() => toggleSelectAll(pagedMetrics)}
+                            aria-label={t("clients.selectAll")}
+                          />
+                        )
+                        : col.labelKey ? t(col.labelKey) : null}
+                      {/* Locked gutters (select, actions) have a fixed width, so
+                          there is nothing to resize and no handle to show. */}
+                      {!col.locked && (
+                        <span
+                          className="col-resizer"
+                          role="separator"
+                          aria-orientation="vertical"
+                          aria-label={t("cols.resize", { name: col.labelKey ? t(col.labelKey) : col.key })}
+                          aria-valuenow={col.w}
+                          aria-valuemin={col.min}
+                          aria-valuemax={col.max}
+                          tabIndex={0}
+                          title={t("cols.resizeHint")}
+                          onPointerDown={e => startResize(e, col)}
+                          onPointerMove={onMove}
+                          onPointerUp={endResize}
+                          onPointerCancel={endResize}
+                          onDoubleClick={e => { e.stopPropagation(); resetColumn(col); }}
+                          onKeyDown={e => onResizeKey(e, col)}
+                        />
+                      )}
+                    </span>
+                  ))}
+                </div>
+                {filteredMetrics.length === 0 && <div className="empty-state">{t("dash.noMetrics")}</div>}
+                {pagedMetrics.map(m => (
+                  <div className="recent-row" key={m.id}>
+                    {shown.map(col => renderCell(col, m))}
+                  </div>
+                ))}
+              </div>
+
+              {/* Pager. Hidden when everything fits on one page — a "page 1 of 1"
+                  control is noise. Reuses the same keys and `.pager` styling as the
+                  profile and clients tables rather than inventing a third variant. */}
+              {totalPages > 1 && (
+                <div className="pager">
+                  <button
+                    className="btn-outline btn-sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                  >{t("pager.prev")}</button>
+                  <span className="muted">{t("pager.pageOf", { page, count: totalPages })}</span>
+                  <button
+                    className="btn-outline btn-sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  >{t("pager.next")}</button>
+                </div>
+              )}
             </section>
           </>}
       </div>
 
-      {/* ── Add/Edit Modal ── */}
-      {showForm && (
-        <div className="modal-overlay" onClick={closeForm}>
-          <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>{editingId ? t("mkt.editMetric") : t("mkt.addMetric")}</h2>
-              <button className="modal-close" onClick={closeForm}><X size={18} /></button>
-            </div>
-            <div className="modal-body">
-              <div className="form-grid">
-                <Field label={t("mkt.campaignName")} wide>
-                  <input placeholder={t("mkt.campaignNamePh")} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-                </Field>
-                <Field label={t("form.channel")} error={formErrors.channel}>
-                  <RefPicker
-                    kind="channels"
-                    value={form.channel === "__custom__" ? (form.customChannelName || "") : form.channel}
-                    options={allChannels}
-                    onChange={v => { clearError("channel"); setForm(f => ({ ...f, channel: v, customChannelName: "" })); }}
-                    render={v => channelLabel(t, v)}
-                    placeholder={t("form.channelPh")}
-                    onAdd={addChannel}
-                    onRemove={canEdit ? removeChannel : undefined}
-                    removable={removableChannels}
-                    removeUsage={channelUsage}
-                    t={t}
-                  />
-                </Field>
-                <Field label={t("mkt.startDate")} error={formErrors.startDate}><input type="date" value={form.startDate} onChange={e => { clearError("startDate"); setForm(f => ({ ...f, startDate: e.target.value })); }} /></Field>
-                <Field label={t("mkt.endDate")} error={formErrors.endDate}><input type="date" value={form.endDate} onChange={e => { clearError("endDate"); setForm(f => ({ ...f, endDate: e.target.value })); }} /></Field>
-                <Field label={t("mkt.spend")} error={formErrors.spend}><input type="number" min="0" step="0.01" placeholder="0.00" value={form.spend} onChange={e => { clearError("spend"); setForm(f => ({ ...f, spend: e.target.value })); }} /></Field>
-                <Field label={t("mkt.reach")}><input type="number" min="0" placeholder="0" value={form.reach} onChange={e => setForm(f => ({ ...f, reach: e.target.value }))} /></Field>
-                <Field label={t("mkt.clicks")}><input type="number" min="0" placeholder="0" value={form.clicks} onChange={e => setForm(f => ({ ...f, clicks: e.target.value }))} /></Field>
-                <Field label={t("mkt.impressions")}><input type="number" min="0" placeholder="0" value={form.impressions} onChange={e => setForm(f => ({ ...f, impressions: e.target.value }))} /></Field>
-                <Field label={t("mkt.notes")} wide>
-                  <textarea rows={2} placeholder={t("mkt.notesPh")} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
-                </Field>
-              </div>
-              {saveError && (
-                <div className="form-errors" style={{ marginTop: 12 }} role="alert">
-                  <div>{saveError}</div>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn-ghost" onClick={closeForm}>{t("common.cancel")}</button>
-              <button className="btn-primary" onClick={handleSubmit}><Save size={15} />{editingId ? t("common.saveChanges") : t("mkt.addMetric")}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The campaign form itself moved to MetricFormModal, shared with /metrics — the
+          markup went across verbatim, so the two pages cannot drift apart. */}
+      <MetricFormModal editor={metricEditor} t={t} allChannels={allChannels} canEdit={canEdit} />
     </div>
   );
 }
@@ -638,13 +815,6 @@ function KpiCard({ label, value, sub, accent, icon }: { label: string; value: st
  * bottom of the modal, so nothing told the user *which* input to fix. `error`
  * now marks the offending control directly: red border, message underneath and
  * aria-invalid for assistive tech.
+ *
+ * Now `src/components/Field.tsx`, shared with /metrics through MetricFormModal.
  */
-function Field({ label, wide, error, children }: { label: string; wide?: boolean; error?: string; children: React.ReactNode }) {
-  return (
-    <label className={`field${wide ? " field-wide" : ""}${error ? " field-invalid" : ""}`}>
-      <span>{label}</span>
-      {children}
-      {error && <em className="field-error">{error}</em>}
-    </label>
-  );
-}

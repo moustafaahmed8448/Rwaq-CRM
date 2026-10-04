@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 import { apiErrorMessage } from "@/lib/api-errors";
 import { readLogoFile, useLogo } from "@/lib/logo";
+import { initialsOf, readAvatarFile } from "@/lib/avatar";
 import { roleLabel } from "@/lib/reporting";
 import AppHeader from "@/components/AppHeader";
 import Select from "@/components/Select";
@@ -13,7 +14,10 @@ import Select from "@/components/Select";
 const ROLES = ["Admin", "Sales", "CRM", "Visitor"];
 
 type User = { name: string; initials: string; role: string; email?: string; avatar?: string };
-type ManagedUser = { username: string; name: string; email?: string; role: string };
+/* `avatar` was missing here, so this list drew initials for everyone — including
+   people whose photo /users and the header were already showing. /api/users has
+   always returned it; the local type was the only thing dropping it. */
+type ManagedUser = { username: string; name: string; email?: string; role: string; avatar?: string | null };
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -55,7 +59,13 @@ export default function SettingsPage() {
       setUser(d.user ?? null);
       setEditName(d.user?.name ?? "");
       setEditEmail(d.user?.email ?? "");
-      const stored = localStorage.getItem("rwaq-avatar");
+      // The session is the source of truth for the photo now. localStorage was
+      // consulted before because /api/auth/me did not carry an avatar at all, so
+      // the picture lived in this browser only and vanished on another machine —
+      // and the account's own row on /users showed a photo the settings page had
+      // never heard of. Kept as a fallback for photos saved before this change.
+      const fromDb = typeof d.user?.avatar === "string" ? d.user.avatar : "";
+      const stored = fromDb || localStorage.getItem("rwaq-avatar") || "";
       if (stored) setAvatarUrl(stored);
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -72,29 +82,77 @@ export default function SettingsPage() {
     localStorage.setItem("rwaq-dark", darkMode ? "1" : "0");
   }, [darkMode]);
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset the input so picking the same file twice still fires onChange.
+    e.target.value = "";
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { setError(t("settings.errAvatarTooBig")); return; }
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const url = ev.target?.result as string;
-      setAvatarUrl(url);
-      setSavingAvatar(true);
-      localStorage.setItem("rwaq-avatar", url);
-      setUser(u => u ? { ...u, avatar: url } : null);
+    setError("");
+    setSavingAvatar(true);
+    try {
+      // Downscale in the browser, then store it on the ACCOUNT.
+      //
+      // This used to end at localStorage: it set the value, poked the header and
+      // moved on. Nothing was ever sent to the server, so the photo existed only
+      // in this one browser — /profile and the users table had nothing to read,
+      // which is why they fell back to initials. One photo per person now lives
+      // on the user row, like every other field, and follows you to another
+      // machine or browser.
+      const dataUrl = await readAvatarFile(file);
+      const res = await fetch("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar: dataUrl }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: unknown };
+        setError(apiErrorMessage(t, body.error));
+        return;
+      }
+      // Trust the server's copy rather than what we sent: it echoes what it
+      // actually stored, which is the value every other screen will read.
+      const { avatar } = await res.json().catch(() => ({ avatar: "" })) as { avatar?: string | null };
+      const stored = avatar ?? "";
+      setAvatarUrl(stored);
+      // Only a cache now, for chrome that has not re-fetched yet.
+      if (stored) localStorage.setItem("rwaq-avatar", stored);
+      else localStorage.removeItem("rwaq-avatar");
+      setUser(u => u ? { ...u, avatar: stored } : null);
       // Tell the header (and any other mounted chrome) to re-read it.
       window.dispatchEvent(new Event("rwaq-avatar-changed"));
+    } catch (err) {
+      setError(err instanceof Error && err.message === "TOO_LARGE"
+        ? t("settings.errAvatarTooBig")
+        : t("users.photoInvalid"));
+    } finally {
       setSavingAvatar(false);
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
-  const removeAvatar = () => {
-    setAvatarUrl("");
-    localStorage.removeItem("rwaq-avatar");
-    setUser(u => u ? { ...u, avatar: undefined } : null);
-    window.dispatchEvent(new Event("rwaq-avatar-changed"));
+  const removeAvatar = async () => {
+    setError("");
+    setSavingAvatar(true);
+    try {
+      const res = await fetch("/api/auth/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        // "" is the EXPLICIT clear. Leaving the key out is read as "leave this
+        // field alone", which is the whole difference between this button working
+        // and silently doing nothing.
+        body: JSON.stringify({ avatar: "" }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: unknown };
+        setError(apiErrorMessage(t, body.error));
+        return;
+      }
+      setAvatarUrl("");
+      localStorage.removeItem("rwaq-avatar");
+      setUser(u => u ? { ...u, avatar: "" } : null);
+      window.dispatchEvent(new Event("rwaq-avatar-changed"));
+    } finally {
+      setSavingAvatar(false);
+    }
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,7 +341,7 @@ export default function SettingsPage() {
                 ? <img src={avatarUrl} alt={t("settings.avatarAlt")} className="avatar-img" />
                 : <div className="avatar-default">{user.initials}</div>
               }
-              <label className="avatar-upload" title={t("settings.changePhoto")}>
+              <label className="avatar-photo-dot" title={t("settings.changePhoto")}>
                 <Camera size={14} />
                 <input type="file" accept="image/*" onChange={handleAvatarUpload} hidden />
               </label>
@@ -372,7 +430,9 @@ export default function SettingsPage() {
                   </div>
                 ) : (
                   <div className="user-row" key={u.username}>
-                    <div className="user-row-avatar">{u.name.slice(0,2).toUpperCase()}</div>
+                    <div className="user-row-avatar">
+                      {u.avatar ? <img src={u.avatar} alt="" /> : initialsOf(u.name)}
+                    </div>
                     <div className="user-row-info">
                       <strong>{u.name}</strong>
                       <small>@{u.username} · {u.email || t("settings.noEmail")}</small>

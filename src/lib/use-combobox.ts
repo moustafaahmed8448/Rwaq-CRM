@@ -119,9 +119,22 @@ export function useCombobox({
   }, [open, inputId, menuId, focusTarget]);
 
   // Keep the highlighted row visible while arrowing through a long list.
+  //
+  // Deliberately NOT `scrollIntoView`. That scrolls EVERY scrollable ancestor, so
+  // once a dropdown lived inside a scrolling container — the modal body, since
+  // `.modal-body` became `overflow-y:auto` — opening the menu dragged the whole
+  // form down to the field. Adjusting `scrollTop` on the listbox itself moves the
+  // same pixels and cannot touch an ancestor, because scrollTop is scoped to one
+  // element.
   useEffect(() => {
     if (!open) return;
-    document.getElementById(`${menuId}-opt-${active}`)?.scrollIntoView({ block: "nearest" });
+    const list = document.getElementById(menuId);
+    const opt = document.getElementById(`${menuId}-opt-${active}`);
+    if (!list || !opt) return;
+    const lb = list.getBoundingClientRect();
+    const ob = opt.getBoundingClientRect();
+    if (ob.top < lb.top) list.scrollTop -= lb.top - ob.top;
+    else if (ob.bottom > lb.bottom) list.scrollTop += ob.bottom - lb.bottom;
   }, [active, open, menuId, filtered]);
 
   const openMenu = useCallback(() => {

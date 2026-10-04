@@ -55,9 +55,20 @@ export async function GET(request: NextRequest) {
     .filter((c) => c !== "ALL");
   const from = q.get("from")?.trim() || undefined;
   const to = q.get("to")?.trim() || undefined;
+  /* "Export selected" sends the ticked ids and nothing else.
+     They win over the channel/date filters on purpose: a selection is an explicit
+     "these rows", so re-applying the filters could silently drop rows the user can
+     see ticked on screen (they were picked before the filters were touched). */
+  const ids = (q.get("ids") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const byIds = ids.length > 0;
+  const wanted = byIds ? new Set(ids) : null;
 
   try {
-    const metrics = await listMetrics({ channels, from, to });
+    const all = await listMetrics(byIds ? {} : { channels, from, to });
+    const metrics = wanted ? all.filter((m) => wanted.has(m.id)) : all;
 
     const records = metrics.map((m) => ({
       channel: CH_LABELS[m.channel] ?? m.channel,
@@ -107,8 +118,11 @@ export async function GET(request: NextRequest) {
       { spend: 0, reach: 0, impressions: 0, clicks: 0 },
     );
 
-    const period =
-      from || to ? `${from ?? "start"} to ${to ?? "today"}` : "All time";
+    const period = byIds
+      ? `${metrics.length} selected`
+      : from || to
+        ? `${from ?? "start"} to ${to ?? "today"}`
+        : "All time";
 
     const buffer = await buildWorkbook([
       {

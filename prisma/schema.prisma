@@ -59,6 +59,11 @@ model Client {
   firstContactPerson  String
   secondContactPerson String
   notes               String?
+  // When this client should next be chased. Nullable on purpose: most rows have
+  // no agreed follow-up yet, and "" cannot express "not set" the way null does.
+  // Separate from `operationToTake`, which stays free text describing WHAT to do
+  // ("Send price sheet"); this is only WHEN.
+  nextFollowUpAt      DateTime?
   archived            Boolean   @default(false)
   archivedAt          DateTime?
   activityLog         Json?
@@ -68,6 +73,10 @@ model Client {
   @@index([location])
   @@index([createdAt])
   @@index([archived])
+  // Serves the "due / overdue" query, which filters on the date alone and sorts
+  // by it. An unindexed date scan over the whole book is what made the dashboard
+  // card slow before this existed.
+  @@index([nextFollowUpAt])
 }
 
 model AppUser {
@@ -84,6 +93,33 @@ model AppUser {
    * added later picks up its default instead of being stranded by a stale entry.
    */
   clientColumns Json?
+  /**
+   * Per-user marketing-table layout: column widths and visibility.
+   * Separate from `clientColumns` on purpose — the two tables have unrelated
+   * column sets, so sharing one blob would mean resizing a clients column
+   * silently rewrote a marketing column of the same name.
+   */
+  marketingColumns Json?
+  /**
+   * Per-user users-table layout: column widths and visibility.
+   * A third blob for the same reason as the second — the users grid has its own
+   * keys (`role`, `username`) that the other two registries would reject, so a
+   * shared blob would drop them on the round trip.
+   */
+  userColumns    Json?
+  /**
+   * Profile photo, stored as a downscaled PNG data URL (see readAvatarFile).
+   * On the row rather than in localStorage, so an admin managing the team sees
+   * every member's photo — the header's own avatar is per-browser, so it cannot
+   * answer that question.
+   */
+  avatar         String?
+  /** Contact number. Free text: it is display-only and never dialled. */
+  phone          String?
+  /** Job title / role description. */
+  jobTitle       String?
+  /** Free-form note an admin keeps about the person. */
+  notes          String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

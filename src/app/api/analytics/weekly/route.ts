@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assigneeScope, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
-import { databaseErrorMessage, listClients, listMetrics, readSetting } from "@/lib/db";
+import { databaseErrorMessage, listClients, listMetrics, readSetting, readSettingObject } from "@/lib/db";
 import {
+  BUCKETS_SETTING_KEY,
   channelLabels,
-  classifyStatus,
-  isInProgress,
+  classifyStatusWith,
+  coerceStatusBuckets,
   parsePeriodKind,
+  previousPeriod,
   PREDEFINED_STATUSES,
   resolvePeriod,
 } from "@/lib/reporting";
@@ -28,6 +30,14 @@ export async function GET(request: NextRequest) {
     q.get("from") ?? undefined,
     q.get("to") ?? undefined,
   );
+
+  /**
+   * The comparison window for the KPI deltas — null for "all time".
+   *
+   * Resolved here, once, so the figure returned below and the window the cards
+   * describe can never be derived from two different sets of bounds.
+   */
+  const previous = previousPeriod(period);
 
   /**
    * Optional status / channel / location narrowing, applied ON TOP of the period.
@@ -55,7 +65,7 @@ export async function GET(request: NextRequest) {
   };
 
   try {
-    const [metrics, periodClients, allClients, customStatuses, customLocations, customChannels] = await Promise.all([
+    const [metrics, periodClients, allClients, customStatuses, customLocations, customChannels, rawBuckets] = await Promise.all([
       listMetrics({ from: period.fromStr, to: period.toStr }),
       // Deliberately NOT includeArchived: an archived client is out of the book, so
       // counting it inflated every figure on this page — the KPI cards, the stage
@@ -76,7 +86,23 @@ export async function GET(request: NextRequest) {
       readSetting("statuses"),
       readSetting("locations"),
       readSetting("channels"),
+      // The admin's status -> bucket assignments from the Options page. Empty on
+      // an untouched workspace, and then `classifyStatusWith` falls through to the
+      // built-in pipeline, so every figure below is unchanged.
+      readSettingObject(BUCKETS_SETTING_KEY),
     ]);
+
+    /* Coerced once and threaded through every bucketing pass below — the KPI
+       cards, the workload, the salesperson reports and the timeline. Reading it
+       in each of those instead would let one of them quietly keep using the
+       built-in pipeline, which is exactly the "the cards say one thing and the
+       funnel says another" bug this is meant to fix.
+
+       Named `statusBuckets`, not `buckets`: the timeline builder further down
+       already has a local `buckets` array holding its series, and shadowing it
+       would silently pass an array where a map is expected. */
+    const statusBuckets = coerceStatusBuckets(rawBuckets);
+    const isProgress = (status: string) => classifyStatusWith(status, statusBuckets) === "progress";
 
     // Known channels plus any user-defined or in-use channel.
     const channelSet = new Set<string>([
@@ -92,7 +118,7 @@ export async function GET(request: NextRequest) {
     const bucket = (list: typeof periodClients) => {
       const counts = { won: 0, lost: 0, waiting: 0, other: 0 };
       for (const client of list) {
-        switch (classifyStatus(client.status)) {
+        switch (classifyStatusWith(client.status, statusBuckets)) {
           case "won": counts.won += 1; break;
           case "lost": counts.lost += 1; break;
           case "progress": counts.waiting += 1; break;
@@ -134,9 +160,43 @@ export async function GET(request: NextRequest) {
     // `other` is what makes won + lost + waiting reconcile to `total`.
     const totals = { total: periodClients.length, ...bucket(periodClients) };
 
+    /* The comparison figures for the KPI deltas.
+       Same client query, same filters, same bucket assignments — only the date
+       bounds differ. Run through the identical `bucket` helper rather than a
+       second implementation, so a change to how statuses are classified cannot
+       move one side of the comparison and not the other. Spend/reach come from
+       the metrics list for that window.
+
+       `total` is included because the "Client overview" card is delta'd too.
+       Null throughout for "all time": there is no previous window to compare
+       with, and the client suppresses the arrows rather than inventing one. */
+    let previousTotals: {
+      from: string; to: string;
+      totals: { total: number; won: number; lost: number; waiting: number; other: number };
+      spend: number; reach: number;
+    } | null = null;
+    if (previous) {
+      const [prevClients, prevMetrics] = await Promise.all([
+        listClients({
+          ...groupFilter,
+          assignee: assigneeScope(sessionUser),
+          createdFrom: previous.fromStr,
+          createdTo: previous.toStr,
+        }),
+        listMetrics({ from: previous.fromStr, to: previous.toStr }),
+      ]);
+      previousTotals = {
+        from: previous.fromStr,
+        to: previous.toStr,
+        totals: { total: prevClients.length, ...bucket(prevClients) },
+        spend: prevMetrics.reduce((s, m) => s + Number(m.spend ?? 0), 0),
+        reach: prevMetrics.reduce((s, m) => s + Number(m.reach ?? 0), 0),
+      };
+    }
+
     const workload = new Map<string, number>();
     periodClients
-      .filter((c) => isInProgress(c.status))
+      .filter((c) => isProgress(c.status))
       .forEach((c) => {
         workload.set(c.firstContactPerson, (workload.get(c.firstContactPerson) ?? 0) + 1);
         workload.set(c.secondContactPerson, (workload.get(c.secondContactPerson) ?? 0) + 1);
@@ -163,7 +223,7 @@ export async function GET(request: NextRequest) {
         if (!key) continue;
         const row = map.get(key) ?? { won: 0, lost: 0, waiting: 0, other: 0, total: 0 };
         row.total += 1;
-        switch (classifyStatus(client.status)) {
+        switch (classifyStatusWith(client.status, statusBuckets)) {
           case "won": row.won += 1; break;
           case "lost": row.lost += 1; break;
           case "progress": row.waiting += 1; break;
@@ -225,7 +285,7 @@ export async function GET(request: NextRequest) {
      * Outcome-split timeline for the dashboard trend chart.
      *
      * Buckets the period's clients by WEEK and splits each bucket with the same
-     * `classifyStatus` the KPI cards use, so the chart and the cards can never
+     * `classifyStatusWith` the KPI cards use, so the chart and the cards can never
      * disagree. Local-day keys, not toISOString(): the same UTC trap documented
      * on `dayKey` in reporting.ts would push every client a day to the left for
      * anyone east of Greenwich.
@@ -267,7 +327,7 @@ export async function GET(request: NextRequest) {
         const row = index.get(key);
         if (!row) continue;
         row.total += 1;
-        switch (classifyStatus(client.status)) {
+        switch (classifyStatusWith(client.status, statusBuckets)) {
           case "won": row.won += 1; break;
           case "lost": row.lost += 1; break;
           case "progress": row.waiting += 1; break;
@@ -289,6 +349,14 @@ export async function GET(request: NextRequest) {
       timeline,
       totalClients: periodClients.length,
       totals,
+      /* The map that produced `totals`, so the client rebuilds its funnel and
+         stage panel from the SAME assignments rather than re-deriving them from
+         the built-in pipeline. Without this the cards would honour the admin's
+         choice while the funnel beside them silently did not. */
+      statusBuckets,
+      /* Present only when a comparison window exists (i.e. not "all time"). The
+         client reads it to decide whether to draw a delta on each KPI card. */
+      previous: previousTotals,
       // Period-scoped breakdowns so every dashboard panel describes the same
       // window as the KPI cards above them.
       statusCounts,

@@ -17,8 +17,9 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Check, Loader2, Plus, Settings2, Trash2, Pencil, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Loader2, Plus, Settings2, Trash2, Pencil, X } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
+import Select from "@/components/Select";
 import { useLang } from "@/lib/i18n";
 import { apiErrorMessage, readApiError } from "@/lib/api-errors";
 import {
@@ -28,11 +29,11 @@ import {
   type OptionColors,
   type RefKind,
 } from "@/lib/ref-options";
-import { channelLabel, locationLabel, statusLabel } from "@/lib/reporting";
+import { channelLabel, classifyStatus, locationLabel, STATUS_OUTCOMES, statusLabel, type StatusBuckets, type StatusOutcome } from "@/lib/reporting";
 import { refreshOptionColors } from "@/lib/option-colors";
 
 type KindData = { values: string[]; removable: string[]; usage: Record<string, number> };
-type Payload = Record<RefKind, KindData> & { colors: OptionColors; role: string | null };
+type Payload = Record<RefKind, KindData> & { colors: OptionColors; buckets?: StatusBuckets; role: string | null };
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
 /** Dictionary key prefix for each panel's title. */
@@ -64,6 +65,35 @@ export default function OptionsPage() {
     }
     setData((await res.json()) as Payload);
   }, [showToast, t]);
+
+  /**
+   * Files one status into one of the four dashboard outcome buckets.
+   *
+   * A separate call rather than a reuse of the panel's generic `call`, because
+   * the response carries the WHOLE bucket map and the dashboard needs it: the
+   * cards, funnel and stage panel are all rebuilt from that map, and reloading
+   * every reference list (what the colour path does) would not refresh it.
+   *
+   * Applied optimistically, then rolled back to the server's map if the write
+   * fails — the select has no "pending" state, so leaving the old value in place
+   * after a refusal would leave the row lying about what is stored.
+   */
+  const setBucket = useCallback(async (value: string, outcome: StatusOutcome) => {
+    const previous = data?.buckets ?? {};
+    setData((cur) => (cur ? { ...cur, buckets: { ...previous, [value]: outcome } } : cur));
+    const res = await fetch("/api/options", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "statuses", label: value, bucket: outcome }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      setData((cur) => (cur ? { ...cur, buckets: previous } : cur));
+      showToast("error", apiErrorMessage(t, res ? await readApiError(res) : undefined));
+      return;
+    }
+    const body = (await res.json().catch(() => ({}))) as { buckets?: StatusBuckets };
+    if (body.buckets) setData((cur) => (cur ? { ...cur, buckets: body.buckets! } : cur));
+  }, [data?.buckets, showToast, t]);
 
   useEffect(() => {
     fetch("/api/auth/me").then(async (r) => {
@@ -129,6 +159,8 @@ export default function OptionsPage() {
             kind={kind}
             data={data[kind]}
             colors={data.colors}
+            buckets={data.buckets ?? {}}
+            setBucket={setBucket}
             onChanged={load}
             showToast={showToast}
             t={t}
@@ -142,10 +174,14 @@ export default function OptionsPage() {
 }
 
 /** One reference list: an add row plus a row per value with a colour picker. */
-function OptionPanel({ kind, data, colors, onChanged, showToast, t }: {
+function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showToast, t }: {
   kind: RefKind;
   data: KindData;
   colors: OptionColors;
+  /** Admin-set status -> bucket assignments. Empty for channels and locations. */
+  buckets: StatusBuckets;
+  /** Persists one status's bucket. Only ever called for `kind === "statuses"`. */
+  setBucket: (value: string, outcome: StatusOutcome) => void | Promise<void>;
   onChanged: () => Promise<void> | void;
   showToast: (type: "success" | "error", message: string) => void;
   t: TFn;
@@ -160,6 +196,11 @@ function OptionPanel({ kind, data, colors, onChanged, showToast, t }: {
   // Multi-select for bulk delete. A Set because selection is toggled constantly
   // and an array would re-render every row on each tap.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Whether the SAVED (custom) options are listed, and whether the built-ins
+  // are. Both collapsed by default: the page is three long reference lists, and
+  // an admin opening it to recolour one value had to scroll past all of them.
+  const [showSaved, setShowSaved] = useState(false);
+  const [showBuiltin, setShowBuiltin] = useState(false);
 
   // Same label rules the rest of the app uses, so a built-in city reads as its
   // localized name here exactly as it does in the pickers.
@@ -322,6 +363,12 @@ function OptionPanel({ kind, data, colors, onChanged, showToast, t }: {
     </div>
   );
 
+  const saved = data.values.filter((v) => !isBuiltinOption(kind, v));
+  // Named `builtinValues` rather than `builtin` because `renderValueRow` has a
+  // local `builtin` boolean of the same name for a single value; reusing it here
+  // would shadow the array inside that function and read as a type mismatch.
+  const builtinValues = data.values.filter((v) => isBuiltinOption(kind, v));
+
   return (
     <section className="panel options-panel">
       <div className="panel-heading">
@@ -369,9 +416,40 @@ function OptionPanel({ kind, data, colors, onChanged, showToast, t }: {
         </div>
       )}
 
+      {/* The built-in list and the saved list are BOTH collapsed behind their own
+          arrow, so the page opens as three short headers instead of three long
+          always-expanded lists. `isBuiltinOption` is the same predicate the
+          server uses to decide what is deletable, so the split can never
+          disagree with the guards behind the buttons. */}
       <div className="options-list">
         {data.values.length === 0 && <div className="empty-state">{t("options.empty")}</div>}
-        {data.values.map((value) => renderValueRow(value))}
+
+        {builtinValues.length > 0 && (
+          <button
+            type="button"
+            className="options-section-toggle"
+            aria-expanded={showBuiltin}
+            onClick={() => setShowBuiltin((s) => !s)}
+          >
+            <ChevronDown size={14} className={showBuiltin ? "options-caret-open" : ""} />
+            {t("options.builtinSection")} ({builtinValues.length})
+          </button>
+        )}
+        {showBuiltin && builtinValues.map(renderValueRow)}
+
+        {saved.length > 0 && (
+          <button
+            type="button"
+            className="options-section-toggle"
+            aria-expanded={showSaved}
+            onClick={() => setShowSaved((s) => !s)}
+          >
+            <ChevronDown size={14} className={showSaved ? "options-caret-open" : ""} />
+            {t("options.savedSection")} ({saved.length})
+          </button>
+        )}
+        {showSaved && saved.length === 0 && <div className="empty-state">{t("options.noSaved")}</div>}
+        {showSaved && saved.map(renderValueRow)}
       </div>
     </section>
   );
@@ -440,6 +518,26 @@ function OptionPanel({ kind, data, colors, onChanged, showToast, t }: {
         )}
         {builtin && <span className="options-tag">{t("options.builtin")}</span>}
         <span className="options-usage" title={t("refData.inUseBy", { n: used })}>{t("options.used", { n: used })}</span>
+        {/* Which KPI card this status counts towards on the dashboard.
+            Only statuses have one — a channel or location is not an outcome — so
+            the control is omitted for the other two panels rather than shown
+            disabled. The displayed value falls back to the status's built-in
+            outcome, so a workspace nobody has configured still reads correctly. */}
+        {kind === "statuses" && (
+          <label className="options-bucket" title={t("options.bucketTitle")}>
+            <span className="options-bucket-label">{t("options.bucketLabel")}</span>
+            <Select
+              value={buckets[value] ?? classifyStatus(value)}
+              options={[...STATUS_OUTCOMES]}
+              onChange={(v) => void setBucket(value, v as StatusOutcome)}
+              render={(v) => t(`options.bucket.${v}`)}
+              searchable={false}
+              className="status-select"
+              t={t}
+              ariaLabel={t("options.bucketFor", { value: lab(value) })}
+            />
+          </label>
+        )}
         <span className="options-actions">
           {!isEditing && (
             <button
