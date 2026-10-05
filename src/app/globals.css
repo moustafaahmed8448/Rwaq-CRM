@@ -3300,6 +3300,29 @@ input.ltr-num { text-align: left; }
    badge so it reads at a glance, not a hairline icon that could sit unnoticed
    on any row. */
 .ms-opt.ms-opt-on .ms-tick { background: var(--azure); border-radius: 50%; color: #fff; }
+
+/* ── Dropdown motion ───────────────────────────────────────────────────────
+   The menu used to pop into existence with no transition, and selecting an
+   option jumped instantly. These run on every dropdown (Select, MultiSelect
+   and RefPicker share .ms-menu / .ms-opt), so Sort by and the rest of the
+   pickers open and select the same smooth way. */
+.ms-menu { animation: msMenuIn .16s ease; }
+@keyframes msMenuIn {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+/* The highlight glides between rows when the active/selected option changes. */
+.ms-opt { transition: background-color .15s ease, color .15s ease; }
+/* The check badge pops in on the row that just became the selection. */
+.ms-opt.ms-opt-on .ms-tick { animation: msTickIn .18s ease; }
+@keyframes msTickIn {
+  from { transform: scale(.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-menu,
+  .ms-opt.ms-opt-on .ms-tick { animation: none; }
+  .ms-opt { transition: none; }
+}
 .ms-opt.ms-opt-active { background: rgba(6, 157, 227, .13); }
 .ms-opt.ms-opt-on.ms-opt-active { background: var(--azure-100); }
 [data-theme="dark"] .ms-opt.ms-opt-on { background: #10263a; color: var(--azure-300); }
@@ -3325,6 +3348,12 @@ input.ltr-num { text-align: left; }
 }
 
 /* ── Duplicate review sidebar: spacing, affordance and dark-mode pass ───── */
+/* Groups are flex children of a fixed-height, scrolling column. With the default
+   flex-shrink:1 — and overflow:hidden collapsing their automatic minimum size to
+   0 — every group was SHRINKING to fit instead of overflowing, which is what
+   clipped each group to "header + a sliver of row" with no scrollbar. Freeze
+   their height; the body does the scrolling. */
+.dupes-panel .detail-body > * { flex-shrink: 0; }
 /* Extra padding/gap over the base rule: the row now stacks a head line and a
    field grid, and the old 10/11px left every block pressed against the next. */
 .dupes-row {
