@@ -23,12 +23,10 @@ export const channelValues = Object.keys(channelLabels);
  * Built-in channels to drop from a filter list because a custom channel already
  * stands in for them.
  *
- * A workspace can still hold a built-in and a custom channel that render to the
- * same label — an older import that wrote one before `parseChannel` knew its
- * Arabic name, or an admin adding one by hand. Listing both gave two identical
- * rows for one real channel, and picking the one no client stores returned
- * nothing. `parseChannel` now maps the Arabic labels onto the built-ins so this
- * cannot be created; the helper below is the second line of defence.
+ * The workspace's "Sales" channel is stored as the custom Arabic value
+ * `المبيعات`, which this label map renders as "Sales" too. Listing the built-in
+ * `SALES` next to it produced TWO "Sales" rows for one real channel, and picking
+ * the built-in one returned nothing, because no client stores that value.
  *
  * A built-in is dropped only when BOTH hold:
  *   - no client actually stores it, and
@@ -554,86 +552,27 @@ export function notificationMessage(
   return t(key, { name: n.clientName });
 }
 
-/**
- * Folds the alef-hamza variants for LOOKUP ONLY.
- *
- * Arabic keyboards and spreadsheets are inconsistent about it: إعلانات can be
- * typed or pasted as اعلانات with a plain alef, and the two are different
- * codepoints that a map lookup will not match. Folding them means a sheet that
- * says `اعلانات جوجل` reaches the same built-in as one that says `إعلانات جوجل`.
- *
- * Deliberately not applied to the stored value — see the note in parseChannel.
- */
-function foldArabicKey(key: string): string {
-  return key.replace(/[أإآٱ]/g, "ا");
-}
-
-/**
- * Channel spellings that resolve to a built-in, keyed by their normalized form.
- *
- * Hoisted to module scope: it used to be rebuilt inside `parseChannel`, which runs
- * once per imported row.
- *
- * The Arabic entries are the labels this app itself shows for the built-ins —
- * the `ch.*` dictionary entries — copied from there rather than invented, so the
- * two cannot drift apart.
- *
- * These were missing entirely, and that is how a Google Sheet import came to hold
- * two channels meaning "Sales". `parseChannel("المبيعات")` found no alias, fell
- * through to the custom-channel branch and returned the Arabic verbatim; the
- * importer then stored it, flagged it as a NEW channel and wrote it into the
- * channels setting — while every existing client held the built-in `SALES`. One
- * channel, two rows in every dropdown, and filtering by either one missed the
- * other.
- *
- * Keys are in NORMALIZED form: `toUpperCase()` leaves Arabic untouched, so only
- * the space-to-underscore rule applies (`إعلانات جوجل` -> `إعلانات_جوجل`).
- */
-const CHANNEL_ALIASES: Record<string, string> = {
-  FACEBOOK: "FACEBOOK",
-  INSTAGRAM: "INSTAGRAM",
-  META: "FACEBOOK",
-  TWITTER: "X",
-  X: "X",
-  TIKTOK: "TIKTOK",
-  GOOGLE: "GOOGLE_ADS",
-  GOOGLE_ADS: "GOOGLE_ADS",
-  WHATSAPP: "WHATSAPP",
-  CALL: "CALLS",
-  CALLS: "CALLS",
-  SALES: "SALES",
-  "المبيعات": "SALES",
-  "مبيعات": "SALES",
-  "فيسبوك": "FACEBOOK",
-  "انستغرام": "INSTAGRAM",
-  "تيك_توك": "TIKTOK",
-  "إعلانات_جوجل": "GOOGLE_ADS",
-  "واتساب": "WHATSAPP",
-  "مكالمات": "CALLS",
-};
-
-/**
- * The alias table with alef-hamza variants folded on BOTH sides.
- *
- * Folding only the incoming value was not enough, and failed in a way that looked
- * fine: `إعلانات_جوجل` in the table and `إعلانات جوجل` in a sheet folded to
- * `اعلانات_جوجل`, which matched nothing, so the sheet value fell through to the
- * custom-channel branch and created the very duplicate this table prevents.
- * Folding the keys too makes the two sides comparable either way.
- */
-const FOLDED_CHANNEL_ALIASES = new Map(
-  Object.entries(CHANNEL_ALIASES).map(([k, v]) => [foldArabicKey(k), v]),
-);
-
 export function parseChannel(value: unknown): string | undefined {
   if (typeof value !== "string") return;
   const key = value.trim().toUpperCase().replace(/[ /-]+/g, "_");
   if (!key || key === "ALL") return undefined;
+  const aliases: Record<string, string> = {
+    FACEBOOK: "FACEBOOK",
+    INSTAGRAM: "INSTAGRAM",
+    META: "FACEBOOK",
+    TWITTER: "X",
+    X: "X",
+    TIKTOK: "TIKTOK",
+    GOOGLE: "GOOGLE_ADS",
+    GOOGLE_ADS: "GOOGLE_ADS",
+    WHATSAPP: "WHATSAPP",
+    CALL: "CALLS",
+    CALLS: "CALLS",
+    SALES: "SALES",
+  };
   // Known aliases normalize to their canonical value; anything else is treated
-  // as a custom channel and kept EXACTLY as the normalizer produced it. The
-  // folding is used for the match only, never returned — otherwise a genuine
-  // custom channel like `أسواق` would be silently rewritten to `اسواق`.
-  return FOLDED_CHANNEL_ALIASES.get(foldArabicKey(key)) ?? (key.length >= 2 ? key : undefined);
+  // as a custom channel and kept as-is.
+  return aliases[key] ?? (key.length >= 2 ? key : undefined);
 }
 
 export function parseStatus(value: unknown): string | undefined {
