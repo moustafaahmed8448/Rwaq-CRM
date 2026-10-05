@@ -396,13 +396,16 @@ export default function Home() {
    * lists, so all four endpoints are refreshed; leaving the pickers stale would
    * hide values that are now in use.
    */
-  const refreshAfterImport = (result: { imported: number; updated: number }) => {
-    const { imported, updated } = result;
-    const total = imported + updated;
-    addToast(
-      total > 0 ? "success" : "info",
-      t(total > 0 ? "importer.doneMixed" : "importer.doneNone", { a: imported, b: updated }),
-    );
+  /**
+   * Re-reads the reference data this page renders from.
+   *
+   * Split out of `refreshAfterImport` because two different actions need it: an
+   * import (rows added) and a duplicate merge (rows removed). Only the import
+   * reports counts, so the toast stays with the import instead of being faked
+   * with zeros for the merge — which would have printed "0 imported, 0 updated"
+   * immediately after a successful merge of three records.
+   */
+  const refreshReferenceData = () => {
     fetch("/api/crm/clients").then(r => r.json()).then(d => {
       setClients(d.clients ?? []);
       setCustomStatuses(d.statuses ?? []);
@@ -412,6 +415,16 @@ export default function Home() {
     fetch("/api/channels").then(r => r.json()).then(d => { setCustomChannels(d.channels ?? []); setRemovableChannels(d.removable ?? []); setChannelUsage(d.usage ?? {}); }).catch(() => undefined);
     fetch("/api/locations").then(r => r.json()).then(d => { setCustomLocations(d.locations ?? []); setRemovableLocations(d.removable ?? []); setLocationUsage(d.usage ?? {}); }).catch(() => undefined);
     refreshNotifications();
+  };
+
+  const refreshAfterImport = (result: { imported: number; updated: number }) => {
+    const { imported, updated } = result;
+    const total = imported + updated;
+    addToast(
+      total > 0 ? "success" : "info",
+      t(total > 0 ? "importer.doneMixed" : "importer.doneNone", { a: imported, b: updated }),
+    );
+    refreshReferenceData();
   };
   const [notifications, setNotifications] = useState<{ id: string; message: string; read: boolean; clientName?: string; createdAt: string; type: string }[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -1379,13 +1392,13 @@ userAvatars={userAvatars}
         />
       )}
 
-      {/* Duplicate review — admin only. `refreshAfterImport` is reused because a
-          merge and an import are the same kind of event to this page: rows were
-          added or removed underneath it and every visible figure is stale. */}
+      {/* Duplicate review — admin only. `refreshReferenceData` rather than
+          `refreshAfterImport`: a merge removed rows, it did not import any, so
+          the import's "N imported, M updated" toast must not fire here. */}
       {dupesOpen && (
         <DuplicatesPanel
           onClose={() => setDupesOpen(false)}
-          onMerged={refreshAfterImport}
+          onMerged={refreshReferenceData}
           t={t}
           lang={lang}
         />

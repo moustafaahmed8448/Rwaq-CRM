@@ -37,6 +37,8 @@ type Row = {
   status: string;
   firstContactPerson: string;
   lastUpdateDate?: string;
+  archived?: boolean;
+  archivedAt?: string | null;
 };
 
 export default function LinkedClientsPanel({
@@ -65,6 +67,7 @@ export default function LinkedClientsPanel({
     const params = new URLSearchParams({
       paged: "1",
       pageSize: String(LIMIT),
+      includeArchived: "1",
       [PARAM[kind]]: value,
     });
     fetch(`/api/crm/clients?${params}`, { cache: "no-store" })
@@ -116,10 +119,17 @@ export default function LinkedClientsPanel({
           )}
           <ul className="linked-list">
             {rows?.map((c) => (
-              <li key={c.id} className="linked-row">
+              <li key={c.id} className={`linked-row${c.archived ? " linked-row-archived" : ""}`}>
                 <span className="linked-id">#{c.id}</span>
                 <span className="linked-main">
-                  <b className="linked-name">{c.name}</b>
+                  <b className="linked-name">
+                    {c.name}
+                    {c.archived && (
+                      <span className="linked-archived-badge" title={t("archive.archivedLabel")}>
+                        {t("archive.archivedLabel")}
+                      </span>
+                    )}
+                  </b>
                   <span className="linked-sub">
                     <span className="ltr-num">{c.phoneNumber}</span>
                     {c.firstContactPerson && <> · {c.firstContactPerson}</>}

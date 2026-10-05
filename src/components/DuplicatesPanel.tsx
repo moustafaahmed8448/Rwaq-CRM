@@ -162,7 +162,7 @@ export default function DuplicatesPanel({
           {groups?.map((group) => {
             const key = groupKey(group);
             const chosen = keep[key] ?? "";
-            // Fields on which the rows actually disagree — these are what tells
+            // Fields on which the rows actually disagree â€” these are what tells
             // the user the records are NOT interchangeable.
             const differing = COMPARE.filter((f) => {
               const values = new Set(group.clients.map((c) => String(c[f] ?? "").trim()));
@@ -195,7 +195,7 @@ export default function DuplicatesPanel({
                           {COMPARE.map((f) => (
                             <span key={f} className={differing.includes(f) ? "dupe-differs" : undefined}>
                               <em>{t(`dupes.field.${f}`)}</em>
-                              {String(c[f] ?? "") || "—"}
+                              {String(c[f] ?? "") || "â€”"}
                             </span>
                           ))}
                         </span>

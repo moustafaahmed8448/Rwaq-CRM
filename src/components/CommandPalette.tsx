@@ -4,9 +4,9 @@
  * Global client search (Ctrl+K / Cmd+K).
  *
  * The clients table already has a search box, but only once you are ON the
- * clients screen â€” which is the problem this solves. Answering "which client was
- * that, the one who called about the Riyadh villa?" meant navigating to the table
- * first, then hoping the filter bar was still set to something sensible.
+ * clients screen. Answering "which client was that, the one who called about the
+ * Riyadh villa?" meant navigating to the table first, then hoping the filter bar
+ * was still set to something sensible.
  *
  * Keyboard-first and deliberately small: arrow keys to move, Enter to open,
  * Escape to dismiss. Arrow/Enter/Escape are handled in the INPUT's onKeyDown
@@ -65,8 +65,8 @@ export default function CommandPalette({ t }: { t: TFn }) {
 
   /* Debounced fetch.
      `live` guards the state write so a slow response for "ah" cannot land after a
-     fast one for "ahmad" and replace the newer results with older ones â€” the
-     classic out-of-order race that makes a typeahead feel broken. */
+     fast one for "ahmad" and replace the newer results with older ones, which is
+     the classic out-of-order race that makes a typeahead feel broken. */
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
@@ -135,8 +135,7 @@ export default function CommandPalette({ t }: { t: TFn }) {
       </button>
     );
   }
-
-  return (
+return (
     <div className="modal-overlay search-overlay" onClick={close}>
       <div
         className="search-palette"
@@ -186,9 +185,9 @@ export default function CommandPalette({ t }: { t: TFn }) {
                 <b>{hit.name}</b>
                 <span className="search-hit-sub">
                   <span className="ltr-num">{hit.phoneNumber}</span>
-                  {hit.project && <> · {hit.project}</>}
-                  {hit.location && <> · {hit.location}</>}
-                  {hit.firstContactPerson && <> · {hit.firstContactPerson}</>}
+                  {hit.project && <> &middot; {hit.project}</>}
+                  {hit.location && <> &middot; {hit.location}</>}
+                  {hit.firstContactPerson && <> &middot; {hit.firstContactPerson}</>}
                 </span>
               </span>
               <StatusPill status={hit.status} t={t} variant="badge" />
