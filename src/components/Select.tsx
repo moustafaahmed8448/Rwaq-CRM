@@ -89,9 +89,9 @@ export default function Select({
                 type="button"
                 role="option"
                 aria-selected={o === value}
-                className={`ms-opt ${i === cb.active ? "ms-opt-active" : ""}`}
+                className={`ms-opt${o === value ? " ms-opt-on" : ""}${i === cb.active ? " ms-opt-active" : ""}`}
                 onMouseEnter={() => cb.setActive(i)}
-                onClick={() => onChange(o)}
+                onClick={() => { onChange(o); cb.close(true); }}
               >
                 {o === value ? <Check size={12} className="ms-tick" /> : <span className="ms-tick" />}
                 <span className="ms-opt-label">{labelOf(o)}</span>

@@ -1,0 +1,188 @@
+[33mcommit 4684240a2e7879c3831978b4ba59e4197daa5d76[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: Moustafa Ahmed <Moustafa.ahmed8448@gmail.com>
+Date:   Mon Oct 5 18:13:10 2026 +0300
+
+    first commit
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit ee3275905a133a627f8926fc241271640ed69066[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Oct 4 16:31:20 2026 +0300
+
+    last update
+
+[33mcommit 52a77296aefbdcbe8cafe71789f9cf14385ab969[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Oct 4 16:13:08 2026 +0300
+
+    new update
+
+[33mcommit c551e1587b461bf6eceee3a4401b2934a391de46[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Oct 4 14:45:11 2026 +0300
+
+    new update and pages
+
+[33mcommit 8df10b9f71ef2c83ddb3a1ac2202b3307e8769c9[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Thu Oct 1 16:23:03 2026 +0300
+
+    fix errors
+
+[33mcommit 1b4e1fd79c8d81b94e98454f776a88f0e28110c4[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Thu Oct 1 15:51:42 2026 +0300
+
+    filter correction
+
+[33mcommit c2b7df10fb380d613f7a5ba7790b8475aa3d75da[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Wed Sep 30 15:49:28 2026 +0300
+
+    new button added if the search has no data
+
+[33mcommit 5d03f7a9f9c1d26753e1bb3cdf633969a2bee0ef[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Wed Sep 30 14:15:29 2026 +0300
+
+    new coulmn filter
+
+[33mcommit 041a77b967fb886e138d927d1449cb8484162f60[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Wed Sep 30 12:17:54 2026 +0300
+
+    new dashboard features
+
+[33mcommit 5f3d69c5e17d2ae30784de5701dec0642a4722e8[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Wed Sep 30 11:32:49 2026 +0300
+
+    updated clients page filters and main dashboard filters
+
+[33mcommit 346cd3f6bfb54dafb83e0ceda9237dc8613dc758[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Tue Sep 29 16:35:39 2026 +0300
+
+    new features
+
+[33mcommit 2bac4d5d7a353a4052f86541e6f366df13bc9b5c[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 27 23:44:37 2026 +0300
+
+    fix status client page
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit 4338c3de8b1bdbf0f82a9c1d87baca595ee4aeeb[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 27 23:27:49 2026 +0300
+
+    fix client filter mark
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit 8fcd7a5e8832f85191ec18398b0f82249e0e0dbc[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 27 23:09:36 2026 +0300
+
+    last version
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit 4e5313d9cd42e843baadf77372b9d0be242fa811[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 27 20:03:03 2026 +0300
+
+    fix login page
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit 373905346e3c7b8b9808cf38e6cccb9e451c8425[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 27 19:45:00 2026 +0300
+
+    client page edit
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit c8f09182d297fc3f688a9ba9c65c1111c7cd5e0a[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 27 18:48:26 2026 +0300
+
+    edit header
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit f6d92e2c6ffc65672a983c3dad9e06826f279094[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 27 17:22:45 2026 +0300
+
+    arabic translate
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit bbab08347b24b77464aea2a08d46fdcf14c56649[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 20 15:43:06 2026 +0300
+
+    new features improved like clients error for archiving and link to vercel
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit 5a5c76c9c62311d013f33ff8e4daaeef7054b440[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Fri Sep 18 02:50:21 2026 +0300
+
+    fix marketing editing
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit 8a3ef770593640cb8b6a46f784e607fd1f5add2f[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Fri Sep 18 01:54:52 2026 +0300
+
+    new update
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit c5aa5c11748da613614ef47284ade6b819d36a55[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Tue Sep 15 21:17:43 2026 +0300
+
+    fix: add missing bcryptjs dependency
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit eb80d7fbc9b73482234df84acead192fdd7473dc[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Tue Sep 15 20:16:19 2026 +0300
+
+    cline ai edit
+    
+    Co-authored-by: ByNara <admin@bynara.id>
+    Model: unknown
+
+[33mcommit 7ad7f42aa57dbc9acbda180e10c590ee6d401c95[m[33m ([m[1;32magents/hey[m[33m)[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Mon Sep 14 15:57:52 2026 +0300
+
+    Initial commit for production deployment
+
+[33mcommit 899c30f488d2827b2f35610dde73c92cf6c71b26[m
+Author: Moustafa Ahmed <moustafa.ahmed8448@gmail.com>
+Date:   Sun Sep 13 20:36:50 2026 +0300
+
+    Initial commit from Create Next App

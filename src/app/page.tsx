@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download, Grid2X2,
   LayoutDashboard, Pencil, Plus, Search, Trash2, UsersRound, X as XIcon,
-  Check, AlertCircle, MessageSquare, Filter, Archive, Upload, GitMerge,
+  Check, AlertCircle, MessageSquare, Filter, Archive, Upload, GitMerge, ChevronDown,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
@@ -48,6 +48,12 @@ import ColumnPicker from "@/components/ColumnPicker";
 import ClientFilterBar from "@/components/ClientFilterBar";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import DuplicatesPanel from "@/components/DuplicatesPanel";
+import FollowUpWorkspace from "@/components/FollowUpWorkspace";
+import BulkEditModal from "@/components/BulkEditModal";
+import StaleClientsPanel from "@/components/StaleClientsPanel";
+import ActivityFeedPanel from "@/components/ActivityFeedPanel";
+import ArchiveReasonModal from "@/components/ArchiveReasonModal";
+import ContactButtons from "@/components/ContactButtons";
 import ClientTable from "@/components/ClientTable";
 import { useOptionColors } from "@/lib/option-colors";
 import { useStatusLabels } from "@/lib/status-labels";
@@ -376,6 +382,10 @@ export default function Home() {
   /* Duplicate review is admin-only (the endpoint enforces it too), so the panel is
      simply never opened for anyone else. */
   const [dupesOpen, setDupesOpen] = useState(false);
+  /* Feature modals: bulk edit, archive-with-reason. Rendered at Home level so
+     the toasts and list refreshes they need are in scope. */
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<{ ids: string[]; names: string[] } | null>(null);
   // Table order. Defaults to most-recently-updated, which is the order the API
   // already returns, so the initial view is unchanged.
   const [sortBy, setSortBy] = useState<SortField>("recent");
@@ -973,11 +983,37 @@ export default function Home() {
   };
   const closeDelete = () => setConfirmDelete(null);
 
-  const archiveClient = async (id: string) => {
+  const archiveClient = async (id: string, reason?: string) => {
+    const client = clients.find((c) => c.id === id);
     const r = await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, archived: true }) });
     if (!r.ok) { addToast("error", apiErrorMessage(t, await readApiError(r))); return; }
+    if (reason) {
+      await fetch("/api/crm/clients", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, notes: `${t("archive.reasonLabel")}: ${reason}` }),
+      }).catch(() => undefined);
+    }
     setClients(prev => prev.filter(c => c.id !== id));
-    addToast("info", t("clients.archivedToast"));
+    addToast("info", reason
+      ? `${t("clients.archivedToast")} — ${reason}`
+      : t("clients.archivedToast"));
+    void client;
+  };
+
+  /** Opens the reason modal for one client (table / kanban / detail panel). */
+  const askArchiveClient = (id: string) => {
+    const c = clients.find((x) => x.id === id) ?? (detailClient?.id === id ? detailClient : undefined);
+    setArchiveTarget({ ids: [id], names: c ? [c.name] : [] });
+  };
+
+  /** Runs the pending archive (single or bulk) with the given reason. */
+  const confirmArchive = async (reason: string) => {
+    const target = archiveTarget;
+    if (!target) return;
+    setArchiveTarget(null);
+    for (const id of target.ids) await archiveClient(id, reason || undefined);
+    setSelectedIds(new Set());
+    if (target.ids.length > 1) addToast("info", t("clients.bulkArchived", { n: target.ids.length }));
   };
 
   /**
@@ -1024,10 +1060,53 @@ export default function Home() {
   const archiveSelected = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
-    for (const id of ids) await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, archived: true }) });
-    setClients(prev => prev.filter(c => !selectedIds.has(c.id)));
+    const names = filteredClients.filter(c => selectedIds.has(c.id)).map(c => c.name);
+    setArchiveTarget({ ids, names });
+  };
+
+  /**
+   * Snoozes one follow-up by N days. Reuses updateClientField so the row, the
+   * detail panel and the toast stay consistent with every other field edit.
+   */
+  const snoozeFollowUp = async (id: string, days: number) => {
+    const next = new Date(Date.now() + days * 86400000).toISOString();
+    await updateClientField(id, { nextFollowUpAt: next });
+    const c = clients.find((x) => x.id === id);
+    if (c) addToast("success", t("followupWorkspace.snoozedToast", { name: c.name, n: days }));
+  };
+
+  /** Clears one follow-up (marks it done). */
+  const doneFollowUp = async (id: string) => {
+    await updateClientField(id, { nextFollowUpAt: null });
+    const c = clients.find((x) => x.id === id);
+    if (c) addToast("success", t("followupWorkspace.doneToast", { name: c.name }));
+  };
+
+  /**
+   * Applies a bulk-edit patch to the ticked rows via the same `{ ids, ... }`
+   * PATCH the bulk-status action uses — one transaction server-side.
+   */
+  const applyBulkEdit = async (patch: Record<string, string | null>) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    const res = await fetch("/api/crm/clients", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, ...patch }),
+    }).catch(() => null);
+    setBulkBusy(false);
+    setBulkEditOpen(false);
+    if (!res || !res.ok) {
+      addToast("error", apiErrorMessage(t, res ? await readApiError(res) : undefined));
+      return;
+    }
+    const stamp = new Date().toISOString();
+    setClients(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, ...patch, lastUpdateDate: stamp } : c)));
+    setTableRows(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, ...patch, lastUpdateDate: stamp } : c)));
     setSelectedIds(new Set());
-    addToast("info", t("clients.bulkArchived", { n: ids.length }));
+    refreshNotifications();
+    addToast("success", t("bulkEdit.done", { n: ids.length }));
   };
 
   const toggleSelect = (id: string) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -1276,9 +1355,12 @@ userAvatars={userAvatars}
             bulkCount={selectedIds.size}
             isAdmin={user.role === "Admin"}
             canEdit={canEdit}
-            onArchive={archiveClient}
+            onArchive={askArchiveClient}
             onArchiveSelected={archiveSelected}
             onBulkStatus={bulkSetStatus}
+            onSnoozeFollowUp={snoozeFollowUp} onDoneFollowUp={doneFollowUp}
+            onOpenBulkEdit={() => setBulkEditOpen(true)}
+            lang={lang}
             onSetFollowUp={setFollowUpFilter}
       followUpCounts={followUpCounts}
             onBulkDelete={() => { if (selectedIds.size === 0) return; setConfirmDelete({ ids: [...selectedIds], names: filteredClients.filter(c => selectedIds.has(c.id)).map(c => c.name) }); }}
@@ -1426,7 +1508,7 @@ userAvatars={userAvatars}
           onClose={closeDetail}
           onEdit={canEdit ? () => { openEdit(detailClient); closeDetail(); } : undefined}
           onDelete={user.role === "Admin" ? () => { closeDetail(); setTimeout(() => setConfirmDelete({ ids: [detailClient.id], names: [detailClient.name] }), 200); } : undefined}
-          onArchive={user.role === "Admin" ? () => { closeDetail(); archiveClient(detailClient.id); } : undefined}
+          onArchive={user.role === "Admin" ? () => { closeDetail(); setTimeout(() => askArchiveClient(detailClient.id), 200); } : undefined}
           /* Coloured from the registry, not a per-status CSS class:
              .status-select.waiting never matched `status-no_response`, so every
              new stage rendered as a bare unstyled select. */
@@ -1453,6 +1535,30 @@ userAvatars={userAvatars}
       <div className="toast-container">
         {toasts.map(t => <div key={t.id} className={`toast toast-${t.type}`}><span>{t.message}</span></div>)}
       </div>
+
+      {/* Bulk edit modal — same selection the bulk bar acts on. */}
+      {bulkEditOpen && selectedIds.size > 0 && (
+        <BulkEditModal
+          count={selectedIds.size}
+          allStatuses={allStatuses}
+          allChannels={allChannels}
+          allLocations={allLocations}
+          users={users}
+          onClose={() => setBulkEditOpen(false)}
+          onApply={applyBulkEdit}
+          t={t}
+        />
+      )}
+
+      {/* Archive with optional reason — single or bulk. */}
+      {archiveTarget && (
+        <ArchiveReasonModal
+          name={archiveTarget.names.length <= 2 ? archiveTarget.names.join(", ") : t("clients.selectedCount", { n: archiveTarget.ids.length })}
+          onClose={() => setArchiveTarget(null)}
+          onConfirm={confirmArchive}
+          t={t}
+        />
+      )}
     </main>
   );
 }
@@ -2090,6 +2196,16 @@ function KpiCard({ label, value, sub, accent, delta, t }: {
   );
 }
 
+/** The three triage views that share the collapsed Insights bar. */
+const INSIGHT_TABS = ["followup", "stale", "activity"] as const;
+type InsightTab = (typeof INSIGHT_TABS)[number];
+/** i18n key per tab, so the bar's label matches the panel it opens. */
+const INSIGHT_LABEL: Record<InsightTab, string> = {
+  followup: "followupWorkspace.title",
+  stale: "stale.title",
+  activity: "activityFeed.title",
+};
+
 function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, onSetFollowUp, followUpCounts, clearAllFilters, onApplyFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDuplicates, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
@@ -2098,6 +2214,7 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   onClearSelection,
   onSelectAllMatching,
   onBulkStatus,
+  onSnoozeFollowUp, onDoneFollowUp, onOpenBulkEdit, lang,
   pager, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void;
   /**
    * Replaces the WHOLE filter state at once, for the saved-views bar. Separate
@@ -2117,7 +2234,13 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   onSetFollowUp: (value: string) => void;
   /** Per-bucket client counts for the follow-up chip badges. */
   followUpCounts?: Record<string, number>;
-  pager?: { page: number; pageCount: number; total: number; loading: boolean; onPage: (p: number) => void; t: TFn }; t: TFn }) {
+  pager?: { page: number; pageCount: number; total: number; loading: boolean; onPage: (p: number) => void; t: TFn }; t: TFn;
+  /** Feature wiring: follow-up triage, stale list, bulk edit, contact actions. */
+  onSnoozeFollowUp?: (id: string, days: number) => void | Promise<void>;
+  onDoneFollowUp?: (id: string) => void | Promise<void>;
+  onOpenBulkEdit?: () => void;
+  lang?: string;
+}) {
   // Page controls for the paged table. Supplied only in table mode — kanban
   // renders the whole book at once, so a pager there would be meaningless.
   const showPager = Boolean(pager && mode === "table");
@@ -2128,6 +2251,10 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   // For the bulk-status dropdown: moving a selection to a stage must name it the
   // same way the rest of the screen does.
   const statusLabels = useStatusLabels();
+  // Insights bar: collapsed by default so the clients page opens on the table,
+  // not on the triage panels. The tab it opens on is remembered while mounted.
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [insightsTab, setInsightsTab] = useState<InsightTab>("followup");
 
   return (
     <div className="page">
@@ -2157,6 +2284,11 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
             )}
             {isAdmin && <><button className="btn-danger-sm" onClick={onBulkDelete}>{t("clients.deleteSelected")}</button>
               <button className="btn-archive-sm" onClick={onArchiveSelected}>{t("clients.archiveSelected")}</button></>}
+            {/* Bulk edit: same selection, more fields. Gated on canEdit like the
+                bulk-status dropdown above — same permission, wider patch. */}
+            {canEdit && onOpenBulkEdit && bulkCount > 0 && (
+              <button className="btn-outline btn-sm" onClick={onOpenBulkEdit}>{t("bulkEdit.apply")}</button>
+            )}
             {/* Always offered while anything is ticked. Selecting every visible row
                 then wanting to change your mind had no way back except re-clicking
                 them one at a time. */}
@@ -2200,6 +2332,65 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
           </button>
         )}
       </div>
+      {/* Insights bar — the three triage panels behind ONE collapsed strip, so the
+          clients page still opens as a clients table. Collapsed by default; the
+          chevron or a tab click expands it, and only the active tab is mounted. */}
+      <section className={`panel insights-bar${insightsOpen ? " is-open" : ""}`}>
+        <div className="insights-bar-head">
+          <button
+            type="button"
+            className="insights-bar-toggle"
+            aria-expanded={insightsOpen}
+            onClick={() => setInsightsOpen((o) => !o)}
+          >
+            <ChevronDown size={14} />
+            <span>{t("insights.title")}</span>
+          </button>
+          <div className="segmented" role="tablist" aria-label={t("insights.title")}>
+            {INSIGHT_TABS.map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={insightsTab === k}
+                className={insightsTab === k ? "seg-active" : ""}
+                onClick={() => { setInsightsTab(k); setInsightsOpen(true); }}
+              >
+                {t(INSIGHT_LABEL[k])}
+              </button>
+            ))}
+          </div>
+        </div>
+        {insightsOpen && (
+          <div className="insights-bar-body">
+            {insightsTab === "followup" && onSnoozeFollowUp && onDoneFollowUp && (
+              <FollowUpWorkspace
+                clients={allClients}
+                onSnooze={onSnoozeFollowUp}
+                onDone={onDoneFollowUp}
+                onOpenDetail={onOpenDetail}
+                t={t}
+                lang={lang ?? "en"}
+              />
+            )}
+            {insightsTab === "stale" && (
+              <StaleClientsPanel clients={allClients} onOpenDetail={onOpenDetail} t={t} lang={lang ?? "en"} />
+            )}
+            {/* The feed reads the FULL book in both modes: `clients` is the paged
+                table rows in table mode, and that endpoint carries no activityLog —
+                which is why the table view claimed "No activity yet" while kanban
+                (fed from the same full list) showed entries. */}
+            {insightsTab === "activity" && (
+              <ActivityFeedPanel
+                clients={allClients}
+                onOpenDetail={(id) => { const c = allClients.find(x => x.id === id); if (c) onOpenDetail(c); }}
+                t={t}
+                lang={lang ?? "en"}
+              />
+            )}
+          </div>
+        )}
+      </section>
       {mode==="table"? <ClientTable clients={clients} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} columns={columns} onColumnsChange={onColumnsChange} rtl={rtl} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} columns={columns} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
       {/* Pager. Only in table mode — kanban shows the whole book. */}
       {showPager && pager && (

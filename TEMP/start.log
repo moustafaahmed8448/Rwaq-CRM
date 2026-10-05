@@ -1,0 +1,12 @@
+
+> rwaq-crm-rebuild@0.1.0 start
+> next start
+
+▲ Next.js 16.3.5
+- Local:         http://localhost:3000
+- Network:       http://192.168.176.1:3000
+✓ Ready in 109ms
+⚠ Warning: Next.js ignored package-lock.json in C:\Users\moustafa because it is outside the current Git repository (C:\Users\moustafa\Desktop\Rwaq CRM).
+ To use this directory, set `outputFileTracingRoot` in your Next.js config.
+
+✓ Running next.config.ts took 27ms

@@ -21,6 +21,7 @@
 import { ArrowUpRight, Archive, Pencil, Trash2, UsersRound, X as XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import StatusPill from "@/components/StatusPill";
+import ContactButtons from "@/components/ContactButtons";
 import { dateLocale, isOverdue } from "@/lib/format";
 import { useOptionColors } from "@/lib/option-colors";
 import { channelLabel } from "@/lib/reporting";
@@ -69,7 +70,7 @@ export default function ClientDetailPanel({
         </div>
         <div className="detail-body">
           <div className="detail-meta">
-            <div className="meta-item"><span className="meta-label">{t("form.phone")}</span><span className="meta-value"><span className="ltr-num">{client.phoneNumber}</span></span></div>
+            <div className="meta-item"><span className="meta-label">{t("form.phone")}</span><span className="meta-value"><span className="ltr-num">{client.phoneNumber}</span><ContactButtons phone={client.phoneNumber} t={t} /></span></div>
             <div className="meta-item">
               <span className="meta-label">{t("form.status")}</span>
               {statusControl ?? <StatusPill status={client.status} t={t} />}

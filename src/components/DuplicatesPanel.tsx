@@ -187,10 +187,29 @@ export default function DuplicatesPanel({
                         onChange={() => setKeep((prev) => ({ ...prev, [key]: c.id }))}
                       />
                       <span className="dupes-row-main">
-                        <b>
-                          <span className="linked-id">#{c.id}</span>
-                          {c.name}
-                        </b>
+                        {/* One head line: name grows and ellipsizes, the status pill
+                            and the open button sit pinned to its end. Previously the
+                            pill and button were siblings of this whole column, so the
+                            wrapped field list competed with them for width and the
+                            row read as cramped and misaligned. */}
+                        <span className="dupes-row-head">
+                          <b>
+                            <span className="linked-id">#{c.id}</span>
+                            {c.name}
+                          </b>
+                          <StatusPill status={c.status} t={t} variant="badge" />
+                          <button
+                            type="button"
+                            className="icon-btn-sm"
+                            title={t("detail.timeline")}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              router.push(`/clients/${c.id}`);
+                            }}
+                          >
+                            <ArrowUpRight size={13} />
+                          </button>
+                        </span>
                         <span className="dupes-row-fields">
                           {COMPARE.map((f) => (
                             <span key={f} className={differing.includes(f) ? "dupe-differs" : undefined}>
@@ -207,18 +226,6 @@ export default function DuplicatesPanel({
                         )}
                         {c.notes && <span className="dupes-row-extra">{c.notes.slice(0, 120)}</span>}
                       </span>
-                      <StatusPill status={c.status} t={t} variant="badge" />
-                      <button
-                        type="button"
-                        className="icon-btn-sm"
-                        title={t("detail.timeline")}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          router.push(`/clients/${c.id}`);
-                        }}
-                      >
-                        <ArrowUpRight size={13} />
-                      </button>
                     </label>
                   ))}
                 </div>

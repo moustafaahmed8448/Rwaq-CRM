@@ -79,3 +79,27 @@ export function isOverdue(value?: string | null, now: Date = new Date()): boolea
   if (!key) return false;
   return key < localDayKey(now);
 }
+
+/**
+ * Digits-only phone, for `tel:` / `wa.me` links.
+ *
+ * Stored numbers carry spaces, dashes, parentheses or a leading `+`; dial and
+ * WhatsApp links need the plain digits. A leading `00` is folded to nothing
+ * (the stored value already carries the country code in that form).
+ */
+export function phoneDigits(phone?: string | null): string {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  return digits.replace(/^00/, "");
+}
+
+/** `tel:` link for a stored phone number, or "" when there is nothing to dial. */
+export function telHref(phone?: string | null): string {
+  const digits = phoneDigits(phone);
+  return digits ? `tel:+${digits}` : "";
+}
+
+/** `wa.me` link for a stored phone number, or "" when there is nothing to message. */
+export function whatsAppHref(phone?: string | null): string {
+  const digits = phoneDigits(phone);
+  return digits ? `https://wa.me/${digits}` : "";
+}

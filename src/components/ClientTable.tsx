@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, MessageSquare, Pencil, Trash2 } from "lucide-react";
 import StatusPill from "@/components/StatusPill";
+import ContactButtons from "@/components/ContactButtons";
 import { useLang } from "@/lib/i18n";
 import { dateLocale, isOverdue } from "@/lib/format";
 import { useOptionColors } from "@/lib/option-colors";
@@ -53,6 +54,7 @@ function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdi
         <span className="person-cell" onClick={() => onOpenDetail(c)}>
           <b>{c.name}</b>
           <small><span className="ltr-num">{c.phoneNumber}</span></small>
+          <ContactButtons phone={c.phoneNumber} t={t} compact />
           {c.notes && <span className="notes-indicator"><MessageSquare size={10} /></span>}
         </span>
       );
