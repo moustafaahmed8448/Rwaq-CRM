@@ -12,6 +12,7 @@ import {
   UserRound, UserCog, TableProperties,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import CommandPalette from "@/components/CommandPalette";
 
 export type HeaderUser = { name: string; initials: string; role?: string };
 export type NavTab = "dashboard" | "clients" | "archived" | "marketing" | "metrics" | "users" | "options" | "profile" | "settings";
@@ -244,6 +245,10 @@ export default function AppHeader({
         </nav>
 
         <div className="topbar-right">
+          {/* Global client search. Mounted here rather than on each page so it is
+              reachable from every screen — the whole point is not having to
+              navigate to the clients table first. */}
+          <CommandPalette t={t} />
           <div className="lang-switch" dir="ltr">
             <button
               type="button"

@@ -11,6 +11,7 @@ import { apiErrorMessage } from "@/lib/api-errors";
 import { channelLabel, locationLabel, statusLabel } from "@/lib/reporting";
 import { optionColor } from "@/lib/ref-options";
 import { useOptionColors } from "@/lib/option-colors";
+import { useStatusLabels } from "@/lib/status-labels";
 import StatusPill from "@/components/StatusPill";
 import { dateLocale } from "@/lib/format";
 
@@ -67,6 +68,9 @@ export default function ArchivedPage() {
   const isAdmin = user?.role === "Admin";
   // Shared colour map, so a recoloured channel or status matches everywhere.
   const colors = useOptionColors();
+  // Archived rows keep their status value, so the archive filters must name a
+  // renamed stage the same way the live screens do.
+  const statusLabels = useStatusLabels();
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const load = useCallback(async () => {
@@ -199,7 +203,7 @@ export default function ArchivedPage() {
             <Search size={15} />
             <input placeholder={t("archive.searchPh")} value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          <MultiSelect label={t("filter.allStatuses")} options={archiveStatuses} selected={statusFilter} onChange={setStatusFilter} render={v => statusLabel(t, v)} t={t} />
+          <MultiSelect label={t("filter.allStatuses")} options={archiveStatuses} selected={statusFilter} onChange={setStatusFilter} render={v => statusLabel(t, v, statusLabels)} t={t} />
           <MultiSelect label={t("filter.allChannels")} options={archiveChannels} selected={channelFilter} onChange={setChannelFilter} render={v => channelLabel(t, v)} t={t} />
           <MultiSelect label={t("filter.allLocations")} options={archiveLocations} selected={locationFilter} onChange={setLocationFilter} render={v => locationLabel(t, v)} t={t} />
         </div>
@@ -231,7 +235,7 @@ export default function ArchivedPage() {
             {query && <span className="filter-chip">&ldquo;{query.slice(0, 24)}&rdquo;<button title={t("common.clear")} onClick={() => setQuery("")}>×</button></span>}
             {statusFilter.map(s => (
               <span key={`a-st-${s}`} className="filter-chip">
-                {statusLabel(t, s)}
+                {statusLabel(t, s, statusLabels)}
                 <button title={t("common.clear")} onClick={() => setStatusFilter(statusFilter.filter(x => x !== s))}>×</button>
               </span>
             ))}

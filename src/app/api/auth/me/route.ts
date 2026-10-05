@@ -118,8 +118,15 @@ export async function PATCH(request: NextRequest) {
     }
     if (avatar !== undefined) {
       const updated = await updateUser(username, { avatar });
-      // Report what is actually stored. A null here means the row went away.
-      avatar = updated ? (updated.avatar ?? null) : null;
+      /* `updateUser` rethrows anything that is not a missing row, so reaching
+         here means the write genuinely ran. A null `updated` is therefore a
+         definite "this account no longer exists", NOT a quiet failure — it used
+         to be folded into the success path, which reported a photo as saved
+         when the write had thrown. Answer 404 so the screen can say so. */
+      if (!updated) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+      avatar = updated.avatar ?? null;
     }
 
     /* Checks all THREE fields. It used to test only the first two, so a request

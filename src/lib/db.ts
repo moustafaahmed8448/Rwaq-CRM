@@ -38,7 +38,7 @@ export function databaseErrorMessage(error: unknown): string {
 
 /* ── Reference data (channels / statuses / locations) ─────────────────────── */
 
-export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "optionColors" | "statusBuckets";
+export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "optionColors" | "statusBuckets" | "statusLabels";
 
 export async function readSetting(key: SettingKey): Promise<string[]> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -112,6 +112,115 @@ export async function writeSettingObject(
     update: { value: value as Prisma.InputJsonValue },
     create: { key, value: value as Prisma.InputJsonValue },
   });
+}
+
+/* ── Saved filter views (per user) ────────────────────────────────
+   Stored in the existing `Setting` table under `savedViews:<username>` rather
+   than in a new AppUser column.
+
+   That is a deliberate choice over a dedicated column: a saved view is user
+   data that arrived after the column-based layout work was finished, and the
+   repo's own history (prisma/sql/008, 009) is that every new AppUser field
+   costs a migration plus a manual psql step on each environment. `Setting` is
+   already the workspace's key/value escape hatch for exactly this shape of
+   data — the reference lists, the colour map and the status buckets all live
+   there — so a saved view is the same kind of thing with a per-user key.
+
+   Keying by username rather than storing one shared blob also means two people
+   can have genuinely different views without a merge rule, and deleting a view
+   touches one row instead of rewriting a shared array. */
+export type SavedView = {
+  /** Stable id, so a rename does not look like a delete + create. */
+  id: string;
+  name: string;
+  /** The filter state to restore. Shape mirrors Filters in client-types.ts. */
+  filters: SavedViewFilters;
+  createdAt: string;
+};
+
+/**
+ * Only the keys a saved view may carry.
+ *
+ * Explicit rather than `Filters` so a stored view cannot smuggle in a key the
+ * client does not know how to restore — the payload is user-editable JSON, and
+ * `Object.assign`-ing an unknown key into live filter state is how a saved view
+ * ends up silently controlling something invisible.
+ */
+export type SavedViewFilters = {
+  query?: string;
+  status?: string[];
+  channel?: string[];
+  location?: string[];
+  firstContact?: string[];
+  secondContact?: string[];
+  followUp?: string;
+  startDate?: string;
+  endDate?: string;
+};
+
+const MAX_VIEWS = 30;
+const MAX_NAME = 60;
+const savedViewsKey = (username: string) =>
+  `savedViews:${String(username ?? "").trim().toLowerCase()}`;
+
+/** Coerces one stored entry, dropping it if any part is unusable. */
+function coerceSavedView(raw: unknown): SavedView | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const entry = raw as Record<string, unknown>;
+  const name = typeof entry.name === "string" ? entry.name.trim().slice(0, MAX_NAME) : "";
+  if (!name || !entry.filters || typeof entry.filters !== "object") return null;
+
+  const f = entry.filters as Record<string, unknown>;
+  const listOf = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 50) : [];
+  const text = (v: unknown): string | undefined =>
+    typeof v === "string" ? v.slice(0, 200) : undefined;
+
+  return {
+    id: typeof entry.id === "string" && entry.id ? entry.id.slice(0, 40) : name,
+    name,
+    filters: {
+      query: text(f.query),
+      status: listOf(f.status),
+      channel: listOf(f.channel),
+      location: listOf(f.location),
+      firstContact: listOf(f.firstContact),
+      secondContact: listOf(f.secondContact),
+      followUp: text(f.followUp),
+      startDate: text(f.startDate),
+      endDate: text(f.endDate),
+    },
+    createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
+  };
+}
+
+export async function readSavedViews(username: string): Promise<SavedView[]> {
+  const row = await prisma.setting.findUnique({ where: { key: savedViewsKey(username) } });
+  if (!Array.isArray(row?.value)) return [];
+  return (row.value as unknown[])
+    .map(coerceSavedView)
+    .filter((v): v is SavedView => v !== null)
+    .slice(0, MAX_VIEWS);
+}
+
+export async function writeSavedViews(username: string, views: SavedView[]): Promise<void> {
+  const value = views.slice(0, MAX_VIEWS);
+  await prisma.setting.upsert({
+    where: { key: savedViewsKey(username) },
+    update: { value: value as unknown as Prisma.InputJsonValue },
+    create: { key: savedViewsKey(username), value: value as unknown as Prisma.InputJsonValue },
+  });
+}
+
+/** Reads, mutates and writes back — one round trip, so a lost update is far less likely. */
+export async function mutateSavedViews(
+  username: string,
+  mutate: (views: SavedView[]) => SavedView[],
+): Promise<SavedView[]> {
+  const current = await readSavedViews(username);
+  const next = mutate(current).slice(0, MAX_VIEWS);
+  await writeSavedViews(username, next);
+  return next;
 }
 
 /* ── Reference-option rename (admin) ───────────────────────────────────────
@@ -890,6 +999,232 @@ export async function listImportBaseline(): Promise<BaselineClient[]> {
 
 export type ClientPatch = Partial<NewClientInput> & { archived?: boolean };
 
+/* ── Duplicate detection & merge ──────────────────────────────────
+   Two clients are treated as the same lead when their phone numbers reduce to
+   the same digits. That is the one field in this schema that is effectively an
+   identity: a number typed as "+20 101 824 0912", "01018240912" and "1018240912"
+   is the same person, and all three variants occur in real data.
+
+   Name is NOT used as an identity signal on its own — family and shared business
+   names are common here, so two rows called "Mohammed" are far more likely to be
+   two different people than one person entered twice. Name-only groups are still
+   reported, but as a weaker `reason` so the UI can present them for review rather
+   than as an obvious merge. */
+
+/** Digits only, with a leading Saudi `00`/`+` form normalised away. */
+export function normalizePhone(phone: string): string {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  if (digits.startsWith("00")) return digits.slice(2);
+  return digits;
+}
+
+/** Why a group was flagged. `phone` is the confident one; see the note above. */
+export type DuplicateReason = "phone" | "name";
+export type DuplicateGroup = {
+  reason: DuplicateReason;
+  /** The normalised value the group matched on, shown as the group heading. */
+  key: string;
+  /** Oldest first, so the earliest record is the natural "primary". */
+  clients: ClientRow[];
+};
+
+/**
+ * Groups clients that look like the same lead.
+ *
+ * Loads the ACTIVE book (archived rows are excluded — an archived row is
+ * deliberately out of the book, so pairing it with a live one would surface a
+ * "duplicate" the user already resolved by archiving) and groups in memory.
+ * The book is small enough that a round trip per candidate pair would be slower
+ * and far more code than one scan.
+ *
+ * A group of one is dropped: a client with a unique phone is not a duplicate of
+ * anything, and listing it would bury the real findings.
+ */
+export async function findDuplicates(includeArchived = false): Promise<DuplicateGroup[]> {
+  const rows = await listClients(includeArchived ? {} : { includeArchived: false });
+  const byPhone = new Map<string, ClientRow[]>();
+  const byName = new Map<string, ClientRow[]>();
+
+  for (const row of rows) {
+    const phone = normalizePhone(row.phoneNumber);
+    // A 4-digit "phone" is a placeholder, not a contact detail — grouping on those
+    // would merge every row someone left blank.
+    if (phone.length >= 7) {
+      const list = byPhone.get(phone) ?? [];
+      list.push(row);
+      byPhone.set(phone, list);
+    }
+    const name = String(row.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+    if (name.length >= 3) {
+      const list = byName.get(name) ?? [];
+      list.push(row);
+      byName.set(name, list);
+    }
+  }
+
+  const byId = (a: ClientRow, b: ClientRow) =>
+    Number(a.id) - Number(b.id) || a.createdAt.localeCompare(b.createdAt);
+
+  const groups: DuplicateGroup[] = [];
+  for (const [key, list] of byPhone) {
+    if (list.length > 1) groups.push({ reason: "phone", key, clients: [...list].sort(byId) });
+  }
+  for (const [key, list] of byName) {
+    if (list.length > 1) {
+      groups.push({ reason: "name", key, clients: [...list].sort(byId) });
+    }
+  }
+
+  /* A phone group already covers every row in a matching-name group, so the
+     name group is dropped rather than shown as a second, weaker copy of the same
+     finding. Without this, one duplicated lead appears twice in the list and the
+     admin merges it twice. */
+  const covered = new Set(groups.filter((g) => g.reason === "phone").flatMap((g) => g.clients.map((c) => c.id)));
+  return groups.filter((g) => g.reason === "phone" || !g.clients.every((c) => covered.has(c.id)));
+}
+
+/**
+ * Fields a merge resolves by taking the first NON-EMPTY value, in the order the
+ * rows are given.
+ *
+ * Empty loses, always. That rule is the whole merge: it means the result keeps the
+ * notes, project and owner that only ONE of the two rows happened to have, instead
+ * of the survivor's blanks silently erasing data the user had actually typed.
+ * `status` is deliberately NOT in this list — "first non-empty" would mean the
+ * older row's stage always wins, which is a business decision, not a data-recovery
+ * one, so status is left exactly as the chosen survivor had it.
+ */
+const MERGE_FILL_DOWN = [
+  "name",
+  "phoneNumber",
+  "project",
+  "location",
+  "acquisitionChannel",
+  "operationToTake",
+  "firstContactPerson",
+  "secondContactPerson",
+] as const;
+
+export type MergeResult = {
+  /** The row that survived. */
+  survivorId: string;
+  /** The rows that were folded into it and removed. */
+  mergedIds: string[];
+  /** Human-readable notes about what the merge did and skipped. */
+  warnings: string[];
+};
+
+/**
+ * Folds `sourceIds` into `primaryId`, then deletes the sources.
+ *
+ * Runs in ONE transaction. A partial merge is worse than no merge at all: it can
+ * leave two rows sharing a phone number after the user was told they were merged,
+ * and re-running the merge then produces a different answer than the first run.
+ *
+ * Refuses rather than guessing when the survivor is not in the set, and when any
+ * id does not exist — silently merging N-1 of N would delete records with no way
+ * to know which.
+ */
+export async function mergeClients(
+  primaryId: string,
+  sourceIds: string[],
+  actor: string,
+): Promise<MergeResult | null> {
+  const primary = String(primaryId ?? "").trim();
+  const sources = [...new Set(sourceIds.map((s) => String(s ?? "").trim()))].filter(
+    (s) => s && s !== primary,
+  );
+  if (!primary || sources.length === 0) return null;
+
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.client.findMany({ where: { id: { in: [primary, ...sources] } } });
+    if (rows.length !== sources.length + 1) return null;
+
+    const survivor = rows.find((r) => r.id === primary)!;
+    const others = sources.map((id) => rows.find((r) => r.id === id)!);
+
+    const warnings: string[] = [];
+
+    /* Fill-down, in a stable order: survivor first, then the sources oldest-first
+       so the OLDEST source's value beats a newer one when both are set. That keeps
+       the result deterministic — merging the same group twice gives the same
+       row — which matters because the user may not notice a partial failure. */
+    const ordered = [survivor, ...others.sort((a, b) => Number(a.id) - Number(b.id))];
+    const data: Record<string, unknown> = {};
+    for (const field of MERGE_FILL_DOWN) {
+      const current = String((survivor as Record<string, unknown>)[field] ?? "").trim();
+      if (current) continue;
+      const found = ordered
+        .map((r) => String((r as Record<string, unknown>)[field] ?? "").trim())
+        .find(Boolean);
+      if (found) {
+        data[field] = found;
+        warnings.push(`${field} filled from a merged record`);
+      }
+    }
+
+    // Notes are concatenated, never replaced: they are free prose and two partial
+    // notes are more useful than one of them. Duplicated text is dropped so
+    // re-merging the same record twice does not double every sentence.
+    const notes = [...new Set(
+      ordered
+        .map((r) => String(r.notes ?? "").trim())
+        .filter(Boolean),
+    )].join("\n\n");
+    if (notes) data.notes = notes;
+
+    /* Follow-up: the EARLIEST future date wins, falling back to any date at all.
+       Taking the survivor's blindly would let a stale past date hide a fresher
+       one; taking the latest would push a real deadline back. */
+    const dates = ordered
+      .map((r) => r.nextFollowUpAt)
+      .filter((d): d is Date => d instanceof Date && !Number.isNaN(d.getTime()));
+    if (dates.length > 0) {
+      const earliest = new Date(Math.min(...dates.map((d) => d.getTime())));
+      if (!survivor.nextFollowUpAt || earliest.getTime() < survivor.nextFollowUpAt.getTime()) {
+        data.nextFollowUpAt = earliest;
+        warnings.push("follow-up date moved to the earliest of the merged records");
+      }
+    }
+
+    /* Activity logs are concatenated oldest-first. The survivor's own entries keep
+       their ids; a colliding id from a source is dropped rather than duplicated,
+       because the list is keyed by id and two entries under one key render as one. */
+    const mergedLog: unknown[] = [];
+    const seen = new Set<string>();
+    for (const row of [...others.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()), survivor]) {
+      const log = Array.isArray(row.activityLog) ? row.activityLog : [];
+      for (const entry of log as { id?: string }[]) {
+        const id = String(entry?.id ?? "");
+        if (id && seen.has(id)) continue;
+        if (id) seen.add(id);
+        mergedLog.push(entry);
+      }
+    }
+    mergedLog.push({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      actor,
+      action: "FIELD_EDIT",
+      field: "mergedIds",
+      newValue: sources.join(", "),
+    });
+    if (mergedLog.length > 0) data.activityLog = mergedLog as never;
+
+    // The survivor keeps the OLDEST createdAt, so "when did we first hear about
+    // this lead" survives a merge rather than resetting to the newest row's date.
+    const earliestCreated = new Date(
+      Math.min(...[survivor, ...others].map((r) => r.createdAt.getTime())),
+    );
+    data.createdAt = earliestCreated;
+
+    await tx.client.update({ where: { id: primary }, data: data as never });
+    await tx.client.deleteMany({ where: { id: { in: sources } } });
+
+    return { survivorId: primary, mergedIds: sources, warnings };
+  });
+}
+
 export type UpdateClientResult =
   | { outcome: "updated"; client: ClientRow }
   | { outcome: "not_found" }
@@ -1383,6 +1718,25 @@ function isMissingLanguageColumn(error: unknown): boolean {
   return /column .*"?language"? does not exist|Unknown column 'language'|no such column: language/i.test(msg);
 }
 
+/**
+ * True only for Prisma's "the row I was told to update does not exist".
+ *
+ * This is the distinction `updateUser` turns on. It used to answer `null` for
+ * EVERY failure, which made a genuine write error indistinguishable from a missing
+ * user — and every caller reads `null` as "nothing to report". That is how a
+ * photo upload came back `{ ok: true, avatar: null }`: the write threw
+ * `Unknown argument 'avatar'`, the throw was swallowed here, and the route
+ * reported success having stored nothing. Anything that is not P2025 is now
+ * rethrown so the caller can answer 500 instead.
+ */
+function isRecordNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "P2025"
+  );
+}
+
 async function ensureLanguageColumn(): Promise<void> {
   try {
     await prisma.$executeRawUnsafe(
@@ -1529,7 +1883,10 @@ export async function updateUser(
       });
       return toUserRecord(row);
     } catch (error) {
-      if (!isMissingLanguageColumn(error)) return null;
+      // A missing row is a real answer; anything else is a failure the caller
+      // must see rather than have read as "saved".
+      if (isRecordNotFound(error)) return null;
+      if (!isMissingLanguageColumn(error)) throw error;
       return findUser(username);
     }
   }
@@ -1549,11 +1906,16 @@ export async function updateUser(
           data,
         });
         return toUserRecord(row);
-      } catch {
-        return null;
+      } catch (retryError) {
+        if (isRecordNotFound(retryError)) return null;
+        throw retryError;
       }
     }
-    return null;
+    // Every other failure — an unknown column, a constraint, a dead connection —
+    // used to become a bare `null`, which each caller reported to the browser as
+    // success. Rethrown so the route can answer 500 and the UI can say so.
+    if (isRecordNotFound(error)) return null;
+    throw error;
   }
 }
 

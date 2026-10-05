@@ -76,6 +76,10 @@ const MESSAGES: Record<string, string> = {
   "Could not reach Google Sheets": "errors.sheetUnreachable",
   "The sheet is not publicly readable": "errors.sheetNotPublic",
   "Could not read the sheet response": "errors.sheetBadResponse",
+  /* Both profile-photo writers reject a payload that is not a downscaled PNG data
+     URL. Without this the raw English string reached an Arabic screen. */
+  "Invalid avatar": "users.photoInvalid",
+  "No layout provided": "errors.nothingToSave",
 };
 
 /** Raw database / configuration noise that must never be shown to a user. */

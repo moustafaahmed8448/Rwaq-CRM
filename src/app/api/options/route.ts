@@ -4,8 +4,10 @@ import {
   BUILTIN_LOCATION_KEYS,
   BUCKETS_SETTING_KEY,
   PREDEFINED_STATUSES,
+  STATUS_LABELS_SETTING_KEY,
   channelValues,
   coerceStatusBuckets,
+  coerceStatusLabels,
   STATUS_OUTCOMES,
   type StatusBuckets,
   type StatusOutcome,
@@ -144,6 +146,20 @@ async function setStatusBucket(status: string, bucket: StatusBuckets[string] | n
   await writeSettingObject(BUCKETS_SETTING_KEY, stored);
 }
 
+/**
+ * Writes one status's admin display name, or clears it when `label` is null.
+ *
+ * Clearing hands the status back to its built-in name, which is why this is a
+ * separate key from the saved `statuses` list: that list holds the VALUES a client
+ * can be assigned, while this holds the words the workspace uses for them.
+ */
+async function setStatusLabel(status: string, label: string | null) {
+  const stored = coerceStatusLabels(await readSettingObject(STATUS_LABELS_SETTING_KEY));
+  if (label) stored[status] = label;
+  else delete stored[status];
+  await writeSettingObject(STATUS_LABELS_SETTING_KEY, stored);
+}
+
 /** Validates `kind` and the normalized `label` from a request body. */
 function parseTarget(
   body: Record<string, unknown>,
@@ -167,10 +183,11 @@ function parseTarget(
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   try {
-    const [clients, colors, buckets] = await Promise.all([
+    const [clients, colors, buckets, statusLabels] = await Promise.all([
       listClients({ includeArchived: true }),
       readSettingObject(COLORS_SETTING_KEY),
       readSettingObject(BUCKETS_SETTING_KEY),
+      readSettingObject(STATUS_LABELS_SETTING_KEY),
     ]);
     const resolved = {} as Record<RefKind, { values: string[]; removable: string[]; usage: Record<string, number> }>;
     for (const kind of REF_KINDS) {
@@ -187,6 +204,11 @@ export async function GET(request: NextRequest) {
          gating it would leave non-admins seeing numbers that disagree with the
          admin's configuration. Only the WRITE is admin-only. */
       buckets: coerceStatusBuckets(buckets),
+      // Admin-set display names for statuses, including the six built-in
+      // pipeline stages. Readable by every signed-in role for the same reason
+      // the colours are: renaming a stage must change its name on every screen
+      // or two screens describe the same stage differently.
+      statusLabels: coerceStatusLabels(statusLabels),
       role: (await getSessionUser(request))?.role ?? null,
     });
   } catch (error) {
@@ -244,12 +266,18 @@ export async function PUT(request: NextRequest) {
   if (target instanceof NextResponse) return target;
   const { kind, label: from } = target;
 
-  const to = normalizeOptionLabel(kind, String(body.to ?? ""));
-  if (!to || to.length < 2) {
-    return NextResponse.json({ error: "Option name too short" }, { status: 400 });
-  }
-  if (to.toLowerCase() === from.toLowerCase()) {
-    return NextResponse.json({ error: "Option name unchanged" }, { status: 400 });
+  /* A reset carries no new name, so the `to` checks must not run for it. It used to
+     run first and answered "Option name too short", which made the revert
+     unreachable from the UI: there was a button that could only ever fail. */
+  const resetting = body.reset === true && kind === "statuses";
+  const to = resetting ? "" : normalizeOptionLabel(kind, String(body.to ?? ""));
+  if (!resetting) {
+    if (!to || to.length < 2) {
+      return NextResponse.json({ error: "Option name too short" }, { status: 400 });
+    }
+    if (to.toLowerCase() === from.toLowerCase()) {
+      return NextResponse.json({ error: "Option name unchanged" }, { status: 400 });
+    }
   }
 
   try {
@@ -273,7 +301,40 @@ export async function PUT(request: NextRequest) {
     // into the "other" bucket and change the KPIs, funnel and win rate — so it
     // is refused rather than allowed to corrupt the reporting.
     if (kind === "statuses" && isBuiltinOption(kind, canonical)) {
-      return NextResponse.json({ error: "Cannot rename a built-in status" }, { status: 400 });
+      /* Reset reverts a rename to the built-in name. Without it a stage renamed
+         by mistake is stuck under the wrong name forever — the row no longer
+         displays the stored value, so the admin has no other way to undo it. */
+      if (resetting) {
+        await setStatusLabel(canonical, null);
+        return NextResponse.json({
+          ok: true,
+          from: canonical,
+          to: canonical,
+          reset: true,
+          statusLabels: coerceStatusLabels(await readSettingObject(STATUS_LABELS_SETTING_KEY)),
+        });
+      }
+
+      /* Built-in pipeline stages are renamed by ALIAS, never by rewriting the rows.
+         `classifyStatus` keys off the stored value, so turning `WON` into "متعاقد"
+         on 40 clients would silently move all 40 out of the `won` bucket and change
+         the KPI cards, the funnel and the win rate. A display name leaves the
+         stored value — and therefore every calculation — untouched while the app
+         shows whatever the team actually calls that stage. This replaces the hard
+         refusal that used to answer "Cannot rename a built-in status" here and
+         disable the button on the Options page. */
+      const affected = await countClients({ status: canonical });
+      await setStatusLabel(canonical, to);
+      return NextResponse.json({
+        ok: true,
+        from: canonical,
+        to,
+        // Informational: these rows were NOT touched. Reported so the confirm
+        // dialog can still say how much of the book the new name covers.
+        clients: affected,
+        aliased: true,
+        statusLabels: coerceStatusLabels(await readSettingObject(STATUS_LABELS_SETTING_KEY)),
+      });
     }
 
     const result = await renameOptionValue(CLIENT_FIELD[kind], canonical, to, session?.name ?? "Admin");

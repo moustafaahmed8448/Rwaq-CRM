@@ -2624,7 +2624,70 @@ input.ltr-num { text-align: left; }
   flex-shrink: 0;
 }
 [data-theme="dark"] .options-tag { background: #1b2231; }
+/* The stored value shown beside an admin-chosen stage name. Monospace and
+   quieter than the name itself: it is a reference, not the label. */
+.options-tag-mapped {
+  background: transparent;
+  border: 1px dashed var(--line);
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+}
+[data-theme="dark"] .options-tag-mapped { background: transparent; }
+/* Usage count, now a button: "used by 42" opens the 42 clients themselves. The
+   affordance lives on the element itself so the whole pill reads as clickable. */
+.options-usage-link {
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+  margin-inline-start: -6px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.options-usage-link:hover { background: #eef2f7; color: var(--ink); }
+[data-theme="dark"] .options-usage-link:hover { background: #1b2231; }
+.options-usage-link:disabled { cursor: default; text-decoration: none; opacity: .6; }
+.options-usage-link:disabled:hover { background: transparent; }
 .options-usage { font-size: 11px; color: var(--ink-faint); white-space: nowrap; flex-shrink: 0; }
+/* ── Linked clients panel (Options: "used by 42") ─────────────────
+   Reuses the .detail-panel slide-in shell, so it needs its own body as a
+   COLUMN: the list has to take the remaining height and scroll on its own,
+   which a plain block body will not do. */
+.linked-panel .detail-body { display: flex; flex-direction: column; min-height: 0; }
+.linked-count, .linked-truncated {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+  flex-shrink: 0;
+}
+.linked-truncated { color: #b78434; font-size: 11px; }
+.linked-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.linked-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.linked-id { font: 10px 'DM Mono', monospace; color: #9ca3af; flex-shrink: 0; min-width: 34px; }
+.linked-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.linked-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.linked-sub {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .options-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 /* Select-all in the panel header, next to the title. */
 .options-select-all {
@@ -2828,3 +2891,230 @@ input.ltr-num { text-align: left; }
 [data-theme="dark"] .search-box:hover,
 [data-theme="dark"] .date-bar input:hover { background: #232328; border-color: #52525b; }
 
+
+/* -- Global search palette (Ctrl+K) --------------------------------
+   The trigger sits in the topbar, so it is hidden below the tablet
+   breakpoint where the nav collapses � there the palette is still
+   reachable by keyboard, which is who actually uses it. */
+.topbar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 190px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: var(--glass-bg, #fff);
+  color: var(--ink-faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.topbar-search:hover { border-color: #b9d975; color: var(--ink); }
+.topbar-search kbd {
+  margin-inline-start: auto;
+  font: 10px 'DM Mono', monospace;
+  background: var(--line);
+  border-radius: 8px;
+  padding: 1px 5px;
+}
+.search-overlay { align-items: flex-start; padding-top: 12vh; }
+.search-palette {
+  width: min(640px, 94vw);
+  background: var(--glass-bg, #fff);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .22);
+  overflow: hidden;
+}
+.search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-faint);
+}
+.search-input-row input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+}
+.search-results { max-height: 52vh; overflow-y: auto; }
+.search-note {
+  padding: 7px 14px;
+  font-size: 11px;
+  color: #b78434;
+  border-bottom: 1px solid var(--line);
+}
+.search-hit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  text-align: start;
+  font: inherit;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.search-hit + .search-hit { border-top: 1px solid var(--line); }
+.search-hit-active { background: rgba(105, 157, 227, .12); }
+.search-hit-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.search-hit-main b {
+  color: var(--ink);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-hit-sub {
+  font-size: 11px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 900px) { .topbar-search { display: none; } }
+
+/* -- Saved views + quick views bar --------------------------------- */
+.views-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.views-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.views-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin: 0 3px;
+}
+.view-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass-bg, #fff);
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.view-chip:hover { border-color: #b9d975; color: var(--ink); }
+.view-chip-active {
+  background: #17181c;
+  border-color: #17181c;
+  color: #fff;
+}
+[data-theme="dark"] .view-chip-active { background: #069de3; border-color: #069de3; color: #18181b; }
+.view-chip-add { border-style: dashed; }
+.view-chip-wrap { display: inline-flex; align-items: center; }
+.view-chip-wrap .view-chip { border-start-end-radius: 0; border-end-end-radius: 0; }
+.view-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 22px;
+  border: 1px solid var(--line);
+  border-inline-start: 0;
+  border-radius: 0 14px 14px 0;
+  background: var(--glass-bg, #fff);
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.view-chip-remove:hover { background: #fef2f2; color: #dc2626; }
+.view-naming { display: inline-flex; align-items: center; gap: 6px; }
+.view-naming input {
+  height: 28px;
+  width: 160px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass-bg, #fff);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11.5px;
+  outline: none;
+}
+.view-naming input:focus { border-color: #b9d975; }
+.view-error { color: #c85d4e; font-size: 11px; font-style: normal; }
+
+/* -- Duplicate review panel ---------------------------------------- */
+.dupes-panel .detail-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+.dupes-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: #fff7e6;
+  color: #a46f00;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.dupes-note svg { flex-shrink: 0; margin-top: 2px; }
+[data-theme="dark"] .dupes-note { background: #3a2f12; color: #e0b25a; }
+.dupes-group { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.dupes-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  background: #fafafa;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+}
+[data-theme="dark"] .dupes-group-head { background: #1e1e22; }
+.dupes-reason { font-weight: 700; color: var(--ink); }
+.dupes-key { color: var(--ink-faint); font-family: "DM Mono", monospace; }
+.dupes-count { margin-inline-start: auto; color: var(--ink-faint); font-size: 10.5px; }
+.dupes-rows { display: flex; flex-direction: column; }
+.dupes-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 11px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.dupes-row:first-child { border-top: 0; }
+.dupes-row-keep { background: rgba(105, 157, 227, .1); }
+.dupes-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.dupes-row-main b { color: var(--ink); font-size: 12.5px; }
+.dupes-row-fields { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--ink-faint); }
+.dupes-row-fields em { font-style: normal; opacity: .65; margin-inline-end: 4px; }
+.dupe-differs { color: #a46f00; font-weight: 600; }
+.dupes-row-extra { font-size: 10.5px; color: var(--ink-faint); }
+.dupes-group-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 8px 11px;
+  border-top: 1px solid var(--line);
+  background: #fafafa;
+  font-size: 11px;
+}
+[data-theme="dark"] .dupes-group-foot { background: #1e1e22; }

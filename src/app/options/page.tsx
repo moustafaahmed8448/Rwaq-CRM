@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Check, ChevronDown, Loader2, Plus, Settings2, Trash2, Pencil, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Loader2, Plus, Settings2, Trash2, Pencil, RotateCcw, X } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import Select from "@/components/Select";
 import { useLang } from "@/lib/i18n";
@@ -31,6 +31,8 @@ import {
 } from "@/lib/ref-options";
 import { channelLabel, classifyStatus, locationLabel, STATUS_OUTCOMES, statusLabel, type StatusBuckets, type StatusOutcome } from "@/lib/reporting";
 import { refreshOptionColors } from "@/lib/option-colors";
+import { refreshStatusLabels, useStatusLabels } from "@/lib/status-labels";
+import LinkedClientsPanel from "@/components/LinkedClientsPanel";
 
 type KindData = { values: string[]; removable: string[]; usage: Record<string, number> };
 type Payload = Record<RefKind, KindData> & { colors: OptionColors; buckets?: StatusBuckets; role: string | null };
@@ -45,7 +47,7 @@ const KIND_TITLE: Record<RefKind, string> = {
 
 export default function OptionsPage() {
   const router = useRouter();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [user, setUser] = useState<{ name: string; initials: string; role: string } | null>(null);
   const [data, setData] = useState<Payload | null>(null);
   const [darkMode, setDarkMode] = useState(false);
@@ -164,6 +166,7 @@ export default function OptionsPage() {
             onChanged={load}
             showToast={showToast}
             t={t}
+            lang={lang}
           />
         ))}
       </div>
@@ -174,7 +177,7 @@ export default function OptionsPage() {
 }
 
 /** One reference list: an add row plus a row per value with a colour picker. */
-function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showToast, t }: {
+function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showToast, t, lang }: {
   kind: RefKind;
   data: KindData;
   colors: OptionColors;
@@ -185,6 +188,8 @@ function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showTo
   onChanged: () => Promise<void> | void;
   showToast: (type: "success" | "error", message: string) => void;
   t: TFn;
+  /** Viewer language, for formatting the dates in the linked-clients list. */
+  lang: string;
 }) {
   const [label, setLabel] = useState("");
   const [color, setColor] = useState("#069de3");
@@ -202,10 +207,15 @@ function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showTo
   const [showSaved, setShowSaved] = useState(false);
   const [showBuiltin, setShowBuiltin] = useState(false);
 
+  // Admin-set display names, so a renamed stage shows its new name on THIS page
+  // too — otherwise the row would read "Non-responsive" here while the rest of
+  // the app said whatever the admin just called it.
+  const statusLabels = useStatusLabels();
+
   // Same label rules the rest of the app uses, so a built-in city reads as its
   // localized name here exactly as it does in the pickers.
   const lab = (v: string) =>
-    kind === "statuses" ? statusLabel(t, v)
+    kind === "statuses" ? statusLabel(t, v, statusLabels)
     : kind === "channels" ? channelLabel(t, v)
     : locationLabel(t, v);
 
@@ -280,10 +290,38 @@ function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showTo
       return;
     }
     const used = data.usage[value] ?? 0;
-    if (!confirm(t("options.renameConfirm", { from: lab(value), to: next, n: used }))) return;
+    /* Two different operations behind one button, so the dialog has to say which
+       one is about to happen. A built-in status is renamed by ALIAS: no client row
+       is rewritten, and the pipeline keeps counting those deals as won/lost as it
+       did before, so the wording must NOT promise a bulk update. Anything else is
+       an in-place rename that rewrites every row holding the old value. */
+    const aliased = kind === "statuses" && isBuiltinOption(kind, value);
+    const question = aliased
+      ? t("options.renameStageConfirm", { from: lab(value), to: next, n: used })
+      : t("options.renameConfirm", { from: lab(value), to: next, n: used });
+    if (!confirm(question)) return;
     if (await call("PUT", { label: value, to: next })) {
-      showToast("success", t("options.renamed", { from: lab(value), to: next }));
+      showToast("success", aliased
+        ? t("options.stageRenamed", { from: lab(value), to: next })
+        : t("options.renamed", { from: lab(value), to: next }));
       cancelRename();
+      // Push the new names into the shared store so every pill, column header and
+      // filter chip in the app shows them without a reload.
+      await refreshStatusLabels();
+    }
+  };
+
+  /* Which value's clients are being listed, or null when the panel is closed.
+     Keyed by kind+value so switching between two values in the same panel
+     refetches rather than showing the previous list. */
+  const [linked, setLinked] = useState<{ kind: RefKind; value: string; label: string } | null>(null);
+
+  /** Reverts a built-in stage's admin name back to its built-in name. */
+  const resetName = async (value: string) => {
+    if (!confirm(t("options.resetNameConfirm", { value: lab(value) }))) return;
+    if (await call("PUT", { label: value, reset: true })) {
+      showToast("success", t("options.nameReset"));
+      await refreshStatusLabels();
     }
   };
 
@@ -451,6 +489,20 @@ function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showTo
         {showSaved && saved.length === 0 && <div className="empty-state">{t("options.noSaved")}</div>}
         {showSaved && saved.map(renderValueRow)}
       </div>
+
+      {/* Which clients hold the value whose usage count was clicked. Rendered
+          inside the panel that owns the state so there is no page-level plumbing
+          for a single selection. */}
+      {linked && (
+        <LinkedClientsPanel
+          kind={linked.kind}
+          value={linked.value}
+          label={linked.label}
+          onClose={() => setLinked(null)}
+          t={t}
+          lang={lang}
+        />
+      )}
     </section>
   );
 
@@ -465,9 +517,18 @@ function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showTo
     const custom = Boolean(colors[kind]?.[value]);
     const swatch = optionColor(kind, value, colors);
     const isEditing = editing === value;
-    // Built-in statuses are locked: renaming one would move every client on it
-    // out of the won/lost/progress buckets and silently change the reporting.
-    const canRename = !(kind === "statuses" && builtin);
+    /* Every option is renameable, built-in stages included.
+       Built-in statuses used to be locked here because the rename rewrote the
+       stored value, and `classifyStatus` keys off that value — so renaming `WON`
+       would have moved its clients out of the `won` bucket and changed the
+       reporting. The server now renames a built-in stage by ALIAS instead, which
+       touches no client rows, so there is nothing left to protect against. The
+       confirm dialog below says which of the two is happening. */
+    const canRename = true;
+    // True when this value is showing an admin-chosen name instead of the value the
+    // app stores. Only statuses can be: the other two kinds rename by rewriting the
+    // stored value, so there is nothing separate to reset.
+    const renamed = kind === "statuses" && Boolean(statusLabels[value]);
     return (
       <div className={`options-row ${selected.has(value) ? "options-row-selected" : ""}`} key={value}>
         <input
@@ -517,7 +578,26 @@ function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showTo
           <span className="options-label">{lab(value)}</span>
         )}
         {builtin && <span className="options-tag">{t("options.builtin")}</span>}
-        <span className="options-usage" title={t("refData.inUseBy", { n: used })}>{t("options.used", { n: used })}</span>
+        {/* Shows the value the app actually stores when it is displaying an
+            admin-chosen name. Without it a renamed stage is just a name with no
+            visible link back to `WON`, so the admin cannot tell what it maps to. */}
+        {renamed && (
+          <span className="options-tag options-tag-mapped" title={t("options.mappedTitle")}>
+            {value}
+          </span>
+        )}
+        {/* The usage count is the question "which clients?" made clickable. It is
+            disabled at zero because there is nothing to open — and a button that
+            reliably leads to an empty panel teaches the admin not to click it. */}
+        <button
+          className="options-usage options-usage-link"
+          type="button"
+          disabled={used === 0}
+          title={t("refData.inUseBy", { n: used })}
+          onClick={() => setLinked({ kind, value, label: lab(value) })}
+        >
+          {t("options.used", { n: used })}
+        </button>
         {/* Which KPI card this status counts towards on the dashboard.
             Only statuses have one — a channel or location is not an outcome — so
             the control is omitted for the other two panels rather than shown
@@ -547,6 +627,18 @@ function OptionPanel({ kind, data, colors, buckets, setBucket, onChanged, showTo
               onClick={() => startRename(value)}
             >
               <Pencil size={13} />
+            </button>
+          )}
+          {/* Only rendered once a name has actually been overridden, so "reset"
+              always has something to undo — the same rule the colour reset below
+              follows. Without it a renamed stage could never be un-renamed. */}
+          {!isEditing && renamed && (
+            <button
+              className="icon-btn-sm"
+              title={t("options.resetNameTitle")}
+              onClick={() => void resetName(value)}
+            >
+              <RotateCcw size={13} />
             </button>
           )}
           <label className="options-color-input" title={t("options.pickColor")}>

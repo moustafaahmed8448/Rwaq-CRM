@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download, Grid2X2,
   LayoutDashboard, Pencil, Plus, Search, Trash2, UsersRound, X as XIcon,
-  Check, AlertCircle, MessageSquare, Filter, Archive, Upload,
+  Check, AlertCircle, MessageSquare, Filter, Archive, Upload, GitMerge,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
@@ -46,8 +46,11 @@ import {
 } from "@/lib/client-types";
 import ColumnPicker from "@/components/ColumnPicker";
 import ClientFilterBar from "@/components/ClientFilterBar";
+import SavedViewsBar from "@/components/SavedViewsBar";
+import DuplicatesPanel from "@/components/DuplicatesPanel";
 import ClientTable from "@/components/ClientTable";
 import { useOptionColors } from "@/lib/option-colors";
+import { useStatusLabels } from "@/lib/status-labels";
 import { optionColor } from "@/lib/ref-options";
 import {
   CLIENT_COLUMNS,
@@ -364,8 +367,15 @@ export default function Home() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [darkMode, setDarkMode] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  /* Admin-set status display names, shared with the sub-components below through
+     the same module store the pickers read. Fetched once per page here so the
+     toast after a bulk status change also says what the admin renamed a stage to. */
+  const statusLabels = useStatusLabels();
   const [activeDatePreset, setActiveDatePreset] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  /* Duplicate review is admin-only (the endpoint enforces it too), so the panel is
+     simply never opened for anyone else. */
+  const [dupesOpen, setDupesOpen] = useState(false);
   // Table order. Defaults to most-recently-updated, which is the order the API
   // already returns, so the initial view is unchanged.
   const [sortBy, setSortBy] = useState<SortField>("recent");
@@ -717,6 +727,18 @@ export default function Home() {
     setActiveDatePreset(null);
   };
 
+  /* Replaces the ENTIRE filter state in one go, for the saved-views bar.
+     Every sibling setter above merges one key; a saved view is the opposite — it
+     carries the complete state, and a merge would leave behind whatever the
+     previous view happened to have set, so "Riyadh" would keep applying to a view
+     named "Overdue". Page 1 and the date-preset badge are reset for the same
+     reason every other filter change resets them. */
+  const applyFilters = (next: Filters) => {
+    setTablePage(1);
+    setFilters(next);
+    setActiveDatePreset(null);
+  };
+
   const applyDatePreset = (preset: DatePreset) => {
     updateFilter("startDate", preset.startDate ?? "");
     updateFilter("endDate", preset.endDate ?? "");
@@ -1042,7 +1064,7 @@ export default function Home() {
     await fetch("/api/crm/clients", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
     setClients(prev => prev.map(c => c.id === id ? { ...c, status, lastUpdateDate: new Date().toISOString() } : c));
     if (detailClient?.id === id) setDetailClient(prev => prev ? { ...prev, status } : null);
-    addToast("info", t("clients.statusToast", { status: statusLabel(t, status) }));
+    addToast("info", t("clients.statusToast", { status: statusLabel(t, status, statusLabels) }));
   };
 
   const updateClientField = async (id: string, patch: Partial<Client>) => {
@@ -1052,7 +1074,7 @@ export default function Home() {
     const [k, v] = Object.entries(patch)[0] ?? [];
     if (k) {
       const field = FIELD_KEYS[k];
-      const value = k === "status" ? statusLabel(t, String(v))
+      const value = k === "status" ? statusLabel(t, String(v), statusLabels)
         : k === "acquisitionChannel" ? channelLabel(t, String(v))
         : String(v ?? "");
       addToast("info", t("clients.fieldToast", { field: field ? t(field) : k, value }));
@@ -1227,6 +1249,7 @@ userAvatars={userAvatars}
             filters={filters} updateFilter={updateFilter}
             setMultiFilter={setMultiFilter}
             clearAllFilters={clearAllFilters}
+            onApplyFilters={applyFilters}
             updateStatus={updateStatus} updateClientField={updateClientField}
             firstContacts={firstContacts} secondContacts={secondContacts}
             sortBy={sortBy} setSortBy={handleSortBy}
@@ -1234,7 +1257,7 @@ userAvatars={userAvatars}
             onAssigned={refreshNotifications}
             selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
             onClearSelection={clearSelection} onSelectAllMatching={() => void selectAllMatching()}
-            onOpenEdit={openEdit} onOpenCreate={openCreate} onOpenImport={() => setImporting(true)} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
+            onOpenEdit={openEdit} onOpenCreate={openCreate} onOpenImport={() => setImporting(true)} onOpenDuplicates={() => setDupesOpen(true)} onOpenDelete={(ids: string[], names: string[]) => setConfirmDelete({ ids, names })}
             onOpenDetail={openDetail}
             exportExcel={exportExcel} exportSelected={exportSelected}
             bulkCount={selectedIds.size}
@@ -1288,7 +1311,7 @@ userAvatars={userAvatars}
                   {/* Delete was never wired here, so no trash icon ever rendered
                       for a custom status. Now matches the location and channel
                       pickers above: admin only, saved values only, unused only. */}
-                  <RefPicker kind="statuses" value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} render={v => statusLabel(t, v)} onRemove={user.role === "Admin" ? removeStatus : undefined} removable={removableStatuses} removeUsage={statusUsage} placeholder={t("form.statusPh")} t={t} />
+                  <RefPicker kind="statuses" value={editDraft.status ?? ""} options={allStatuses} onAdd={addStatus} onChange={v => setEditDraft({ ...editDraft, status: v })} render={v => statusLabel(t, v, statusLabels)} onRemove={user.role === "Admin" ? removeStatus : undefined} removable={removableStatuses} removeUsage={statusUsage} placeholder={t("form.statusPh")} t={t} />
                 </Field>
                 <Field label={t("form.firstContact")}>
                   <Select
@@ -1356,6 +1379,18 @@ userAvatars={userAvatars}
         />
       )}
 
+      {/* Duplicate review — admin only. `refreshAfterImport` is reused because a
+          merge and an import are the same kind of event to this page: rows were
+          added or removed underneath it and every visible figure is stale. */}
+      {dupesOpen && (
+        <DuplicatesPanel
+          onClose={() => setDupesOpen(false)}
+          onMerged={refreshAfterImport}
+          t={t}
+          lang={lang}
+        />
+      )}
+
       {/* Delete Confirmation */}
       {confirmDelete && (
         <div className="modal-overlay" onClick={closeDelete}>
@@ -1387,7 +1422,7 @@ userAvatars={userAvatars}
               value={detailClient.status}
               options={allStatuses}
               onChange={v => updateStatus(detailClient.id, v)}
-              render={v => statusLabel(t, v)}
+              render={v => statusLabel(t, v, statusLabels)}
               className="status-select"
               style={{
                 background: optionColor("statuses", detailClient.status, colors) + "1f",
@@ -1494,6 +1529,10 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
   const [spRole, setSpRole] = useState<"first" | "second">("second");
   const spRows = spReports[spRole];
   const { logo: heroLogo } = useLogo();
+  // The stage panel, funnel and sales-performance headers all name a status, so
+  // a renamed built-in stage has to be honoured here as well — otherwise the
+  // dashboard would keep calling it "Contracted" while the kanban says otherwise.
+  const statusLabels = useStatusLabels();
 
   // Status panel: every pipeline stage in registry order, followed by the
   // user-defined statuses created on the clients page. Without the second half,
@@ -1642,7 +1681,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           options={allStatuses ?? []}
           selected={dashFilters.status}
           onChange={v => setDashFilter("status", v)}
-          render={v => statusLabel(t, v)}
+          render={v => statusLabel(t, v, statusLabels)}
           t={t}
         />
         <MultiSelect
@@ -1673,7 +1712,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         <div className="filter-chips">
           {dashFilters.status.map(s => (
             <span key={`d-st-${s}`} className="filter-chip">
-              {statusLabel(t, s)}
+              {statusLabel(t, s, statusLabels)}
               <button title={t("common.clear")} onClick={() => setDashFilter("status", dashFilters.status.filter(x => x !== s))}>×</button>
             </span>
           ))}
@@ -1786,7 +1825,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
                 onClick={() => onToggleStageFilter(value)}
               >
                 <span className="stage-row-dot" style={{ background: color }} />
-                <span className="stage-row-name">{statusLabel(t, value)}</span>
+                <span className="stage-row-name">{statusLabel(t, value, statusLabels)}</span>
                 <span className="stage-row-track">
                   <span className="stage-row-fill" style={{ width: `${pct}%`, background: color }} />
                 </span>
@@ -1829,8 +1868,8 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
             {t(spRole === "first" ? "sp.roleFirstHint" : "sp.roleSecondHint")}
           </p>
           <div className="sp-perf-legend">
-            <span className="sp-won">{statusLabel(t, "WON")}</span>
-            <span className="sp-lost">{statusLabel(t, "LOST")}</span>
+            <span className="sp-won">{statusLabel(t, "WON", statusLabels)}</span>
+            <span className="sp-lost">{statusLabel(t, "LOST", statusLabels)}</span>
             <span className="sp-wait">{t("funnel.inProgress")}</span>
             <span className="sp-other">{t("kpi.otherStatus")}</span>
             <span className="sp-total">{t("sp.total")}</span>
@@ -1963,7 +2002,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
                 <div className="funnel2-step" key={stage.value}>
                   <div className="funnel2-head">
                     <span className="funnel2-dot" style={{ background: stageColor }} />
-                    <span className="funnel2-name">{statusLabel(t, stage.value)}</span>
+                    <span className="funnel2-name">{statusLabel(t, stage.value, statusLabels)}</span>
                     <span className="funnel2-count">{num(count)}</span>
                   </div>
                   <div className="funnel2-track">
@@ -2038,15 +2077,20 @@ function KpiCard({ label, value, sub, accent, delta, t }: {
   );
 }
 
-function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, onSetFollowUp, followUpCounts, clearAllFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
-  selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDelete, onOpenDetail,
+function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, onSetFollowUp, followUpCounts, clearAllFilters, onApplyFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
+  selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDuplicates, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
   customLocationInput, setCustomLocationInput, customChannels, activeDatePreset,
   applyDatePreset, clearDatePreset, datePresets, filterCount, allLocations, users, onAddStatus, onAddChannel, onAddLocation,
   onClearSelection,
   onSelectAllMatching,
   onBulkStatus,
-  pager, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; columns: ResolvedColumn[]; onColumnsChange: (c: ResolvedColumn[]) => void; rtl: boolean; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>;
+  pager, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void;
+  /**
+   * Replaces the WHOLE filter state at once, for the saved-views bar. Separate
+   * from the per-key setters above on purpose — see applyFilters in Home.
+   */
+  onApplyFilters: (next: Filters) => void; isAdmin: boolean; canEdit: boolean; refData: { onRemoveStatus?: (v: string) => void; onRemoveChannel?: (v: string) => void; onRemoveLocation?: (v: string) => void; removableStatuses?: string[]; removableChannels?: string[]; removableLocations?: string[]; statusUsage?: Record<string, number>; channelUsage?: Record<string, number>; locationUsage?: Record<string, number> }; onArchive: (id: string) => void | Promise<void>; onArchiveSelected: () => void | Promise<void>; firstContacts: string[]; secondContacts: string[]; sortBy: SortField; setSortBy: (s: SortField) => void; columns: ResolvedColumn[]; onColumnsChange: (c: ResolvedColumn[]) => void; rtl: boolean; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; onAssigned?: () => void; selectedIds: Set<string>; toggleSelect: (id: string) => void; toggleSelectAll: () => void; onOpenEdit: (c: Client) => void; onOpenDelete: (ids: string[], names: string[]) => void; onOpenDetail: (c: Client) => void; onOpenCreate: () => void; onOpenImport: () => void; onOpenDuplicates: () => void; exportExcel: () => void; exportSelected: () => void; bulkCount: number; onBulkDelete: () => void; allStatuses: string[]; allChannels: string[]; customLocationInput: string; setCustomLocationInput: (v: string) => void; customChannels: string[]; activeDatePreset?: string | null; applyDatePreset?: (p: DatePreset) => void; clearDatePreset?: () => void; datePresets?: DatePreset[]; filterCount?: number; allLocations?: string[]; users?: { username: string; name: string; role: string }[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>;
   /** Clears the bulk selection. Always offered while anything is selected. */
   onClearSelection?: () => void;
   /** Ticks every client the current filter matches, across all pages. */
@@ -2068,6 +2112,9 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   const hasNext = showPager && pager!.page < pager!.pageCount;
   const rowFrom = showPager ? (pager!.page - 1) * 25 + 1 : 0;
   const rowTo = showPager ? Math.min(pager!.page * 25, pager!.total) : 0;
+  // For the bulk-status dropdown: moving a selection to a stage must name it the
+  // same way the rest of the screen does.
+  const statusLabels = useStatusLabels();
 
   return (
     <div className="page">
@@ -2087,7 +2134,7 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
                   value=""
                   options={allStatuses}
                   onChange={onBulkStatus}
-                  render={v => statusLabel(t, v)}
+                  render={v => statusLabel(t, v, statusLabels)}
                   searchable={false}
                   className="status-select"
                   t={t}
@@ -2107,12 +2154,17 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
             <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>{t("clients.kanban")}</button>
           </div>
           {canEdit && <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>{t("clients.newClient")}</button>}
+          {isAdmin && <button className="btn-outline" onClick={onOpenDuplicates}><GitMerge size={14}/>{t("dupes.title")}</button>}
           {isAdmin && <button className="btn-outline" onClick={onOpenImport}><Upload size={15}/>{t("importer.btn")}</button>}
           <ColumnPicker columns={columns} onChange={onColumnsChange} t={t} />
           <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>{t("clients.exportSelected",{n:bulkCount})}</button>
           <button className="btn-outline" onClick={exportExcel}><Download size={15}/>{t("clients.exportAll")}</button>
         </div>
       </div>
+      {/* Saved views + one-click quick views. Sits ABOVE the filter bar because a
+          view replaces the whole filter state, so it has to be read before the
+          individual controls it overwrites. */}
+      <SavedViewsBar filters={filters} onApply={onApplyFilters} t={t} />
       <ClientFilterBar filters={filters} updateFilter={updateFilter} setMultiFilter={setMultiFilter}
         followUp={filters.followUp} setFollowUp={onSetFollowUp}
         followUpCounts={followUpCounts}
@@ -2185,6 +2237,9 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
   // 3-column board, so there is nothing for a width to act on.
   const show = (key: ColumnKey) => columns.find(c => c.key === key)?.hidden === false;
   const colors = useOptionColors();
+  // The column header is the most prominent place a stage is named — if a rename
+  // did not reach here the board would contradict every pill on its own cards.
+  const statusLabels = useStatusLabels();
   const statusColumns: string[] = [...new Set([...(allStatuses ?? ["WAITING","WON","LOST"]), ...clients.map(c => c.status)])];
   return (
     <div className="kanban-board">
@@ -2193,7 +2248,7 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
           onDragEnter={canEdit?()=>setDropTarget(col):undefined} onDragOver={canEdit?(e=>{e.preventDefault();setDropTarget(col);}):undefined}
           onDragLeave={canEdit?()=>setDropTarget(null):undefined} onDrop={canEdit?()=>{if(draggedId){updateStatus(draggedId,col);setDraggedId(null);setDropTarget(null);}}:undefined}>
           <div className="kanban-head">
-            <StatusDot status={col} /><span>{statusLabel(t, col)}</span><small>{clients.filter(c=>c.status===col).length}</small>
+            <StatusDot status={col} /><span>{statusLabel(t, col, statusLabels)}</span><small>{clients.filter(c=>c.status===col).length}</small>
           </div>
           {clients.filter(c=>c.status===col).map(c=>(
             <article className={`client-card ${draggedId===c.id?"dragging":""} ${selectedIds.has(c.id)?"card-selected":""}`} key={c.id} draggable={canEdit} onDragStart={canEdit?()=>setDraggedId(c.id):undefined} onDragEnd={canEdit?()=>{setDraggedId(null);setDropTarget(null);}:undefined} onDoubleClick={()=>onOpenDetail(c)}>

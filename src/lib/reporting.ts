@@ -213,6 +213,43 @@ export const BUCKETS_SETTING_KEY = "statusBuckets";
 export const STATUS_OUTCOMES: readonly StatusOutcome[] = ["won", "lost", "progress", "other"];
 
 /**
+ * Admin-set DISPLAY names for statuses: stored status value -> the name the
+ * workspace calls it.
+ *
+ * This is what makes a built-in stage renameable. Renaming by rewriting the stored
+ * value was refused for a real reason: `classifyStatus` keys off that value, so
+ * `WON` becoming "متعاقد" would move every one of those clients into the `other`
+ * bucket and silently change the KPI cards, the funnel and the win rate. Keeping
+ * the stored value untouched and the admin's wording in this map means the
+ * pipeline still knows a deal was won while the app says whatever the team calls
+ * it.
+ *
+ * Declared here, for the same reason as BUCKETS_SETTING_KEY: the module must stay
+ * free of `next/server` so both route handlers and client bundles can read it.
+ */
+export const STATUS_LABELS_SETTING_KEY = "statusLabels";
+
+/**
+ * Coerces a stored/hand-edited label map into a valid one.
+ *
+ * The row is editable through the API, so anything can end up in it. A non-string
+ * value or a blank label is DROPPED rather than rendered, because an empty name on
+ * a kanban column header is worse than the built-in name it was meant to replace —
+ * and it must never fall through to showing the raw stored token to the user.
+ */
+export function coerceStatusLabels(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [value, label] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value) continue;
+    if (typeof label !== "string") continue;
+    const trimmed = label.trim();
+    if (trimmed) out[value] = trimmed;
+  }
+  return out;
+}
+
+/**
  * `classifyStatus` with the admin's overrides applied.
  *
  * Kept as a SEPARATE function rather than an optional argument on
@@ -341,8 +378,25 @@ export function channelLabel(t: TranslateFn, channel: string): string {
   return key && fallback ? translated(t, key, fallback) : channel;
 }
 
-/** Localized display label for a status; custom statuses stay as stored. */
-export function statusLabel(t: TranslateFn, status: string): string {
+/**
+ * The name to SHOW for a status.
+ *
+ * Resolution order: an admin's own name for the value, then the built-in
+ * localized name, then the stored value itself.
+ *
+ * `override` is optional and deliberately optional rather than required: the
+ * stored value is still the identity of a status (it is what the pipeline, the
+ * filters and the funnel bucket on), so every caller that only needs a display
+ * name keeps working unchanged. Callers that should honour an admin rename pass
+ * the map from `useStatusLabels()`.
+ */
+export function statusLabel(
+  t: TranslateFn,
+  status: string,
+  override?: Record<string, string> | null,
+): string {
+  const custom = override?.[String(status ?? "").trim()];
+  if (custom) return custom;
   const key = STATUS_KEYS[status];
   const stage = pipelineStage(status);
   if (key && stage) return translated(t, key, stage.fallback);
@@ -412,11 +466,19 @@ export function activityFieldLabel(t: TranslateFn, field: string): string {
  * translated; dates are rendered as dates; every other value is user data and is
  * returned untouched.
  */
-export function activityValueLabel(t: TranslateFn, field: string, value: string | undefined, lang = "en"): string {
+export function activityValueLabel(
+  t: TranslateFn,
+  field: string,
+  value: string | undefined,
+  lang = "en",
+  statusOverride?: Record<string, string> | null,
+): string {
   if (value === undefined) return "";
   if (value.trim() === "") return t("form.unassigned");
   const key = fieldKey(field);
-  if (key === "status") return statusLabel(t, value);
+  // `statusOverride` is passed through so an activity entry about a renamed stage
+  // reads with the admin's name, like every other surface that names a status.
+  if (key === "status") return statusLabel(t, value, statusOverride);
   if (key === "acquisitionChannel") return channelLabel(t, value);
   /* A follow-up is stored as a timestamp, so the raw value is an ISO string.
      Rendering it verbatim put `2026-09-24T00:30:00.000Z` in the timeline — the
@@ -441,7 +503,11 @@ export interface ActivityLike {
 }
 
 /** Localized one-line description of an activity-log entry. */
-export function describeActivity(t: TranslateFn, entry: ActivityLike): string {
+export function describeActivity(
+  t: TranslateFn,
+  entry: ActivityLike,
+  statusOverride?: Record<string, string> | null,
+): string {
   const name = entry.clientName ?? "";
   switch (entry.action) {
     case "CREATED":
@@ -454,8 +520,8 @@ export function describeActivity(t: TranslateFn, entry: ActivityLike): string {
       return t("act.restored", { name: name || t("act.client") });
     case "STATUS_CHANGE":
       return t("act.statusChanged", {
-        old: activityValueLabel(t, "status", entry.oldValue ?? ""),
-        new: activityValueLabel(t, "status", entry.newValue ?? ""),
+        old: activityValueLabel(t, "status", entry.oldValue ?? "", "en", statusOverride),
+        new: activityValueLabel(t, "status", entry.newValue ?? "", "en", statusOverride),
       });
     case "NOTE_ADD":
     case "NOTE_EDIT":

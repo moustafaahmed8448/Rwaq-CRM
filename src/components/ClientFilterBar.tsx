@@ -13,6 +13,7 @@ import MultiSelect from "@/components/MultiSelect";
 import Select from "@/components/Select";
 import { num } from "@/lib/format";
 import { channelLabel, locationLabel, statusLabel } from "@/lib/reporting";
+import { useStatusLabels } from "@/lib/status-labels";
 import {
   FOLLOW_UP_BUCKETS,
   SORT_LABELS,
@@ -64,6 +65,9 @@ export default function FilterBar({ filters, updateFilter, setMultiFilter, follo
   locationUsage?: Record<string, number>;
   t: TFn;
 }) {
+  // Admin-set display names, so the status dropdown and the removable filter
+  // chips say what the admin renamed a stage to rather than its built-in name.
+  const statusLabels = useStatusLabels();
   const hasPreset = activeDatePreset || filters.startDate || filters.endDate;
   return (
     <>
@@ -78,7 +82,7 @@ export default function FilterBar({ filters, updateFilter, setMultiFilter, follo
       )}
       <div className="filter-row filter-row--bar">
         <div className="search-box"><Search size={15} /><input placeholder={t("filter.queryPh")} value={filters.query} onChange={e => updateFilter("query", e.target.value)} /></div>
-        <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} render={v => statusLabel(t, v)} onRemove={onRemoveStatus} removable={removableStatuses} removeUsage={statusUsage} t={t} />
+        <MultiSelect label={t("filter.allStatuses")} options={allStatuses ?? []} selected={filters.status} onChange={v => setMultiFilter("status", v)} render={v => statusLabel(t, v, statusLabels)} onRemove={onRemoveStatus} removable={removableStatuses} removeUsage={statusUsage} t={t} />
         <MultiSelect label={t("filter.allChannels")} options={allChannels ?? []} selected={filters.channel} onChange={v => setMultiFilter("channel", v)} render={v => channelLabel(t, v)} onRemove={onRemoveChannel} removable={removableChannels} removeUsage={channelUsage} t={t} />
         <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} render={v => locationLabel(t, v)} onRemove={onRemoveLocation} removable={removableLocations} removeUsage={locationUsage} t={t} />
         {/* 1st and 2nd contact are separate dropdowns, and they AND together:
@@ -127,7 +131,7 @@ export default function FilterBar({ filters, updateFilter, setMultiFilter, follo
       {(filterCount ?? 0) > 0 && (
         <div className="filter-chips">
           {filters.query && <span className="filter-chip">&ldquo;{filters.query.slice(0, 24)}&rdquo;<button title={t("common.clear")} onClick={() => updateFilter("query", "")}>×</button></span>}
-          {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{statusLabel(t, s)}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
+          {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{statusLabel(t, s, statusLabels)}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
           {filters.channel.map(c => <span key={`ch-${c}`} className="filter-chip">{channelLabel(t, c)}<button onClick={() => setMultiFilter("channel", filters.channel.filter(x => x !== c))}>×</button></span>)}
           {filters.location.map(l => <span key={`lo-${l}`} className="filter-chip">{l}<button onClick={() => setMultiFilter("location", filters.location.filter(x => x !== l))}>×</button></span>)}
           {filters.firstContact.map(p => <span key={`fc-${p}`} className="filter-chip">{t("filter.firstContact")}: {p}<button onClick={() => setMultiFilter("firstContact", filters.firstContact.filter(x => x !== p))}>×</button></span>)}

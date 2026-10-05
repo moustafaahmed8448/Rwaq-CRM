@@ -1,0 +1,14 @@
+{
+  "name": "ZZTempView",
+  "filters": {
+    "query": "",
+    "status": ["WON"],
+    "channel": [],
+    "location": [],
+    "firstContact": [],
+    "secondContact": [],
+    "followUp": "overdue",
+    "startDate": "",
+    "endDate": ""
+  }
+}

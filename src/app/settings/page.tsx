@@ -224,9 +224,17 @@ export default function SettingsPage() {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: editName, email: editEmail }),
       });
-      const d = await res.json() as { error?: string };
+      const d = await res.json() as { error?: string; user?: { name: string; email?: string } };
       if (!res.ok) throw new Error(apiErrorMessage(t, d.error));
-      setUser(u => u ? { ...u, name: editName, email: editEmail } : null);
+      /* Re-render from the values the SERVER stored, not the ones typed into the
+         form. The two used to come from the same optimistic local state, so a
+         request the server quietly declined still produced the green
+         "Profile saved successfully" banner with the unsaved text left on
+         screen. A missing `user` is treated as a failure for the same reason. */
+      if (!d.user) throw new Error(t("errors.generic"));
+      setUser(u => u ? { ...u, name: d.user!.name, email: d.user!.email } : null);
+      setEditName(d.user.name);
+      if (d.user.email !== undefined) setEditEmail(d.user.email);
       setSaveMsg(t("settings.profileSaved"));
     } catch (e: unknown) { setError((e as Error).message); }
   };

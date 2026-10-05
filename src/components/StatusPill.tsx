@@ -16,6 +16,7 @@
 import { statusLabel, type TranslateFn } from "@/lib/reporting";
 import { useOptionColors } from "@/lib/option-colors";
 import { optionColor } from "@/lib/ref-options";
+import { useStatusLabels } from "@/lib/status-labels";
 
 export default function StatusPill({
   status,
@@ -29,8 +30,12 @@ export default function StatusPill({
   style?: React.CSSProperties;
 }) {
   const colors = useOptionColors();
+  // Admin-set display name. This is the single most common place a status is
+  // rendered — table cell, kanban card, detail panel, notification — so honouring
+  // the rename here is what makes a renamed stage read the same everywhere.
+  const statusLabels = useStatusLabels();
   const color = optionColor("statuses", status, colors);
-  const label = statusLabel(t, status);
+  const label = statusLabel(t, status, statusLabels);
   const cls = variant === "badge" ? "status-badge" : "status-pill";
   return (
     <span className={cls} style={{ background: color + "1f", color, ...style }}>
