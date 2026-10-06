@@ -123,6 +123,7 @@ export default function FilterBar({ filters, updateFilter, setMultiFilter, follo
               onChange={v => setSortBy!(v as SortField)}
               render={v => t(SORT_LABELS[v] ?? v)}
               searchable={false}
+              closeOnSelect={false}
               t={t}
             />
           </label>

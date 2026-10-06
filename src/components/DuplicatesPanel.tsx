@@ -11,9 +11,9 @@
  * survivor, and the differing fields are shown side by side so the decision is
  * made on evidence rather than on a button's default.
  *
- * Nothing merges without an explicit choice plus a confirmation that names the
- * rows being removed. A merge deletes records; that must never be one click.
- */
+* Nothing merges without an explicit choice plus a confirmation that names the
+  * rows being removed. A merge archives records; that must never be one click.
+  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowUpRight, GitMerge, Loader2, Phone, UserRound, X as XIcon } from "lucide-react";
@@ -53,12 +53,15 @@ const COMPARE = [
 export default function DuplicatesPanel({
   onClose,
   onMerged,
+  isAdmin,
   t,
   lang,
 }: {
   onClose: () => void;
   /** Lets the host refresh its client list after a merge. */
   onMerged?: () => void;
+  /** Only admins may execute a merge; standard users can view but not act. */
+  isAdmin: boolean;
   t: TFn;
   lang: string;
 }) {
@@ -85,6 +88,7 @@ export default function DuplicatesPanel({
   }, [load]);
 
   const merge = async (group: Group) => {
+    if (!isAdmin) return;
     const primaryId = keep[groupKey(group)];
     if (!primaryId || busy) return;
     const sources = group.clients.filter((c) => c.id !== primaryId).map((c) => c.id);
@@ -234,7 +238,8 @@ export default function DuplicatesPanel({
                   <span className="muted">{t("dupes.keepHint")}</span>
                   <button
                     className="btn-primary"
-                    disabled={!chosen || busy === key}
+                    disabled={!chosen || busy === key || !isAdmin}
+                    title={isAdmin ? undefined : t("errors.adminOnly")}
                     onClick={() => void merge(group)}
                   >
                     {busy === key ? <Loader2 size={13} className="imp-spin" /> : <GitMerge size={13} />}

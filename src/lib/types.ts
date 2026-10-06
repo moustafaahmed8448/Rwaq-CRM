@@ -7,6 +7,7 @@ export type ActivityAction =
   | "DELETED"
   | "ARCHIVED"
   | "RESTORED"
+  | "MERGED"
   | "STATUS_CUSTOM_ADDED";
 
 export interface ActivityEntry {

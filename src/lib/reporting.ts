@@ -518,6 +518,8 @@ export function describeActivity(
       return t("act.archived", { name: name || t("act.client") });
     case "RESTORED":
       return t("act.restored", { name: name || t("act.client") });
+    case "MERGED":
+      return t("act.merged", { value: entry.newValue ?? "" });
     case "STATUS_CHANGE":
       return t("act.statusChanged", {
         old: activityValueLabel(t, "status", entry.oldValue ?? "", "en", statusOverride),

@@ -13,7 +13,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { useCombobox, type TFn } from "@/lib/use-combobox";
 
 export default function Select({
-  value, options, onChange, render, placeholder, className, style, t, ariaLabel, searchable = true,
+  value, options, onChange, render, placeholder, className, style, t, ariaLabel, searchable = true, closeOnSelect = true,
 }: {
   value: string;
   options: string[];
@@ -30,11 +30,19 @@ export default function Select({
    * input is dropped and the listbox itself takes the key handler.
    */
   searchable?: boolean;
+  /**
+   * When false, the dropdown stays open after an option is selected so the
+   * user can see the checkmark move and pick another option. The menu still
+   * closes on Escape, outside click, or pressing Enter on an empty search.
+   * Default: true (close after select).
+   */
+  closeOnSelect?: boolean;
 }) {
   const labelOf = (v: string) => (render ? render(v) : v);
   const cb = useCombobox({
-    options, labelOf, selected: value ? [value] : [], onSelect: onChange,
+    options, labelOf, selected: [], onSelect: onChange,
     focusTarget: searchable ? "input" : "list",
+    closeOnSelect,
   });
 
   return (
@@ -91,7 +99,7 @@ export default function Select({
                 aria-selected={o === value}
                 className={`ms-opt${o === value ? " ms-opt-on" : ""}${i === cb.active ? " ms-opt-active" : ""}`}
                 onMouseEnter={() => cb.setActive(i)}
-                onClick={() => { onChange(o); cb.close(true); }}
+                onClick={() => { onChange(o); if (closeOnSelect !== false) cb.close(true); }}
               >
                 {o === value ? <Check size={12} className="ms-tick" /> : <span className="ms-tick" />}
                 <span className="ms-opt-label">{labelOf(o)}</span>

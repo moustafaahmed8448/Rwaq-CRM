@@ -459,7 +459,7 @@ function ProfileView() {
             applyDatePreset={applyDatePreset}
             clearDatePreset={clearDatePreset}
             sortBy={sortBy}
-            setSortBy={s => { setPage(1); setSortBy(s); }}
+             setSortBy={s => { setPage(1); setSortBy(s); }}
             filterCount={filterCount}
             allStatuses={allStatuses}
             allChannels={allChannels}

@@ -1,19 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canWrite, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
+import { isAdmin, canWrite, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
 import { databaseErrorMessage, findDuplicates, mergeClients } from "@/lib/db";
 
 /**
  * Duplicate detection and merge for the clients book.
  *
- * Admin-only for BOTH verbs, and deliberately so. Detecting is a report and could
- * safely be open to every role, but it is kept behind the same door as the merge
- * so the endpoint has one rule to state and one rule to enforce — and because a
- * rep should not be reading a list of "these two rows are the same person" for a
- * book they cannot edit anyway.
+ * The two verbs have DIFFERENT gates, by design:
+ *
+ *   GET (detect) — open to every write-capable role (Admin, Sales, CRM).
+ *     Detecting is a report; a rep may review potential duplicates even if they
+ *     cannot merge them.
+ *
+ *   POST (merge) — Admin only. A merge archives source rows and rewrites the
+ *     survivor, so it is the same privilege class as archiving / deleting.
  */
-async function requireAdmin(request: NextRequest) {
+/** Write-capable roles (Admin, Sales, CRM) — may view duplicate groups. */
+async function requireCanWrite(request: NextRequest) {
   const session = await getSessionUser(request);
   if (!session || !canWrite(session.role)) {
+    return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  }
+  return session;
+}
+
+/** Admin only — may merge (archive) duplicate records. */
+async function requireAdminOnly(request: NextRequest) {
+  const session = await getSessionUser(request);
+  if (!session || !isAdmin(session.role)) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
   return session;
@@ -22,8 +35,8 @@ async function requireAdmin(request: NextRequest) {
 /** GET — the groups, strongest signal first. */
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
-  const denied = await requireAdmin(request);
-  if (denied instanceof NextResponse) return denied;
+  const session = await requireCanWrite(request);
+  if (session instanceof NextResponse) return session;
 
   try {
     const includeArchived = request.nextUrl.searchParams.get("includeArchived") === "1";
@@ -55,7 +68,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
-  const session = await requireAdmin(request);
+  const session = await requireAdminOnly(request);
   if (session instanceof NextResponse) return session;
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;

@@ -1108,21 +1108,21 @@ const MERGE_FILL_DOWN = [
 export type MergeResult = {
   /** The row that survived. */
   survivorId: string;
-  /** The rows that were folded into it and removed. */
+  /** The rows that were folded into it and archived (not deleted). */
   mergedIds: string[];
   /** Human-readable notes about what the merge did and skipped. */
   warnings: string[];
 };
 
 /**
- * Folds `sourceIds` into `primaryId`, then deletes the sources.
+ * Folds `sourceIds` into `primaryId`, then archives the sources.
  *
  * Runs in ONE transaction. A partial merge is worse than no merge at all: it can
  * leave two rows sharing a phone number after the user was told they were merged,
  * and re-running the merge then produces a different answer than the first run.
  *
  * Refuses rather than guessing when the survivor is not in the set, and when any
- * id does not exist — silently merging N-1 of N would delete records with no way
+ * id does not exist — silently merging N-1 of N would archive records with no way
  * to know which.
  */
 export async function mergeClients(
@@ -1205,8 +1205,7 @@ export async function mergeClients(
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       actor,
-      action: "FIELD_EDIT",
-      field: "mergedIds",
+      action: "MERGED",
       newValue: sources.join(", "),
     });
     if (mergedLog.length > 0) data.activityLog = mergedLog as never;
@@ -1219,7 +1218,16 @@ export async function mergeClients(
     data.createdAt = earliestCreated;
 
     await tx.client.update({ where: { id: primary }, data: data as never });
-    await tx.client.deleteMany({ where: { id: { in: sources } } });
+    /* Non-selected duplicates are ARCHIVED, not deleted, so the book stays clean
+       while the rolled-up data is still recoverable — and auditable — from
+       /archived. A merged-then-archived row must never resurface as a live
+       duplicate, so `archivedAt` is stamped here regardless of the survivor. */
+    await tx.client.updateMany({
+      where: { id: { in: sources } },
+      data: { archived: true, archivedAt: new Date() },
+    });
+
+    warnings.push(`archived ${sources.length} duplicate record(s)`);
 
     return { survivorId: primary, mergedIds: sources, warnings };
   });

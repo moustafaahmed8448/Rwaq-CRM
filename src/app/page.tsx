@@ -1475,12 +1475,13 @@ userAvatars={userAvatars}
       )}
 
       {/* Duplicate review — admin only. `refreshReferenceData` rather than
-          `refreshAfterImport`: a merge removed rows, it did not import any, so
+          `refreshAfterImport`: a merge archived rows, it did not import any, so
           the import's "N imported, M updated" toast must not fire here. */}
       {dupesOpen && (
         <DuplicatesPanel
           onClose={() => setDupesOpen(false)}
           onMerged={refreshReferenceData}
+          isAdmin={user.role === "Admin"}
           t={t}
           lang={lang}
         />
@@ -2299,7 +2300,10 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
             <button className={mode==="kanban"?"seg-active":""} onClick={()=>setMode("kanban")}><Grid2X2 size={14}/>{t("clients.kanban")}</button>
           </div>
           {canEdit && <button className="btn-primary" onClick={onOpenCreate}><Plus size={15}/>{t("clients.newClient")}</button>}
-          {isAdmin && <button className="btn-outline" onClick={onOpenDuplicates}><GitMerge size={14}/>{t("dupes.title")}</button>}
+          {/* Duplicates/merge: visible to every write-capable role so a Sales or
+              CRM rep can REVIEW potential duplicates, but only Admin can execute
+              the merge (the button is disabled and the API enforces it too). */}
+          {canEdit && <button className="btn-outline" disabled={!isAdmin} title={isAdmin ? undefined : t("errors.adminOnly")} onClick={isAdmin ? onOpenDuplicates : undefined}><GitMerge size={14}/>{t("dupes.title")}</button>}
           {isAdmin && <button className="btn-outline" onClick={onOpenImport}><Upload size={15}/>{t("importer.btn")}</button>}
           <ColumnPicker columns={columns} onChange={onColumnsChange} t={t} />
           <button className="btn-outline" onClick={exportSelected} disabled={bulkCount===0}><Download size={15}/>{t("clients.exportSelected",{n:bulkCount})}</button>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Clock, Edit3, Plus, Tag, Trash2, UserRound, AlertCircle, Check, MessageSquare, TrendingUp } from "lucide-react";
+import { ArrowLeft, Clock, Edit3, GitMerge, Plus, Tag, Trash2, UserRound, AlertCircle, Check, MessageSquare, TrendingUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import RefPicker from "@/components/RefPicker";
@@ -382,6 +382,7 @@ function ActivityItem({ entry, t, lang }: { entry: ActivityEntry; t: (key: strin
     FIELD_EDIT: { icon: <Edit3 size={13} />, color: "#069de3" },
     NOTE_ADD: { icon: <MessageSquare size={13} />, color: "#0891b2" },
     NOTE_EDIT: { icon: <MessageSquare size={13} />, color: "#0891b2" },
+    MERGED: { icon: <GitMerge size={13} />, color: "#0ea5e0" },
   };
   const { icon, color } = icons[entry.action] ?? { icon: <Clock size={13} />, color: "#9ca3af" };
 
