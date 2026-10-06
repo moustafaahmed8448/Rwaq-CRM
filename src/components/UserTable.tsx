@@ -132,7 +132,7 @@ export default function UserTable({ users, columns, onColumnsChange, rtl, t, onE
   const layout = draft ? columns.map(c => (c.key === draft.key ? { ...c, w: draft.w } : c)) : columns;
   const shown = layout.filter(col => !col.hidden);
 
-  const cell = (col: ResolvedUserColumn, u: ManagedUser) => {
+  const cell = (col: ResolvedUserColumn, u: ManagedUser, i: number) => {
     switch (col.key) {
       case "name":
         // Photo when there is one, initials otherwise — the same fallback the
@@ -145,10 +145,8 @@ export default function UserTable({ users, columns, onColumnsChange, rtl, t, onE
             <b>{u.name}</b>
           </span>
         );
-      case "username":
-        // Forced LTR: a username is an identifier, and an Arabic layout would
-        // otherwise reorder the "@" and the characters around it.
-        return <span className="ltr-num muted">@{u.username}</span>;
+      case "index":
+        return <span className="muted" dir="ltr">{i + 1}</span>;
       case "email":
         return <span className="muted" dir="ltr">{u.email || "—"}</span>;
       case "role":
@@ -213,20 +211,20 @@ export default function UserTable({ users, columns, onColumnsChange, rtl, t, onE
             </span>
           ))}
         </div>
-        {users.map(u => (
-          <div className="client-row client-row-clickable" key={u.username} onClick={onOpenDetail ? (e) => {
-            // Same guard the clients table uses: the action buttons and the
-            // avatar upload control live inside this row and handle themselves.
-            const el = e.target as HTMLElement;
-            if (el.tagName === "INPUT" || el.tagName === "SELECT" || el.closest(".no-detail")) return;
-            onOpenDetail(u);
-          } : undefined}>
-            {/* Keyed Fragment, not the bare element: `cell()` returns a single
-                element with no key of its own, so an array of them without one
-                made React log "Each child in a list should have a unique key". */}
-            {shown.map(col => <Fragment key={col.key}>{cell(col, u)}</Fragment>)}
-          </div>
-        ))}
+{users.map((u, i) => (
+  <div className="client-row client-row-clickable" key={u.username} onClick={onOpenDetail ? (e) => {
+    // Same guard the clients table uses: the action buttons and the
+    // avatar upload control live inside this row and handle themselves.
+    const el = e.target as HTMLElement;
+    if (el.tagName === "INPUT" || el.tagName === "SELECT" || el.closest(".no-detail")) return;
+    onOpenDetail(u);
+  } : undefined}>
+    {/* Keyed Fragment, not the bare element: `cell()` returns a single
+        element with no key of its own, so an array of them without one
+        made React log "Each child in a list should have a unique key". */}
+    {shown.map(col => <Fragment key={col.key}>{cell(col, u, i)}</Fragment>)}
+  </div>
+))}
         {users.length === 0 && <div className="empty-state">{t("users.noMatches")}</div>}
       </div>
     </div>

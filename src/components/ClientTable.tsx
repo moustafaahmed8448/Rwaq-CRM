@@ -31,7 +31,7 @@ import type { Client, TFn } from "@/lib/client-types";
  * drift out of column order — the grid assigns cells positionally, so one extra
  * or missing cell shifts every cell after it.
  */
-function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdit, onOpenDelete, onArchive }: {
+function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdit, onOpenDelete, onArchive, totalClients, index }: {
   col: ResolvedColumn;
   c: Client;
   t: TFn;
@@ -42,13 +42,19 @@ function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdi
   onOpenEdit: (c: Client) => void;
   onOpenDelete: (ids: string[], names: string[]) => void;
   onArchive?: (id: string) => void | Promise<void>;
+  totalClients?: number;
+  index?: number;
 }) {
   // Same shared colour map as the rest of the app, so a channel recoloured on
   // the options page shows here without this component knowing the option exists.
   const colors = useOptionColors();
+  // Calculate DESC index: if totalClients is provided, show descending number
+  const descNumber = (totalClients !== undefined && index !== undefined)
+    ? totalClients - index
+    : undefined;
   switch (col.key) {
-    case "id":
-      return <span className="id-cell" title={t("th.id")}>#{c.id}</span>;
+    case "index":
+      return descNumber !== undefined ? <span className="id-cell" dir="ltr">{descNumber}</span> : null;
     case "client":
       return (
         <span className="person-cell" onClick={() => onOpenDetail(c)}>
@@ -238,15 +244,15 @@ export default function ClientTable({ clients, selectedIds, toggleSelect, toggle
             </span>
           ))}
         </div>
-        {clients.map(c => (
-          <div className={`client-row client-row-clickable ${selectedIds.has(c.id) ? "selected" : ""}`} key={c.id} onClick={e => { (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "SELECT" && !(e.target as HTMLElement).closest(".no-detail") && onOpenDetail(c) }}>
-            {shown.map(col => (
-              col.key === "select"
-                ? <input key={col.key} type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="cb" onClick={e => e.stopPropagation()} />
-                : <ClientCell key={col.key} col={col} c={c} t={t} lang={lang} onOpenDetail={onOpenDetail} canEdit={canEdit} isAdmin={isAdmin} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onArchive={onArchive} />
-            ))}
-          </div>
-        ))}
+{clients.map((c, i) => (
+  <div className={`client-row client-row-clickable ${selectedIds.has(c.id) ? "selected" : ""}`} key={c.id} onClick={e => { (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "SELECT" && !(e.target as HTMLElement).closest(".no-detail") && onOpenDetail(c) }}>
+    {shown.map(col => (
+      col.key === "select"
+        ? <input key={col.key} type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="cb" onClick={e => e.stopPropagation()} />
+        : <ClientCell key={col.key} col={col} c={c} t={t} lang={lang} onOpenDetail={onOpenDetail} canEdit={canEdit} isAdmin={isAdmin} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onArchive={onArchive} totalClients={clients.length} index={i} />
+    ))}
+  </div>
+))}
         {clients.length === 0 && <div className="empty-state">{t("clients.noResults")}</div>}
       </div>
     </div>

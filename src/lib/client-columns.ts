@@ -23,7 +23,7 @@ import {
 } from "@/lib/column-registry";
 
 export type ColumnKey =
-  | "select" | "id" | "client" | "status" | "channel" | "project"
+  | "select" | "index" | "client" | "status" | "channel" | "project"
   | "location" | "registeredAt" | "operation" | "firstContact"
   | "secondContact" | "lastUpdateDate" | "nextFollowUp" | "actions";
 
@@ -61,7 +61,7 @@ export const sanitizePrefs = (input: unknown): ColumnPrefs =>
 
 export const CLIENT_COLUMNS: readonly ClientColumn[] = [
   { key: "select",         labelKey: "",                    w: 30,  min: 30,  max: 30,  locked: true,  inKanban: false },
-  { key: "id",             labelKey: "th.id",               w: 42,  min: 36,  max: 90,  locked: true,  inKanban: false },
+  { key: "index",          labelKey: "#",            w: 30,  min: 20,  max: 100, locked: true,  inKanban: false },
   { key: "client",         labelKey: "th.client",           w: 140, min: 110, max: 420, locked: false, inKanban: true },
   { key: "status",         labelKey: "th.status",           w: 85,  min: 70,  max: 200, locked: true,  inKanban: true },
   { key: "channel",        labelKey: "th.source",           w: 90,  min: 70,  max: 220, locked: false, inKanban: true },

@@ -20,6 +20,8 @@ export type Client = {
   /** ISO string, or null when no follow-up is set. */
   nextFollowUpAt?: string | null;
   archived?: boolean; archivedAt?: string;
+  /** Row index/display order within the current sorted/filtered table. */
+  index?: number;
 };
 
 export type Filters = {

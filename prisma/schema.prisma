@@ -46,7 +46,7 @@ model MarketingMetric {
 }
 
 model Client {
-  id                  String    @id
+  id                  String    @id @default(uuid()) @db.Uuid
   createdAt           DateTime  @default(now())
   lastUpdateDate      DateTime  @updatedAt
   name                String

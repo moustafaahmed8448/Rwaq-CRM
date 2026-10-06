@@ -23,7 +23,7 @@ import {
   type Resolved,
 } from "@/lib/column-registry";
 
-export type UserColumnKey = "name" | "username" | "email" | "role" | "actions";
+export type UserColumnKey = "name" | "index" | "email" | "role" | "actions";
 
 export type UserColumn = GridColumn<UserColumnKey>;
 
@@ -46,8 +46,8 @@ export const sanitizeUserPrefs = (input: unknown): ColumnPrefs =>
  * so an un-customised table looks the way it always has.
  */
 export const USER_COLUMNS: readonly UserColumn[] = [
+  { key: "index",    labelKey: "#",    w: 30,  min: 20,  max: 100, locked: true  },
   { key: "name",     labelKey: "users.name",     w: 180, min: 120, max: 360, locked: false },
-  { key: "username", labelKey: "users.username", w: 130, min: 90,  max: 240, locked: false },
   { key: "email",    labelKey: "users.email",    w: 200, min: 120, max: 420, locked: false },
   { key: "role",     labelKey: "users.role",     w: 90,  min: 70,  max: 180, locked: false },
   { key: "actions",  labelKey: "",               w: 62,  min: 62,  max: 62,  locked: true  },
