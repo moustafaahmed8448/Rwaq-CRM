@@ -106,7 +106,7 @@ function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdi
   }
 }
 
-export default function ClientTable({ clients, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, columns, onColumnsChange, rtl, hideSelect, t }: {
+export default function ClientTable({ clients, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, columns, onColumnsChange, rtl, hideSelect, t, totalClients }: {
   clients: Client[];
   selectedIds: Set<string>;
   toggleSelect: (id: string) => void;
@@ -117,10 +117,8 @@ export default function ClientTable({ clients, selectedIds, toggleSelect, toggle
   isAdmin?: boolean;
   canEdit?: boolean;
   onArchive?: (id: string) => void | Promise<void>;
-  /* `| null` on the inner type is React 19's `useRef<T>(null)` shape. Declaring it
-     as `RefObject<HTMLDivElement>` made every caller that keeps a real ref fail to
-     typecheck, so hosts passed `null` and lost the scroll indicators. */
   tableRef?: React.RefObject<HTMLDivElement | null> | null;
+  totalClients?: number;
   columns: ResolvedColumn[];
   onColumnsChange: (c: ResolvedColumn[]) => void;
   rtl: boolean;
