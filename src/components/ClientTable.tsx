@@ -48,7 +48,7 @@ function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdi
   // Same shared colour map as the rest of the app, so a channel recoloured on
   // the options page shows here without this component knowing the option exists.
   const colors = useOptionColors();
-  // Calculate DESC index: if totalClients is provided, show descending number
+  // Row number counts DOWN from the total of the current result set; `index` already includes the page offset (see startIndex), so with 362 total page 1 shows 362..338 and page 2 continues at 337.
   const descNumber = (totalClients !== undefined && index !== undefined)
     ? totalClients - index
     : undefined;
@@ -106,7 +106,7 @@ function ClientCell({ col, c, t, lang, onOpenDetail, canEdit, isAdmin, onOpenEdi
   }
 }
 
-export default function ClientTable({ clients, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, columns, onColumnsChange, rtl, hideSelect, t, totalClients }: {
+export default function ClientTable({ clients, selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenDelete, onOpenDetail, isAdmin, canEdit, onArchive, tableRef, columns, onColumnsChange, rtl, hideSelect, t, totalClients, startIndex }: {
   clients: Client[];
   selectedIds: Set<string>;
   toggleSelect: (id: string) => void;
@@ -119,6 +119,8 @@ export default function ClientTable({ clients, selectedIds, toggleSelect, toggle
   onArchive?: (id: string) => void | Promise<void>;
   tableRef?: React.RefObject<HTMLDivElement | null> | null;
   totalClients?: number;
+  /** 0-based index of the first row ON THIS PAGE within the whole result set; the host folds the page offset in here (see src/app/page.tsx) so the descending row number is continuous across pages. */
+  startIndex?: number;
   columns: ResolvedColumn[];
   onColumnsChange: (c: ResolvedColumn[]) => void;
   rtl: boolean;
@@ -247,7 +249,7 @@ export default function ClientTable({ clients, selectedIds, toggleSelect, toggle
     {shown.map(col => (
       col.key === "select"
         ? <input key={col.key} type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="cb" onClick={e => e.stopPropagation()} />
-        : <ClientCell key={col.key} col={col} c={c} t={t} lang={lang} onOpenDetail={onOpenDetail} canEdit={canEdit} isAdmin={isAdmin} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onArchive={onArchive} totalClients={clients.length} index={i} />
+        : <ClientCell key={col.key} col={col} c={c} t={t} lang={lang} onOpenDetail={onOpenDetail} canEdit={canEdit} isAdmin={isAdmin} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onArchive={onArchive} totalClients={totalClients} index={(startIndex ?? 0) + i} />
     ))}
   </div>
 ))}

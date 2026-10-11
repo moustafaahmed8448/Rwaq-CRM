@@ -348,6 +348,10 @@ export default function MetricsPage() {
         return <span className="r-num">{sar(m.spend)}</span>;
       case "reach":
         return <span className="r-num">{num(m.reach)}</span>;
+      case "impressions":
+        return <span className="r-num">{num(m.impressions)}</span>;
+      case "clicks":
+        return <span className="r-num">{num(m.clicks)}</span>;
       case "notes":
         return <span className="muted">{m.notes || "—"}</span>;
       /* `.actions-cell` and `.icon-btn-sm` rather than /marketing's `.r-actions`:
@@ -513,7 +517,7 @@ export default function MetricsPage() {
                         aria-sort={sortable
                           ? (sortKey === col.key ? (sortDir === "asc" ? "ascending" : "descending") : "none")
                           : undefined}
-                        className={`col-head-cell${col.key === "spend" || col.key === "reach" ? " r-num" : ""}`}
+                        className={`col-head-cell${col.key === "spend" || col.key === "reach" || col.key === "impressions" || col.key === "clicks" ? " r-num" : ""}`}
                       >
                         {/* The tick-all box, the same one /marketing uses. "Select
                             all" means all rows on the current page. */}

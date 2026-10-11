@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/lib/i18n";
 import { useLogo } from "@/lib/logo";
+import { useBrand } from "@/lib/brand";
 import { dateLocale } from "@/lib/format";
 import { notificationMessage } from "@/lib/reporting";
 import BrandMark from "@/components/BrandMark";
@@ -61,6 +62,9 @@ export default function AppHeader({
   const router = useRouter();
   const { t, lang, setLang } = useLang();
   const { logo } = useLogo();
+  // The admin-set workspace name (white-label). Falls back to the original
+  // brand inside the hook, so an untouched workspace renders exactly as before.
+  const { brand } = useBrand();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -87,7 +91,19 @@ export default function AppHeader({
     fetch("/api/notifications").then((r) => r.json()).then((d) => setNotifications(d.notifications ?? [])).catch(() => {});
   };
 
-  useEffect(() => { refreshNotifications(); }, []);
+  useEffect(() => {
+    refreshNotifications();
+    // Kick the follow-up reminder pass once on mount, in the background. The
+    // route is idempotent (one reminder per client per day), so this is safe to
+    // fire from every page that shows the header. If it creates any, refresh the
+    // badge so the new due reminders appear without a reload.
+    fetch("/api/notifications/reminders", { method: "POST" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res: { created?: number } | null) => {
+        if (res && (res.created ?? 0) > 0) refreshNotifications();
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const onChange = () => refreshNotifications();
@@ -230,8 +246,8 @@ export default function AppHeader({
             title={t("nav.dashboard")}
             aria-label={t("nav.dashboard")}
           >
-            <BrandMark logo={logo} alt={t("brand.logoAlt")} />
-            <span className="brand-name">rwaq</span>
+            <BrandMark logo={logo} alt={t("brand.logoAlt")} fallback={brand} />
+            <span className="brand-name">{brand}</span>
           </button>
           {badge}
         </div>
@@ -377,8 +393,8 @@ export default function AppHeader({
                 title={t("nav.dashboard")}
                 aria-label={t("nav.dashboard")}
               >
-                <BrandMark logo={logo} alt={t("brand.logoAlt")} />
-                <span className="brand-name">rwaq</span>
+                <BrandMark logo={logo} alt={t("brand.logoAlt")} fallback={brand} />
+                <span className="brand-name">{brand}</span>
               </button>
               {badge}
             </div>

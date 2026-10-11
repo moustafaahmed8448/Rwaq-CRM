@@ -3,8 +3,9 @@ import bcrypt from "bcryptjs";
 import { DEMO_SESSION, SESSION_COOKIE, normalizeRole, sessionCookieOptions, sessionCookieValue } from "@/lib/auth";
 import { databaseErrorMessage, findUser } from "@/lib/db";
 import { ensureUsersBootstrapped } from "@/lib/bootstrap";
+import { checkLock, clearFailures, recordFailure } from "@/lib/login-throttle";
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const username = String(body.username ?? "").trim().toLowerCase();
   const password = String(body.password ?? "");
@@ -12,8 +13,22 @@ export async function POST(request: Request) {
   if (!username || !password)
     return NextResponse.json({ error: "Username and password are required" }, { status: 400 });
 
+  // Brute-force guard, checked BEFORE any password comparison. The key is the
+  // username + client IP, so one account cannot be ground down by repeated
+  // guesses from one source. See login-throttle.ts for the multi-instance caveat.
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "";
+  const lockedFor = checkLock(username, ip);
+  if (lockedFor > 0) {
+    const minutes = Math.max(1, Math.ceil(lockedFor / 60000));
+    return NextResponse.json(
+      { error: "Too many attempts", retryAfterMinutes: minutes },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(lockedFor / 1000)) } },
+    );
+  }
+
   // Built-in demo user
   if (username === "amira" && password === "rwaq2026") {
+    clearFailures(username, ip);
     const response = NextResponse.json({
       user: { name: "Amira Mansour", initials: "AM", role: "Admin" },
     });
@@ -27,13 +42,20 @@ export async function POST(request: Request) {
     await ensureUsersBootstrapped();
 
     const user = await findUser(username);
-    if (!user)
+    // Both "no such user" and "wrong password" record a failure and return the
+    // SAME message, so the endpoint never reveals whether a username exists.
+    if (!user) {
+      recordFailure(username, ip);
       return NextResponse.json({ error: "Incorrect username or password" }, { status: 401 });
+    }
 
     const match = await bcrypt.compare(password, user.hash);
-    if (!match)
+    if (!match) {
+      recordFailure(username, ip);
       return NextResponse.json({ error: "Incorrect username or password" }, { status: 401 });
+    }
 
+    clearFailures(username, ip);
     const response = NextResponse.json({
       user: {
         name: user.name,
@@ -47,3 +69,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }
 }
+

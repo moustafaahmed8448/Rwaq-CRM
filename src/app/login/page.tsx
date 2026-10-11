@@ -5,12 +5,15 @@ import { ArrowRight, Eye, EyeOff, LockKeyhole, UserRound, ShieldCheck, Sun, Moon
 import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 import { useLogo } from "@/lib/logo";
+import { useBrand } from "@/lib/brand";
 import BrandMark from "@/components/BrandMark";
 
 export default function LoginPage() {
   const router = useRouter();
   const { t, lang, setLang } = useLang();
   const { logo } = useLogo();
+  // Admin-set workspace name (white-label); falls back to the original brand.
+  const { brand } = useBrand();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -46,7 +49,15 @@ export default function LoginPage() {
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) {
-        setError(t("auth.badCredentials"));
+        // A 429 means the brute-force lockout tripped; show the specific,
+        // localized wait message rather than the generic credentials error.
+        if (response.status === 429) {
+          const data = await response.json().catch(() => ({})) as { retryAfterMinutes?: number };
+          const minutes = Number(data.retryAfterMinutes) > 0 ? Number(data.retryAfterMinutes) : 15;
+          setError(t("errors.tooManyAttempts", { minutes }));
+        } else {
+          setError(t("auth.badCredentials"));
+        }
         setBusy(false);
         return;
       }
@@ -64,8 +75,8 @@ export default function LoginPage() {
 
       <header className="login-v2-topbar">
         <div className="login-v2-brand-badge">
-          <BrandMark logo={logo} alt={t("brand.logoAlt")} />
-          <span className="brand-name">rwaq</span>
+          <BrandMark logo={logo} alt={t("brand.logoAlt")} fallback={brand} />
+          <span className="brand-name">{brand}</span>
           <span className="login-v2-pill">{t("auth.secureBadge")}</span>
         </div>
         <div className="login-v2-topbar-actions">
@@ -103,7 +114,7 @@ export default function LoginPage() {
         <section className="login-v2-card">
           <div className="login-v2-card-header">
             <div className="login-v2-icon-wrap">
-              <BrandMark logo={logo} alt={t("brand.logoAlt")} variant="login" size="lg" />
+              <BrandMark logo={logo} alt={t("brand.logoAlt")} variant="login" size="lg" fallback={brand} />
             </div>
             <h1>{t("auth.welcomeBack")}</h1>
             <p>{t("auth.signinSub")}</p>

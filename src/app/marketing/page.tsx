@@ -473,6 +473,10 @@ export default function MarketingPage() {
         return <span key={key} className="r-num r-spend">{sar(Number(m.spend))}</span>;
       case "reach":
         return <span key={key} className="r-num r-reach">{num(Number(m.reach))}</span>;
+      case "impressions":
+        return <span key={key} className="r-num">{num(Number(m.impressions))}</span>;
+      case "clicks":
+        return <span key={key} className="r-num">{num(Number(m.clicks))}</span>;
       case "notes":
         return <span key={key} className="r-notes muted">{m.notes ? m.notes.slice(0, 40) : "—"}</span>;
       case "actions":
@@ -719,7 +723,7 @@ export default function MarketingPage() {
                   {shown.map(col => (
                     <span
                       key={col.key}
-                      className={`col-head-cell${col.key === "spend" || col.key === "reach" ? " r-num" : ""}`}
+                      className={`col-head-cell${col.key === "spend" || col.key === "reach" || col.key === "impressions" || col.key === "clicks" ? " r-num" : ""}`}
                     >
                       {col.key === "select"
                         ? (

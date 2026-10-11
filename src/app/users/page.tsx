@@ -138,6 +138,9 @@ export default function UsersPage() {
             jobTitle: form.jobTitle,
             notes: form.notes,
             avatar: form.avatar,
+            // Optional admin password reset. Sent only when the admin typed a new
+            // one; a blank leaves the existing hash untouched (see the PATCH route).
+            ...(form.password ? { password: form.password } : {}),
           }),
         })
         : await fetch("/api/users", {
@@ -351,6 +354,13 @@ export default function UsersPage() {
                 {!editing && (
                   <Field label={t("settings.field.password")}>
                     <input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder={t("settings.passwordMinPh")} />
+                  </Field>
+                )}
+                {/* Admin reset while editing. Blank keeps the current password; a
+                    non-empty value (≥6 chars) replaces the hash — see the PATCH route. */}
+                {editing && (
+                  <Field label={t("users.resetPassword")}>
+                    <input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder={t("users.resetPasswordPh")} />
                   </Field>
                 )}
                 <Field label={t("settings.field.role")}>

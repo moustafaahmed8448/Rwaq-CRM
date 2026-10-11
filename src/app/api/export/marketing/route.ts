@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
-import { databaseErrorMessage, listMetrics } from "@/lib/db";
+import { databaseErrorMessage, listMetrics, readSettingValue } from "@/lib/db";
 import { parseChannel } from "@/lib/reporting";
 import { MONEY_FMT, INT_FMT, buildWorkbook, dateStamp, xlsxResponse, type ExcelColumn } from "@/lib/excel";
 
@@ -124,9 +124,13 @@ export async function GET(request: NextRequest) {
         ? `${from ?? "start"} to ${to ?? "today"}`
         : "All time";
 
-    const buffer = await buildWorkbook([
-      {
-        name: "Summary",
+    // White-label: see the clients export — the admin-set workspace name rides
+    // into the file's author metadata and the filename prefix.
+    const brand = (((await readSettingValue("brand")) as string | null) ?? "").trim();
+    const buffer = await buildWorkbook(
+      [
+        {
+          name: "Summary",
         columns: SUMMARY_COLUMNS,
         rows: summary,
         totalsRow: {
@@ -145,9 +149,12 @@ export async function GET(request: NextRequest) {
         columns: RECORD_COLUMNS,
         rows: records,
       },
-    ]);
+      ],
+      brand,
+    );
 
-    return xlsxResponse(buffer, `rwaq-marketing-${dateStamp()}.xlsx`);
+    const slug = (brand || "rwaq").toLowerCase().replace(/\s+/g, "-");
+    return xlsxResponse(buffer, `${slug}-marketing-${dateStamp()}.xlsx`);
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }

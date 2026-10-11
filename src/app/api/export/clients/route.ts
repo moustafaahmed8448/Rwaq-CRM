@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assigneeScope, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
-import { databaseErrorMessage, listClients } from "@/lib/db";
+import { databaseErrorMessage, listClients, readSettingValue } from "@/lib/db";
 import { parseChannel, stageFallback } from "@/lib/reporting";
 import { buildWorkbook, dateStamp, xlsxResponse, type ExcelColumn } from "@/lib/excel";
 
@@ -123,16 +123,24 @@ export async function GET(request: NextRequest) {
     }));
 
     const scope = ids.length > 0 ? "selected" : "all";
-    const buffer = await buildWorkbook([
-      {
-        name: ids.length > 0 ? "Selected clients" : "Clients",
-        columns: COLUMNS,
-        rows: sheetRows,
-        totalsRow: { clientId: `${sheetRows.length} client${sheetRows.length === 1 ? "" : "s"}` },
-      },
-    ]);
+    // White-label: the workspace name (admin-set) rides into the file's author
+    // metadata and its filename prefix, so an exported sheet from any tenant
+    // carries that tenant's identity.
+    const brand = (((await readSettingValue("brand")) as string | null) ?? "").trim();
+    const buffer = await buildWorkbook(
+      [
+        {
+          name: ids.length > 0 ? "Selected clients" : "Clients",
+          columns: COLUMNS,
+          rows: sheetRows,
+          totalsRow: { clientId: `${sheetRows.length} client${sheetRows.length === 1 ? "" : "s"}` },
+        },
+      ],
+      brand,
+    );
 
-    return xlsxResponse(buffer, `rwaq-clients-${scope}-${dateStamp()}.xlsx`);
+    const slug = (brand || "rwaq").toLowerCase().replace(/\s+/g, "-");
+    return xlsxResponse(buffer, `${slug}-clients-${scope}-${dateStamp()}.xlsx`);
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }

@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Rwaq Marketing Dashboard",
+  /* Neutral pre-hydration fallback only: the tenant's actual name is written to
+     document.title by useBrand() once the Setting row loads (see src/lib/brand.ts),
+     so keeping "Rwaq" here would flash the original brand on every white-labeled
+     workspace during first paint. */
+  title: "CRM",
   description: "Weekly marketing ROI and CRM workflow dashboard",
   // Matches --navy so the browser chrome (address bar, notch) blends with the
   // dark theme's base rather than flashing a separate grey.

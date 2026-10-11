@@ -21,6 +21,15 @@ export type ExcelSheet = {
   rows: Array<Record<string, ExcelCell>>;
   /** Optional emphasised final row (e.g. totals). */
   totalsRow?: Record<string, ExcelCell>;
+  /**
+   * Keys whose cells hold a real `Date` and should be written as dates.
+   *
+   * Without this a Date cell is serialized to a bare number, so Excel shows
+   * `46654` instead of a date. The writer already accepts `Date` cells; this is
+   * what tells it to apply a number format so the column reads as a date and
+   * sorts chronologically. Columns not listed keep their default text handling.
+   */
+  dateColumns?: string[];
 };
 
 const HEADER_FILL: ExcelJS.Fill = {
@@ -29,12 +38,26 @@ const HEADER_FILL: ExcelJS.Fill = {
   fgColor: { argb: "FF4F46E5" },
 };
 
-export async function buildWorkbook(sheets: ExcelSheet[]): Promise<Buffer> {
+export async function buildWorkbook(
+  sheets: ExcelSheet[],
+  /**
+   * "Author" written into the file's metadata. Export routes pass the
+   * admin-set workspace name (Setting row `brand`), so a downloaded file from
+   * any white-labeled tenant says that company's name rather than the original
+   * brand. Falls back to the legacy constant when omitted or empty.
+   */
+  creator?: string,
+): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Rwaq CRM";
+  workbook.creator = (creator ?? "").trim() || "Rwaq CRM";
   workbook.created = new Date();
 
   for (const spec of sheets) {
+    // Columns holding a real Date need a display format, or Excel renders the
+    // underlying serial number. Resolved once per sheet so the row loop below
+    // stays a straight pass.
+    const dateKeys = new Set(spec.dateColumns ?? []);
+
     const sheet = workbook.addWorksheet(spec.name, {
       views: [{ state: "frozen", ySplit: 1 }],
     });
@@ -52,7 +75,17 @@ export async function buildWorkbook(sheets: ExcelSheet[]): Promise<Buffer> {
     header.alignment = { vertical: "middle", horizontal: "left" };
     header.height = 22;
 
-    for (const row of spec.rows) sheet.addRow(row);
+    for (const row of spec.rows) {
+      const added = sheet.addRow(row);
+      // Applied per cell after the row lands: exceljs resolves `style.numFmt`
+      // on the column, but a Date written through `addRow` is coerced to text
+      // unless the CELL carries a date number format.
+      if (dateKeys.size > 0) {
+        spec.columns.forEach((column, index) => {
+          if (dateKeys.has(column.key)) added.getCell(index + 1).numFmt = DATE_FMT;
+        });
+      }
+    }
 
     if (spec.totalsRow) {
       const totals = sheet.addRow(spec.totalsRow);

@@ -8,7 +8,9 @@ export type ActivityAction =
   | "ARCHIVED"
   | "RESTORED"
   | "MERGED"
-  | "STATUS_CUSTOM_ADDED";
+  | "STATUS_CUSTOM_ADDED"
+  /** An inbound WhatsApp reply logged by the Twilio webhook. */
+  | "WHATSAPP_REPLY";
 
 export interface ActivityEntry {
   id: string;

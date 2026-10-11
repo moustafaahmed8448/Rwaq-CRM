@@ -4,6 +4,8 @@ import {
   addSettingValues,
   bulkImportClients,
   databaseErrorMessage,
+  lastSyncRun,
+  latestClientUpdate,
   listImportBaseline,
   readSetting,
   recordSyncRun,
@@ -183,10 +185,31 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** Lets the UI show which sheet is configured without fetching it. */
+/**
+ * Sheet URL + import health, read-only.
+ *
+ * `lastSyncRun` / `latestClientUpdate` back the status strip that lives OUTSIDE
+ * the modal: until now the only place the sync state existed at all was inside
+ * the import dialog, so you had to open an import to learn whether the last one
+ * had failed. Both fields are additive — `{ source }` is unchanged — and both
+ * readers swallow their own errors, so an unreadable SyncRun table degrades to
+ * "no data" instead of failing the request.
+ */
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   const session = await getSessionUser(request);
   if (!session || session.role !== "Admin") return errorResponse(ERR_ADMIN, 403);
-  return NextResponse.json({ source: sheetUrl() });
+
+  const [last, latest] = await Promise.all([lastSyncRun(PROVIDER), latestClientUpdate()]);
+  const finishedAt = last?.finishedAt ?? null;
+  return NextResponse.json({
+    source: sheetUrl(),
+    lastSyncRun: last,
+    latestClientUpdate: latest,
+    /* Both sides are `iso()`-formatted UTC, so the string comparison IS the
+       chronological one. True means someone edited (or a webhook touched) a
+       row after the sheet last wrote — i.e. the import diff would now show
+       changes the last commit did not make. */
+    rowsNewerThanLastImport: Boolean(finishedAt && latest && latest > finishedAt),
+  });
 }

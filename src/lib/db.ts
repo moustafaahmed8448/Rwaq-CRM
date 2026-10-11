@@ -38,7 +38,14 @@ export function databaseErrorMessage(error: unknown): string {
 
 /* ── Reference data (channels / statuses / locations) ─────────────────────── */
 
-export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "optionColors" | "statusBuckets" | "statusLabels";
+/**
+ * Keys of the open `Setting` KV store. `Setting.key` is a plain string column,
+ * so adding one here is a type-level widening only — never a migration.
+ *
+ * `"brand"` is the white-label workspace name (see /api/settings/brand): the
+ * text beside the logo mark, which adapts the whole app to another company.
+ */
+export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "brand" | "optionColors" | "statusBuckets" | "statusLabels";
 
 export async function readSetting(key: SettingKey): Promise<string[]> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -221,6 +228,37 @@ export async function mutateSavedViews(
   const next = mutate(current).slice(0, MAX_VIEWS);
   await writeSavedViews(username, next);
   return next;
+}
+
+/* ── Per-user notification preferences ────────────────────────────────────
+   Stored in the same `Setting` KV table under `notifPrefs:<username>`, for the
+   same reason saved views are: it is per-user data with a small, fixed shape,
+   and adding an AppUser column costs a migration on every environment. Absent
+   keys fall back to "on", so a user who never opens the toggle gets reminders. */
+
+export type NotifPrefs = {
+  /** When false, the follow-up reminder pass skips this user entirely. */
+  followUpReminders: boolean;
+};
+
+const notifPrefsKey = (username: string) =>
+  `notifPrefs:${String(username ?? "").trim().toLowerCase()}`;
+
+/** Reads a user's notification preferences, defaulting to everything on. */
+export async function readNotifPrefs(username: string): Promise<NotifPrefs> {
+  const row = await prisma.setting.findUnique({ where: { key: notifPrefsKey(username) } });
+  const value = row?.value as Partial<NotifPrefs> | null | undefined;
+  // Only a real `false` turns a reminder off; anything else (missing, junk)
+  // keeps the default of on, so a malformed blob can never silently mute a user.
+  return { followUpReminders: value?.followUpReminders !== false };
+}
+
+export async function writeNotifPrefs(username: string, prefs: NotifPrefs): Promise<void> {
+  await prisma.setting.upsert({
+    where: { key: notifPrefsKey(username) },
+    update: { value: { followUpReminders: Boolean(prefs.followUpReminders) } as unknown as Prisma.InputJsonValue },
+    create: { key: notifPrefsKey(username), value: { followUpReminders: Boolean(prefs.followUpReminders) } as unknown as Prisma.InputJsonValue },
+  });
 }
 
 /* ── Reference-option rename (admin) ───────────────────────────────────────
@@ -711,6 +749,39 @@ export async function findClient(id: string): Promise<ClientRow | null> {
   return row ? toClientRow(row) : null;
 }
 
+/**
+ * Live clients whose phone matches `phone`, ignoring spaces/dashes/parentheses
+ * and a leading `00` — the same normalization the search box uses (see
+ * `clientWhere`), so a number typed with or without punctuation finds the same
+ * rows. Archived rows are included and flagged, because a rep re-entering a
+ * number that already exists as an archived lead still needs to be told.
+ *
+ * Backs the duplicate-phone guard on the add/edit form: it answers "does this
+ * number already exist, and on whom" without exposing the whole book.
+ */
+export async function findClientsByPhone(
+  phone: string,
+  opts: { excludeId?: string; limit?: number } = {},
+): Promise<ClientRow[]> {
+  const digits = String(phone ?? "").replace(/\D/g, "").replace(/^00/, "");
+  // Too short to be a real number — matching on 1-2 digits would flag almost
+  // every row, so return nothing and let the guard stay silent.
+  if (digits.length < 6) return [];
+  const rows = await prisma.client.findMany({
+    where: {
+      OR: [
+        { phoneNumber: { contains: digits } },
+        { phoneNumber: { contains: String(phone ?? "").trim() } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: Math.min(Math.max(opts.limit ?? 10, 1), 25),
+  });
+  return rows
+    .map(toClientRow)
+    .filter((c) => c.id !== opts.excludeId);
+}
+
 export async function countClients(where: Prisma.ClientWhereInput = {}): Promise<number> {
   return prisma.client.count({ where });
 }
@@ -960,6 +1031,61 @@ export async function recordSyncRun(input: {
   }
 }
 
+export type SyncRunRecord = {
+  provider: string;
+  status: string;
+  recordsRead: number;
+  recordsWritten: number;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+};
+
+/**
+ * The most recent run for a provider, or null when nothing has run yet.
+ *
+ * Backs the "last import" strip on the clients screen, so the sync state is
+ * visible OUTSIDE the import modal instead of only after you open it. Like
+ * `recordSyncRun`, a read failure is swallowed: the strip is diagnostic and an
+ * unreadable log must never break the page that embeds it.
+ */
+export async function lastSyncRun(provider: string): Promise<SyncRunRecord | null> {
+  try {
+    const row = await prisma.syncRun.findFirst({
+      where: { provider },
+      orderBy: { startedAt: "desc" },
+    });
+    if (!row) return null;
+    return {
+      provider: row.provider,
+      status: row.status,
+      recordsRead: row.recordsRead,
+      recordsWritten: row.recordsWritten,
+      error: row.error ?? undefined,
+      startedAt: iso(row.startedAt) ?? "",
+      finishedAt: row.finishedAt ? iso(row.finishedAt) ?? undefined : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The newest `lastUpdateDate` across the book, as an ISO string.
+ *
+ * Compared against `lastSyncRun().finishedAt` to answer "have the rows on
+ * screen been edited since the last sheet import?", which is the one question
+ * the import diff cannot answer once its modal is closed.
+ */
+export async function latestClientUpdate(): Promise<string | null> {
+  try {
+    const agg = await prisma.client.aggregate({ _max: { lastUpdateDate: true } });
+    return iso(agg._max.lastUpdateDate);
+  } catch {
+    return null;
+  }
+}
+
 /**
 /**
  * Every client, shaped for the sheet importer to diff against.
@@ -1016,6 +1142,86 @@ export function normalizePhone(phone: string): string {
   const digits = String(phone ?? "").replace(/\D/g, "");
   if (digits.startsWith("00")) return digits.slice(2);
   return digits;
+}
+
+/**
+ * Resolves an inbound WhatsApp sender number to a client, live rows first.
+ *
+ * Twilio sends `whatsapp:+2010…` while the book holds every historic spelling
+ * (`010…`, `+20 10…`, bare local digits), so the comparison runs on
+ * `normalizePhone` — the same identity rule the duplicates panel uses.
+ *
+ * Archived rows still match when nothing live does: a reply from someone the
+ * team archived must land on the archived record rather than be dropped (or
+ * worse, treated as unknown). Within a pool the OLDEST row wins, matching the
+ * merge logic's "earliest record is the natural primary" rule.
+ */
+export async function findClientByPhone(phone: string): Promise<ClientRow | null> {
+  const key = normalizePhone(phone);
+  // Shorter than 7 digits is a placeholder, not a contact number — grouping on
+  // those would attach a reply to an unrelated row (see findDuplicates).
+  if (key.length < 7) return null;
+
+  const rows = await listClients({ includeArchived: true });
+  const matches = rows.filter((r) => normalizePhone(r.phoneNumber) === key);
+  const live = matches.filter((r) => !r.archived);
+  const pool = live.length > 0 ? live : matches;
+  pool.sort((a, b) => Number(a.id) - Number(b.id) || a.createdAt.localeCompare(b.createdAt));
+  return pool[0] ?? null;
+}
+
+/**
+ * Logs an inbound WhatsApp reply on the client's timeline and notifies the
+ * people who own the client.
+ *
+ * One helper for both side effects, because they must agree: a timeline entry
+ * with no notification leaves the reps unaware, and a notification with no
+ * timeline entry leaves the detail page unable to explain where it came from.
+ *
+ * The write bumps `lastUpdateDate` implicitly (`@updatedAt`), which is honest —
+ * the row DID change — and is exactly what the import-health strip compares
+ * against the last sheet import.
+ */
+export async function recordInboundWhatsAppReply(input: {
+  clientId: string;
+  clientName: string;
+  firstContactPerson: string;
+  secondContactPerson: string;
+  from: string;
+  body: string;
+}): Promise<void> {
+  const excerpt = input.body.replace(/\s+/g, " ").trim().slice(0, 160);
+  const entry = makeActivityEntry("WHATSAPP_REPLY", "WhatsApp", {
+    // The sender number rides in `oldValue` so the timeline carries WHO
+    // replied, not only what they said — useful when two clients share a name.
+    oldValue: input.from,
+    newValue: excerpt,
+    clientName: input.clientName,
+  });
+
+  const row = await prisma.client.findUnique({ where: { id: input.clientId } });
+  if (!row) return;
+  const log = Array.isArray(row.activityLog)
+    ? (row.activityLog as unknown as ActivityEntry[])
+    : [];
+  await prisma.client.update({
+    where: { id: input.clientId },
+    data: { activityLog: [...log, entry] as unknown as Prisma.InputJsonValue },
+  });
+
+  // Both contacts, de-duplicated — when one person is both the 1st and 2nd
+  // contact (common for a solo rep) they get ONE notification, not two.
+  for (const person of new Set([input.firstContactPerson, input.secondContactPerson])) {
+    if (!person) continue;
+    await createNotification({
+      recipient: person,
+      type: "WA_REPLY",
+      // Legacy English fallback; the UI localizes WA_REPLY at render time.
+      message: `New WhatsApp reply from \u201c${input.clientName}\u201d`,
+      clientId: input.clientId,
+      clientName: input.clientName,
+    });
+  }
 }
 
 /** Why a group was flagged. `phone` is the confident one; see the note above. */
@@ -1270,7 +1476,10 @@ export async function updateClient(
   const { archived, ...rest } = patch;
   const updates: Prisma.ClientUpdateInput = {};
   const changes: Array<{ field: string; oldVal: string; newVal: string }> = [];
-  const notify: Array<{ contact: "1st" | "2nd"; newVal: string }> = [];
+  // Both the new AND the previous contact are captured per reassignment, so the
+  // person who LOSES the client can be told too — not just the person who gains
+  // it. `oldVal`/`newVal` are compared below and only a genuine change notifies.
+  const notify: Array<{ contact: "1st" | "2nd"; newVal: string; oldVal: string }> = [];
 
   for (const [key, value] of Object.entries(rest)) {
     if (value === undefined) continue;
@@ -1292,7 +1501,7 @@ export async function updateClient(
     // localize the field name; never the English label.
     changes.push({ field: key, oldVal: String(oldValue ?? ""), newVal: String(value) });
     if (key === "firstContactPerson" || key === "secondContactPerson") {
-      notify.push({ contact: key === "firstContactPerson" ? "1st" : "2nd", newVal: String(value) });
+      notify.push({ contact: key === "firstContactPerson" ? "1st" : "2nd", newVal: String(value), oldVal: String(oldValue ?? "") });
     }
   }
 
@@ -1331,17 +1540,33 @@ export async function updateClient(
 
   if (options.notify !== false) {
     for (const item of notify) {
-      if (!item.newVal) continue;
-    await createNotification({
-      recipient: item.newVal,
-      // The contact role rides along in the type so the message can be
-      // localized at render time (see notificationMessage in reporting.ts).
-      type: `ASSIGNED:${item.contact}`,
-      // Legacy English fallback for clients that don't localize yet.
-      message: `You were assigned \u201c${existing.name}\u201d`,
-      clientId: id,
-      clientName: existing.name,
-      });
+      // The person who GAINS the client is told they were assigned it.
+      if (item.newVal) {
+        await createNotification({
+          recipient: item.newVal,
+          // The contact role rides along in the type so the message can be
+          // localized at render time (see notificationMessage in reporting.ts).
+          type: `ASSIGNED:${item.contact}`,
+          // Legacy English fallback for clients that don't localize yet.
+          message: `You were assigned \u201c${existing.name}\u201d`,
+          clientId: id,
+          clientName: existing.name,
+        });
+      }
+      /* The person who LOSES the client is told too — previously only the new
+         contact was notified, so a rep whose client was quietly reassigned never
+         knew and kept expecting to chase it. Only a real hand-over notifies: the
+         old and new names must differ and both be non-empty, so clearing a
+         contact or re-saving the same one is silent. */
+      if (item.oldVal && item.newVal && item.oldVal !== item.newVal) {
+        await createNotification({
+          recipient: item.oldVal,
+          type: `REASSIGNED:${item.contact}`,
+          message: `You are no longer the ${item.contact} contact for \u201c${existing.name}\u201d`,
+          clientId: id,
+          clientName: existing.name,
+        });
+      }
     }
   }
 
@@ -1650,6 +1875,71 @@ export async function deleteNotifications(
   }
 }
 
+/* ── Follow-up reminders ──────────────────────────────────────────────────
+   The dashboard can FILTER to a due/overdue bucket, but nothing ever told the
+   rep a follow-up had come due. These two helpers back an on-demand reminder
+   pass (see /api/notifications/reminders) that turns each due/overdue client
+   into a single notification per day — no cron needed, since the notifications
+   page and the header trigger it on load. */
+
+/** The notification type used for follow-up reminders. */
+export const FOLLOW_UP_DUE_TYPE = "FOLLOW_UP_DUE";
+
+/**
+ * Live, non-archived clients the given person owns (as 1st or 2nd contact) whose
+ * follow-up date is set and is on or before the end of `throughDay`.
+ *
+ * "On or before end of day" is computed with the same BUSINESS_TZ midnights as
+ * `clientWhere`'s follow-up buckets, so a follow-up due later today is included
+ * (it is due), and the boundary agrees with what the table shows.
+ *
+ * `assignee` matches the 1st OR 2nd contact with `equals` (not `contains`), so
+ * "Ann" never inherits "Anna"'s clients — the same rule `assigneeScope` uses.
+ */
+export async function listFollowUpsDueFor(
+  assignee: string,
+  throughDay: Date,
+): Promise<ClientRow[]> {
+  const person = String(assignee ?? "").trim();
+  if (!person) return [];
+  const rows = await prisma.client.findMany({
+    where: {
+      archived: false,
+      nextFollowUpAt: { not: null, lte: throughDay },
+      OR: [{ firstContactPerson: person }, { secondContactPerson: person }],
+    },
+    orderBy: { nextFollowUpAt: "asc" },
+  });
+  return rows.map(toClientRow);
+}
+
+/**
+ * True when a follow-up reminder for this client was already created for the
+ * recipient today (since `sinceDay`).
+ *
+ * This is what makes the reminder pass idempotent: the notifications page and
+ * the header both fire it on every load, and without this guard a rep reloading
+ * the page would collect a fresh "due" notification each time.
+ */
+export async function hasReminderSince(
+  recipient: string,
+  clientId: string,
+  sinceDay: Date,
+): Promise<boolean> {
+  const person = String(recipient ?? "").trim();
+  if (!person) return false;
+  const existing = await prisma.notification.findFirst({
+    where: {
+      type: FOLLOW_UP_DUE_TYPE,
+      clientId,
+      recipient: person,
+      createdAt: { gte: sinceDay },
+    },
+    select: { id: true },
+  });
+  return Boolean(existing);
+}
+
 /* ── Users ──────────────────────────────────────────────────────────────── */
 
 export type UserRecord = {
@@ -1865,6 +2155,8 @@ export async function updateUser(
   patch: {
     newUsername?: string; name?: string; email?: string; role?: string; language?: string;
     avatar?: string | null; phone?: string | null; jobTitle?: string | null; notes?: string | null;
+    /** Pre-hashed password (bcrypt). Only the auth routes set this. */
+    hash?: string;
   },
 ): Promise<UserRecord | null> {
   const data: Prisma.AppUserUpdateInput = {};
@@ -1880,6 +2172,7 @@ export async function updateUser(
   if (patch.jobTitle !== undefined) data.jobTitle = patch.jobTitle;
   if (patch.notes !== undefined) data.notes = patch.notes;
   if (patch.newUsername !== undefined) data.username = patch.newUsername.toLowerCase();
+  if (patch.hash !== undefined) data.hash = patch.hash;
 
   // Language-only updates (from the header switch) must not fail on databases
   // that have not run the language-column migration yet.

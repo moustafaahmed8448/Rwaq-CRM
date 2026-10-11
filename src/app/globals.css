@@ -446,10 +446,24 @@ button { cursor: pointer; }
 .stage-lost .funnel-num { color: #991b1b; }
 .funnel-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
 .funnel-arrow { color: #d1d5db; font-size: 18px; margin: 0 4px; align-self: center; }
+/* ── Import health strip (clients screen, admin) ─────────────────────────── */
+.import-status-strip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:11px;padding:8px 12px;border:1px solid #eef0f2;border-radius:8px;background:#fafbfc;margin-bottom:12px;color:var(--ink-soft)}
+.import-status-strip .import-status-title{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--ink);text-transform:uppercase;letter-spacing:.04em;font-size:10px}
+.import-status-strip .import-status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.import-status-dot.ok{background:#16a34a}
+.import-status-dot.warn{background:#f59e0b}
+.import-status-dot.err{background:#ef4444}
+.import-status-warn{color:#b45309;font-weight:600}
+.import-status-bad{color:#ef4444;font-weight:600}
+[data-theme="dark"] .import-status-strip{background:#18181b;border-color:#27272a;color:#a1a1aa}
+[data-theme="dark"] .import-status-strip .import-status-title{color:var(--ink)}
+[data-theme="dark"] .import-status-warn{color:#fbbf24}
+[data-theme="dark"] .import-status-bad{color:#f87171}
+
 .channel-roi-panel { padding: 18px 20px; }
 .roi-table { display: flex; flex-direction: column; gap: 0; }
-.roi-head { display: grid; grid-template-columns: 1.3fr .8fr .6fr .8fr; gap: 8px; padding: 0 4px 8px; border-bottom: 1px solid #eef0f2; font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
-.roi-row { display: grid; grid-template-columns: 1.3fr .8fr .6fr .8fr; gap: 8px; padding: 9px 4px; border-bottom: 1px solid #f5f5f5; font-size: 11px; color: var(--ink-soft); align-items: center; }
+.roi-head { display: grid; grid-template-columns: 1.3fr .8fr .6fr .7fr .8fr; gap: 8px; padding: 0 4px 8px; border-bottom: 1px solid #eef0f2; font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+.roi-row { display: grid; grid-template-columns: 1.3fr .8fr .6fr .7fr .8fr; gap: 8px; padding: 9px 4px; border-bottom: 1px solid #f5f5f5; font-size: 11px; color: var(--ink-soft); align-items: center; }
 .roi-row:last-child { border-bottom: none; }
 .good { color: #16a34a; font-weight: 600; }
 .bad { color: #ef4444; font-weight: 600; }
@@ -1754,6 +1768,25 @@ input.ltr-num { text-align: left; }
 .import-modal{width:min(640px,100%)}
 .import-modal .modal-body{max-height:min(62vh,560px);overflow-y:auto}
 .imp-sub{margin:0 0 10px;color:#6b7280;font-size:12px;line-height:1.6}
+/* Import source picker (Google Sheet vs uploaded file) and its file row. */
+.imp-source-tabs{margin:0 0 12px}
+.imp-source-tabs .imp-tab{display:inline-flex;align-items:center;gap:6px}
+.imp-file-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px;border:1px dashed rgba(120,120,140,.35);border-radius:10px;margin-bottom:12px}
+.imp-file-btn{cursor:pointer}
+.imp-file-name{font-size:12px;font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Team performance + data-quality report tables. */
+.team-table-wrap,.dq-table-wrap{overflow-x:auto;margin-top:10px}
+.team-table,.dq-table{width:100%;border-collapse:collapse;font-size:12px}
+.team-table th,.dq-table th{text-align:start;font-size:11px;font-weight:600;color:#6b7280;padding:7px 9px;border-bottom:1px solid #eef0f2;white-space:nowrap}
+.team-table td,.dq-table td{padding:8px 9px;border-bottom:1px solid #f4f5f7;vertical-align:middle}
+.team-table tr:last-child td,.dq-table tr:last-child td{border-bottom:0}
+.team-load{display:inline-block;min-width:22px;padding:1px 6px;border-radius:6px;background:#fef3c7;color:#92400e;font-weight:700;text-align:center}
+.team-overdue{display:inline-block;min-width:22px;padding:1px 6px;border-radius:6px;background:#fee2e2;color:#b91c1c;font-weight:700;text-align:center}
+.team-flag{display:inline-flex;align-items:center;margin-inline-start:6px;color:#b45309;vertical-align:middle}
+.dq-kind{font-weight:600;white-space:nowrap}
+.dq-count{display:inline-block;min-width:22px;padding:1px 7px;border-radius:6px;background:#f3f4f6;color:#374151;font-weight:700;text-align:center}
+.dq-sample{margin:0;font-size:11.5px;color:#6b7280;max-width:520px}
+.dq-actions{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .imp-source{margin:0 0 12px;font-size:11px;word-break:break-all}
 .imp-source a{color:#069de3}
 .imp-error{display:flex;align-items:center;gap:7px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:7px;padding:9px 11px;font-size:12px;margin-bottom:12px}
@@ -3396,3 +3429,23 @@ input.ltr-num { text-align: left; }
 [data-theme="dark"] .dupe-differs { color: #fbbf24; }
 [data-theme="dark"] .dupes-row-main b { color: var(--ink); }
 [data-theme="dark"] .dupes-row-fields { color: var(--ink-faint); }
+
+/* ── New in this release: row-level integrations ──────────────────────────
+   Small, advisory surfaces that borrow the app's amber warning voice. The
+   duplicate-phone warning sits inside the add/edit modal; the WhatsApp template
+   picker expands beside the phone on the detail page; the mute toggle is a plain
+   checkbox row in Settings > Security, so no new control machinery is needed. */
+.dupe-phone-warning { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding: 8px 10px; border-radius: 7px; background: #fffbeb; color: #92400e; font-size: 12px; }
+[data-theme="dark"] .dupe-phone-warning { background: #292524; color: #fcd34d; }
+.dupe-phone-link { border: 0; background: transparent; color: #1d4ed8; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: underline; }
+[data-theme="dark"] .dupe-phone-link { color: #93c5fd; }
+.phone-with-templates { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wa-templates { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wa-templates-label { font-size: 11px; color: var(--ink-faint); }
+.wa-template-link { display: inline-block; padding: 3px 10px; border: 1px solid var(--line); border-radius: 14px; font-size: 11px; font-weight: 600; color: var(--ink); text-decoration: none; }
+.wa-template-link:hover { background: var(--paper); }
+.wa-templates-close { border: 0; background: transparent; color: var(--ink-faint); font-size: 15px; cursor: pointer; padding: 0 4px; }
+.notif-toggle-row { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.notif-toggle-row > span { display: flex; flex-direction: column; gap: 2px; }
+.notif-toggle-row strong { font-size: 13px; }
+.notif-toggle-row small { font-size: 11px; }

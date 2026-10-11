@@ -57,6 +57,10 @@ const MESSAGES: Record<string, string> = {
   "Invalid image data": "errors.logoInvalid",
   "Image is too large (max 2MB).": "errors.logoTooLarge",
   "Read-only role": "errors.readOnly",
+  "Current password is incorrect": "settings.wrongPassword",
+  "Current and new password are required": "settings.passwordFieldsRequired",
+  "The demo account cannot change its password": "settings.demoNoPassword",
+  "Too many attempts": "errors.tooManyAttempts",
   "Cannot remove a built-in location": "errors.builtinLocation",
   "Cannot remove a built-in channel": "errors.builtinChannel",
   "Location is still used by existing clients": "errors.locationInUse",
@@ -80,6 +84,18 @@ const MESSAGES: Record<string, string> = {
      URL. Without this the raw English string reached an Arabic screen. */
   "Invalid avatar": "users.photoInvalid",
   "No layout provided": "errors.nothingToSave",
+  // Bulk owner reassignment (/api/crm/clients/reassign).
+  "Nothing to reassign": "errors.reassignNoFields",
+  "Unknown owner name": "errors.reassignUnknownOwner",
+  "You can only reassign clients in your own book": "errors.reassignCrossBook",
+  // Workspace name (white-label branding) — /api/settings/brand.
+  "Name must be 2 to 40 characters": "errors.brandNameLength",
+  // Spreadsheet upload import (/api/import/upload).
+  "Unsupported file type. Upload an .xlsx, .xls or .csv file.": "upload.badType",
+  "The file is too large (max 8MB).": "upload.tooLarge",
+  "The file is empty.": "upload.empty",
+  "The file has no data rows": "upload.noRows",
+  "Could not read the file. It may be corrupt or not a spreadsheet.": "upload.corrupt",
 };
 
 /** Raw database / configuration noise that must never be shown to a user. */

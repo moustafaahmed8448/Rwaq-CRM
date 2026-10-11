@@ -8,8 +8,8 @@
  * unseen — the counts, the status mapping and the new reference values are all
  * shown first, and the commit button reports exactly that many rows.
  */
-import { useMemo, useState } from "react";
-import { AlertCircle, Check, Download, Loader2, X as XIcon } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { AlertCircle, Check, Download, Loader2, Upload, X as XIcon } from "lucide-react";
 import { apiErrorMessage } from "@/lib/api-errors";
 import { activityFieldLabel, activityValueLabel } from "@/lib/reporting";
 import type { DiffKind, DiffRow, FieldChange } from "@/lib/import-clients";
@@ -108,23 +108,45 @@ export default function ImportClientsModal({
   const [error, setError] = useState("");
   const [tab, setTab] = useState<DiffKind>("new");
   const [picked, setPicked] = useState<Picked>(new Map());
+  /* Where the rows come from. `sheet` is the original behaviour and stays the
+     default, so nothing changes for a workspace already using the Google Sheet.
+     `file` posts multipart to /api/import/upload instead; both endpoints return
+     the SAME `Summary` shape, so every panel below is shared. */
+  const [source, setSource] = useState<"sheet" | "file">("sheet");
+  const [fileName, setFileName] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const call = async (mode: "preview" | "commit"): Promise<void> => {
     setBusy(mode);
     setError("");
     try {
-      const res = await fetch("/api/import/clients", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Only row numbers and kept field names cross the wire. The server
-        // re-reads the sheet and rebuilds the plan, so nothing here can name a
-        // client to overwrite.
-        body: JSON.stringify(
-          mode === "commit"
-            ? { mode, rows: [...picked].map(([rowNumber, keep]) => ({ rowNumber, keep: [...keep] })) }
-            : { mode },
-        ),
-      });
+      const pickedRows = [...picked].map(([rowNumber, keep]) => ({ rowNumber, keep: [...keep] }));
+
+      let res: Response;
+      if (source === "file") {
+        const file = fileInput.current?.files?.[0];
+        if (!file) { setError(t("importer.pickFile")); setBusy(null); return; }
+        const form = new FormData();
+        form.append("file", file);
+        form.append("mode", mode);
+        // Only row numbers and kept field names cross the wire; the server
+        // rebuilds the plan from the uploaded rows, exactly as the sheet route
+        // re-reads the sheet.
+        if (mode === "commit") form.append("rows", JSON.stringify(pickedRows));
+        res = await fetch("/api/import/upload", { method: "POST", body: form });
+      } else {
+        res = await fetch("/api/import/clients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Only row numbers and kept field names cross the wire. The server
+          // re-reads the sheet and rebuilds the plan, so nothing here can name a
+          // client to overwrite.
+          body: JSON.stringify(
+            mode === "commit" ? { mode, rows: pickedRows } : { mode },
+          ),
+        });
+      }
+
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { error?: unknown };
         setError(apiErrorMessage(t, body.error));
@@ -232,10 +254,64 @@ export default function ImportClientsModal({
 
         <div className="modal-body">
           <p className="imp-sub">{t("importer.subtitle")}</p>
+
+          {/* Source picker. Reuses the `.imp-tabs` treatment so it reads as the
+              same kind of control as the diff tabs below. Switching resets the
+              preview: a plan built from the sheet says nothing about a file. */}
+          <div className="imp-tabs imp-source-tabs" role="group" aria-label={t("importer.source")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={source === "sheet"}
+              className={`imp-tab ${source === "sheet" ? "active" : ""}`}
+              disabled={busy !== null}
+              onClick={() => { setSource("sheet"); setSummary(null); setPicked(new Map()); setError(""); }}
+            >
+              <Download size={13} />{t("importer.sourceSheet")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={source === "file"}
+              className={`imp-tab ${source === "file" ? "active" : ""}`}
+              disabled={busy !== null}
+              onClick={() => { setSource("file"); setSummary(null); setPicked(new Map()); setError(""); }}
+            >
+              <Upload size={13} />{t("importer.sourceFile")}
+            </button>
+          </div>
+
+          {source === "file" && (
+            <div className="imp-file-row">
+              <label className="btn-outline imp-file-btn">
+                <Upload size={14} />{fileName ? t("importer.changeFile") : t("importer.chooseFile")}
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  hidden
+                  onChange={(e) => {
+                    setFileName(e.target.files?.[0]?.name ?? "");
+                    // A new file invalidates the plan shown above it.
+                    setSummary(null);
+                    setPicked(new Map());
+                    setError("");
+                  }}
+                />
+              </label>
+              {fileName && <span className="imp-file-name" dir="ltr">{fileName}</span>}
+              <p className="muted" style={{ fontSize: 11, margin: 0 }}>{t("importer.fileHint")}</p>
+            </div>
+          )}
+
           {summary && (
             <p className="imp-source">
               <span className="muted">{t("importer.source")}: </span>
-              <a href={summary.source} target="_blank" rel="noreferrer noopener" dir="ltr">{summary.source}</a>
+              {/* The sheet reports a URL the user can open; an upload has none, so
+                  the filename is shown as plain text rather than as a dead link. */}
+              {source === "sheet"
+                ? <a href={summary.source} target="_blank" rel="noreferrer noopener" dir="ltr">{summary.source}</a>
+                : <span dir="ltr">{summary.source}</span>}
             </p>
           )}
 

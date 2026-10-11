@@ -39,6 +39,19 @@ export default function NotificationsPage() {
     load();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (localStorage.getItem("rwaq-dark") === "1") setDarkMode(true);
+
+    // Fire the follow-up reminder pass once, in the background, and do not block
+    // on it: a failed or slow pass must never keep the page from rendering. If it
+    // creates any reminders, re-read the list so the new due items appear.
+    fetch("/api/notifications/reminders", { method: "POST" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((res: { created?: number } | null) => {
+        if (res && (res.created ?? 0) > 0) {
+          window.dispatchEvent(new Event("rwaq-notifications-changed"));
+          void load();
+        }
+      })
+      .catch(() => {});
   }, [load]);
 
   useEffect(() => {

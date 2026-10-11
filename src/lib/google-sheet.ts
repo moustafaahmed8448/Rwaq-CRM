@@ -28,8 +28,13 @@ export const sheetUrl = (): string =>
  * Header label -> Client field. Every label is normalized with `cleanText`
  * first, which drops the stray leading space the sheet has on the 1st-contact
  * column (" مسئول التواصل…") and any bidi marks a paste may have introduced.
+ *
+ * Exported because the workbook importer (src/lib/excel-read.ts) reads the SAME
+ * columns out of an uploaded .xlsx/.csv. Keeping one map is the point: a header
+ * rename then has to be made in one place, and a file whose headers the sheet
+ * reader would understand is understood identically by the uploader.
  */
-const COLUMN_BY_HEADER: Record<string, keyof SheetRow> = {
+export const COLUMN_BY_HEADER: Record<string, keyof SheetRow> = {
   "رقم الهاتف": "phone",
   "الاسم": "name",
   "حالة العميل": "status",
@@ -43,7 +48,7 @@ const COLUMN_BY_HEADER: Record<string, keyof SheetRow> = {
 };
 
 /** Positional fallback, in the sheet's current column order. */
-const COLUMN_BY_INDEX: Array<keyof SheetRow | null> = [
+export const COLUMN_BY_INDEX: Array<keyof SheetRow | null> = [
   null, // م — the sheet's own row number; deliberately ignored (see plan).
   "phone",
   "name",

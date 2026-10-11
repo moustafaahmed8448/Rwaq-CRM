@@ -482,6 +482,8 @@ function ProfileView() {
                  full client page, which really can edit. */}
             <ClientTable
               clients={rows}
+              totalClients={total}
+              startIndex={(page - 1) * PAGE_SIZE}
               selectedIds={NO_SELECTION}
               toggleSelect={() => undefined}
               toggleSelectAll={() => undefined}

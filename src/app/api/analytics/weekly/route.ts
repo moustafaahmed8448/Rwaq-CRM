@@ -136,6 +136,17 @@ export async function GET(request: NextRequest) {
       const { won, lost, waiting, other } = bucket(channelClients);
       const spend = Number(metric?.spend ?? 0);
       const platform = channelLabels[channel] ?? channel;
+
+      /* ── ROI drill-down detail (ADDITIVE — existing fields above are untouched) ──
+         `spend`/`reach` keep their original "first campaign for this channel"
+         reading so no existing consumer's numbers move; the new figures below
+         deliberately aggregate EVERY campaign in the window, because a channel
+         with three campaigns must not report the clicks of one. */
+      const campaigns = metrics.filter((m) => m.channel === channel);
+      const impressions = campaigns.reduce((s, m) => s + Number(m.impressions ?? 0), 0);
+      const clicks = campaigns.reduce((s, m) => s + Number(m.clicks ?? 0), 0);
+      const costPerClick = clicks > 0 ? spend / clicks : 0;
+
       return {
         channel,
         platform,
@@ -149,6 +160,19 @@ export async function GET(request: NextRequest) {
         waiting,
         other,
         cpa: won ? spend / won : 0,
+        /* Conversion = won ÷ this channel's clients in the period — the same
+           numerator/denominator the funnel uses, so the ROI table and the funnel
+           can never disagree about the same window. */
+        conversionRate: channelClients.length > 0 ? won / channelClients.length : 0,
+        /* Explicit status split for drill-down tooltips, mirroring `bucket`. */
+        statusBreakdown: { won, lost, waiting, other },
+        campaignCount: campaigns.length,
+        impressions,
+        clicks,
+        /* CTR as a fraction of impressions (0–1), matching how the marketing
+           page already derives it from raw counters. */
+        ctr: impressions > 0 ? clicks / impressions : 0,
+        costPerClick,
       };
     });
 

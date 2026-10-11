@@ -31,10 +31,43 @@ export async function GET(request: NextRequest) {
 
   try {
     const metrics = await listMetrics({ channels, from, to });
+
+    /* ── Per-channel roll-up (ADDITIVE) ─────────────────────────────────────
+       The table below still receives exactly `metrics` / `totalSpend` /
+       `totalReach` as before; `byChannel` is extra drill-down metadata so a
+       reader can answer "which channel is actually efficient?" without
+       re-deriving the sums in every consumer. Conversions and CPA are NOT
+       computed here — they need client outcomes, which live in the analytics
+       weekly aggregator (the only place that already pairs listMetrics with
+       listClients under one period and assignment scope). */
+    const rollup = new Map<string, { channel: string; campaigns: number; spend: number; reach: number; impressions: number; clicks: number }>();
+    for (const m of metrics) {
+      const row = rollup.get(m.channel) ?? { channel: m.channel, campaigns: 0, spend: 0, reach: 0, impressions: 0, clicks: 0 };
+      row.campaigns += 1;
+      row.spend += Number(m.spend ?? 0);
+      row.reach += Number(m.reach ?? 0);
+      row.impressions += Number(m.impressions ?? 0);
+      row.clicks += Number(m.clicks ?? 0);
+      rollup.set(m.channel, row);
+    }
+    const byChannel = [...rollup.values()]
+      .map((row) => ({
+        ...row,
+        spend: Math.round(row.spend * 100) / 100,
+        /* Fractions, not percentages: the UI decides how many digits to show. */
+        ctr: row.impressions > 0 ? row.clicks / row.impressions : 0,
+        costPerClick: row.clicks > 0 ? row.spend / row.clicks : 0,
+        costPerMille: row.impressions > 0 ? (row.spend / row.impressions) * 1000 : 0,
+      }))
+      .sort((a, b) => b.spend - a.spend || a.channel.localeCompare(b.channel));
+
     return NextResponse.json({
       metrics,
       totalSpend: metrics.reduce((s, m) => s + m.spend, 0),
       totalReach: metrics.reduce((s, m) => s + m.reach, 0),
+      byChannel,
+      // Echo of the applied filter, so a drill-down link can be rebuilt exactly.
+      drilldown: { from: from ?? null, to: to ?? null, channels, campaigns: metrics.length },
     });
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });

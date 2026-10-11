@@ -33,6 +33,8 @@ export type MarketingColumnKey =
   | "period"
   | "spend"
   | "reach"
+  | "impressions"
+  | "clicks"
   | "notes"
   | "actions";
 
@@ -64,6 +66,10 @@ export const MARKETING_COLUMNS: readonly MarketingColumn[] = [
   { key: "period",   labelKey: "dash.thPeriod",    w: 150, min: 130, max: 320, locked: false },
   { key: "spend",    labelKey: "dash.thSpend",     w: 100, min: 90,  max: 220, locked: false },
   { key: "reach",    labelKey: "dash.thReach",     w: 85,  min: 70,  max: 200, locked: false },
+  /* The two counters behind CTR / CPC / CPM — the ROI detail the spend and
+     reach columns alone cannot show. Rendered as `r-num` cells on both pages. */
+  { key: "impressions", labelKey: "mkt.impressions", w: 95, min: 80, max: 220, locked: false },
+  { key: "clicks",      labelKey: "mkt.clicks",      w: 85, min: 70, max: 200, locked: false },
   { key: "notes",    labelKey: "dash.thNotes",     w: 140, min: 120, max: 460, locked: false },
   { key: "actions",  labelKey: "",                 w: 62,  min: 62,  max: 62,  locked: true  },
 ];

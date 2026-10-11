@@ -1,12 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
-import { UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plus, Users, Check, Settings, Pencil } from "lucide-react";
+import { UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plus, Users, Check, Settings, Pencil, DatabaseBackup } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 import { apiErrorMessage } from "@/lib/api-errors";
 import { readLogoFile, useLogo } from "@/lib/logo";
+import { useBrand } from "@/lib/brand";
 import { initialsOf, readAvatarFile } from "@/lib/avatar";
 import { roleLabel } from "@/lib/reporting";
+import { downloadFile } from "@/lib/download";
 import AppHeader from "@/components/AppHeader";
 import Select from "@/components/Select";
 
@@ -64,10 +66,35 @@ export default function SettingsPage() {
   const { logo: logoUrl, setLogo } = useLogo();
   const [logoErr, setLogoErr] = useState("");
   const [savingLogo, setSavingLogo] = useState(false);
+  /* Admin-set workspace name (white-label). `brandDraft === null` means "show
+     the stored name"; typing switches to the draft, and Save writes it through
+     /api/settings/brand (admin-only) then pushes it into every mounted header
+     and the login card via setBrand(). */
+  const { brand, setBrand } = useBrand();
+  const [brandDraft, setBrandDraft] = useState<string | null>(null);
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [brandErr, setBrandErr] = useState("");
+  const [brandSaved, setBrandSaved] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  // Per-user notification preferences. `null` = not loaded yet, so the toggle
+  // does not flash a wrong default before the stored value arrives.
+  const [followUpReminders, setFollowUpReminders] = useState<boolean | null>(null);
+  const [savingNotif, setSavingNotif] = useState(false);
 
   const loadUsers = async () => {
     const r = await fetch("/api/users");
     if (r.ok) { const d = await r.json() as { users?: ManagedUser[] }; setManagedUsers(d.users ?? []); }
+  };
+
+  // Per-user notification preferences, declared up here next to loadUsers so the
+  // session effect below can call it without tripping use-before-declare. The
+  // SAVE handler stays further down beside changePassword, where it reads
+  // naturally as part of the security form.
+  const loadNotifPrefs = async () => {
+    const r = await fetch("/api/notifications/prefs", { cache: "no-store" }).catch(() => null);
+    if (!r || !r.ok) { setFollowUpReminders(true); return; }
+    const d = await r.json().catch(() => ({})) as { prefs?: { followUpReminders?: boolean } };
+    setFollowUpReminders(d.prefs?.followUpReminders !== false);
   };
 
   useEffect(() => {
@@ -89,6 +116,8 @@ export default function SettingsPage() {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadUsers();
+    // Notification preferences are per-user; load them with the session, once.
+    void loadNotifPrefs();
   }, [router]);
 
   useEffect(() => {
@@ -217,6 +246,56 @@ export default function SettingsPage() {
     }
   };
 
+  // Saves the workspace name through /api/settings/brand (admin-only). The
+  // hook's setBrand() then pushes the new name into every mounted header and
+  // the login card, and document.title updates on every mounted page.
+  const saveBrand = async () => {
+    const next = (brandDraft ?? brand).trim();
+    if (!next) { setBrandErr(t("errors.brandNameLength")); return; }
+    setSavingBrand(true);
+    setBrandErr("");
+    setBrandSaved(false);
+    try {
+      const res = await fetch("/api/settings/brand", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: next }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: unknown };
+        setBrandErr(apiErrorMessage(t, data.error));
+        return;
+      }
+      setBrand(next);
+      setBrandDraft(null);
+      setBrandSaved(true);
+      setTimeout(() => setBrandSaved(false), 2500);
+    } catch {
+      setBrandErr(t("errors.generic"));
+    } finally {
+      setSavingBrand(false);
+    }
+  };
+
+  // Full-workspace JSON backup (admin only). Reuses the shared downloadFile, which
+  // reads the server's Content-Disposition filename and streams the blob to disk.
+  // The route itself is admin-gated, so this button failing with 403 is handled
+  // through the same apiErrorMessage path as every other error here.
+  const backupWorkspace = async () => {
+    setError("");
+    setBackingUp(true);
+    try {
+      await downloadFile("/api/export/workspace", `rwaq-backup-${new Date().toISOString().slice(0, 10)}.json`);
+      setSaveMsg(t("settings.backupDone"));
+    } catch (e) {
+      setError(e instanceof Error && e.message !== "Export failed"
+        ? apiErrorMessage(t, e.message)
+        : t("settings.backupFailed"));
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
   const saveProfile = async () => {
     setError(""); setSaveMsg("");
     try {
@@ -252,6 +331,25 @@ export default function SettingsPage() {
       setCurrentPassword(""); setNewPassword("");
       setSaveMsg(t("settings.passwordChanged"));
     } catch (e: unknown) { setError((e as Error).message); }
+  };
+
+  const saveNotifPrefs = async (value: boolean) => {
+    setError(""); setSaveMsg("");
+    setSavingNotif(true);
+    try {
+      const res = await fetch("/api/notifications/prefs", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ followUpReminders: value }),
+      });
+      const d = await res.json().catch(() => ({})) as { error?: string; prefs?: { followUpReminders?: boolean } };
+      if (!res.ok) throw new Error(apiErrorMessage(t, d.error));
+      setFollowUpReminders(d.prefs?.followUpReminders !== false);
+      setSaveMsg(t("settings.notifSaved"));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : t("errors.generic"));
+    } finally {
+      setSavingNotif(false);
+    }
   };
 
   const addUser = async () => {
@@ -419,6 +517,27 @@ export default function SettingsPage() {
           </div>
           <button className="btn-outline" onClick={changePassword}>{t("settings.updatePassword")}</button>
 
+          {/* Notification preferences. The reminders an admin's team gets can be
+              noisy; each user decides for themselves. The toggle saves on change,
+              mirroring how the reminder route reads the same stored value. */}
+          <div className="section-header" style={{ marginTop: 18 }}>
+            <h2>{t("settings.notifSection")}</h2>
+            <span className="section-sub">{t("settings.notifSubtitle")}</span>
+          </div>
+          <label className="notif-toggle-row">
+            <input
+              type="checkbox"
+              className="cb"
+              checked={followUpReminders ?? true}
+              disabled={followUpReminders === null || savingNotif}
+              onChange={e => void saveNotifPrefs(e.target.checked)}
+            />
+            <span>
+              <strong>{t("settings.notifReminders")}</strong>
+              <small className="muted">{t("settings.notifRemindersHint")}</small>
+            </span>
+          </label>
+
           {/* Sign out moved here from the Danger zone. It is an account action, and
               leaving it alone at the foot of the page kept it looking like the
               destructive one next to it. */}
@@ -507,6 +626,54 @@ export default function SettingsPage() {
                 <button type="button" className={lang === "en" ? "active" : ""} aria-pressed={lang === "en"} onClick={() => setLang("en")}>English</button>
               </div>
             </section>
+            {/* ── Workspace name (admin only) ──
+                The white-label counterpart of the dashboard logo. One Setting
+                row drives the header, the login card and the browser tab, so
+                adapting the app to a different company needs no code change. */}
+            {user.role === "Admin" && (
+              <section className="settings-section">
+                <div className="section-header">
+                  <h2>{t("settings.brandSection")}</h2>
+                  <span className="section-sub">{t("settings.brandSubtitle")}</span>
+                </div>
+                <div className="form-grid-2">
+                  <Field label={t("settings.brandNameLabel")}>
+                    <input
+                      value={brandDraft ?? brand}
+                      maxLength={40}
+                      placeholder={t("settings.brandNamePh")}
+                      onChange={e => setBrandDraft(e.target.value)}
+                    />
+                  </Field>
+                </div>
+                <div className="logo-actions">
+                  <button className="btn-primary" onClick={saveBrand} disabled={savingBrand || (brandDraft ?? brand).trim() === brand || !(brandDraft ?? brand).trim()}>
+                    <Save size={14} />{savingBrand ? t("settings.saving") : t("common.saveChanges")}
+                  </button>
+                  <p className="muted" style={{ fontSize: 11, margin: 0 }}>{t("settings.brandHint")}</p>
+                  {brandSaved && <div className="settings-success">{t("settings.brandSaved")}</div>}
+                  {brandErr && <div className="settings-error">{brandErr}</div>}
+                </div>
+              </section>
+            )}
+            {/* ── Workspace backup (admin only) ──
+                A machine-readable JSON snapshot of the whole workspace. Placed with
+                the other admin/appearance controls; the real gate is the API route,
+                which rejects any non-admin with 403. */}
+            {user.role === "Admin" && (
+              <section className="settings-section">
+                <div className="section-header">
+                  <h2>{t("settings.backupSection")}</h2>
+                  <span className="section-sub">{t("settings.backupSubtitle")}</span>
+                </div>
+                <div className="logo-actions">
+                  <button className="btn-outline" onClick={backupWorkspace} disabled={backingUp}>
+                    <DatabaseBackup size={14} />{backingUp ? t("settings.backupWorking") : t("settings.backupButton")}
+                  </button>
+                  <p className="muted" style={{ fontSize: 11, margin: 0 }}>{t("settings.backupHint")}</p>
+                </div>
+              </section>
+            )}
             {/* ── Dashboard logo (admin only) ── */}
             {user.role === "Admin" && (
           <section className="settings-section">

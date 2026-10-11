@@ -9,6 +9,7 @@ import { useLang } from "@/lib/i18n";
 import { dateInputValue, dateLocale, isOverdue } from "@/lib/format";
 import { canWrite } from "@/lib/auth";
 import StatusPill from "@/components/StatusPill";
+import WhatsAppTemplates from "@/components/WhatsAppTemplates";
 import { activityFieldLabel, activityValueLabel, channelLabel, describeActivity, PIPELINE_STAGES, statusLabel as localizeStatus } from "@/lib/reporting";
 import { optionColor, type OptionColors, type RefKind } from "@/lib/ref-options";
 import { useOptionColors } from "@/lib/option-colors";
@@ -337,7 +338,12 @@ export default function ClientDetailPage({ clientId }: { clientId: string }) {
             ) : (
               <dl className="info-list">
                 <InfoItem icon={<Tag size={14} />} label={t("form.status")}><StatusPill status={client.status} t={t} variant="badge" /></InfoItem>
-                <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}><span><span className="ltr-num">{client.phoneNumber}</span></span></InfoItem>
+                <InfoItem icon={<UserRound size={14} />} label={t("form.phone")}>
+                  <span className="phone-with-templates">
+                    <span className="ltr-num">{client.phoneNumber}</span>
+                    <WhatsAppTemplates phone={client.phoneNumber} name={client.name} project={client.project} t={t} />
+                  </span>
+                </InfoItem>
                 <InfoItem icon={<Tag size={14} />} label={t("form.project")}><span>{client.project}</span></InfoItem>
                 <InfoItem icon={<Tag size={14} />} label={t("form.channel")}><span className="chan-tag-inline"><i className="dot" style={{ background: optionColor("channels", client.acquisitionChannel, colors) }} />{channelLabel(t, client.acquisitionChannel)}</span></InfoItem>
                 <InfoItem icon={<TrendingUp size={14} />} label={t("form.location")}><span className="loc-tag"><i className="dot" style={{ background: optionColor("locations", client.location, colors) }} />{client.location}</span></InfoItem>
@@ -383,6 +389,7 @@ function ActivityItem({ entry, t, lang }: { entry: ActivityEntry; t: (key: strin
     NOTE_ADD: { icon: <MessageSquare size={13} />, color: "#0891b2" },
     NOTE_EDIT: { icon: <MessageSquare size={13} />, color: "#0891b2" },
     MERGED: { icon: <GitMerge size={13} />, color: "#0ea5e0" },
+    WHATSAPP_REPLY: { icon: <MessageSquare size={13} />, color: "#22c55e" },
   };
   const { icon, color } = icons[entry.action] ?? { icon: <Clock size={13} />, color: "#9ca3af" };
 

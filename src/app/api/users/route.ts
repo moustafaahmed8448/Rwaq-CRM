@@ -91,6 +91,15 @@ export async function PATCH(request: NextRequest) {
   const email = body.email !== undefined ? String(body.email).trim() : undefined;
   const role = body.role !== undefined ? normalizeRole(String(body.role)) : undefined;
 
+  // Optional admin-initiated password reset. The whole PATCH is already
+  // Admin-only, so reaching here means the caller may rewrite anyone's hash.
+  // A blank/absent field is `undefined` — "leave the password alone" — so a
+  // normal profile edit never touches the hash; only a non-empty value resets it.
+  const resetPassword = typeof body.password === "string" ? body.password : "";
+  if (resetPassword && resetPassword.length < 6) {
+    return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
+  }
+
   if (newUsername.length < 2) return NextResponse.json({ error: "Username must be at least 2 characters" }, { status: 400 });
   if (name !== undefined && !name) return NextResponse.json({ error: "Name cannot be empty" }, { status: 400 });
 
@@ -117,6 +126,10 @@ export async function PATCH(request: NextRequest) {
     const jobTitle = readOptional(body.jobTitle, 120);
     const notes = readOptional(body.notes);
 
+    // Hash the reset password here, so the raw value never reaches the db layer
+    // and the hash is written only when a non-empty password was actually sent.
+    const hash = resetPassword ? await bcrypt.hash(resetPassword, 10) : undefined;
+
     const updated = await updateUser(username, {
       newUsername,
       ...(name !== undefined ? { name } : {}),
@@ -126,6 +139,7 @@ export async function PATCH(request: NextRequest) {
       ...(phone !== undefined ? { phone } : {}),
       ...(jobTitle !== undefined ? { jobTitle } : {}),
       ...(notes !== undefined ? { notes } : {}),
+      ...(hash !== undefined ? { hash } : {}),
     });
     if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
 

@@ -34,6 +34,7 @@ import RefPicker from "@/components/RefPicker";
 import MultiSelect from "@/components/MultiSelect";
 import Select from "@/components/Select";
 import ImportClientsModal from "@/components/ImportClientsModal";
+import ImportStatusStrip from "@/components/ImportStatusStrip";
 import DashboardCharts, { type ChartView, type TrendPoint } from "@/components/DashboardCharts";
 import {
   initialFilters,
@@ -51,6 +52,8 @@ import DuplicatesPanel from "@/components/DuplicatesPanel";
 import FollowUpWorkspace from "@/components/FollowUpWorkspace";
 import BulkEditModal from "@/components/BulkEditModal";
 import StaleClientsPanel from "@/components/StaleClientsPanel";
+import TeamReportPanel from "@/components/TeamReportPanel";
+import DataQualityPanel from "@/components/DataQualityPanel";
 import ActivityFeedPanel from "@/components/ActivityFeedPanel";
 import ArchiveReasonModal from "@/components/ArchiveReasonModal";
 import ContactButtons from "@/components/ContactButtons";
@@ -64,7 +67,10 @@ import {
 } from "@/lib/client-columns";
 import { useColumnLayout } from "@/lib/use-column-layout";
 
-type Metric = { channel: string; platform: string; spend: number; reach: number; totalClients: number; won: number; lost: number; waiting: number; cpa: number };
+type Metric = { channel: string; platform: string; spend: number; reach: number; totalClients: number; won: number; lost: number; waiting: number; cpa: number;
+  /* ROI drill-down detail, additive on /api/analytics/weekly (see that route). */
+  conversionRate?: number; statusBreakdown?: { won: number; lost: number; waiting: number; other: number };
+  campaignCount?: number; impressions?: number; clicks?: number; ctr?: number; costPerClick?: number };
 type User = { name: string; initials: string; role: string };
 type EditDraft = Partial<Client> & { id: string };
 type ConfirmDelete = { ids: string[]; names: string[] };
@@ -367,6 +373,10 @@ export default function Home() {
   const [adding, setAdding] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState("");
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  // Existing clients that already hold the phone number being typed in the
+  // add/edit modal. Drives the inline duplicate-phone warning (see the effect
+  // below and the phone field in the modal).
+  const [phoneDupes, setPhoneDupes] = useState<{ id: string; name: string; status: string; archived: boolean }[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDelete | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailClient, setDetailClient] = useState<Client | null>(null);
@@ -435,10 +445,16 @@ export default function Home() {
       t(total > 0 ? "importer.doneMixed" : "importer.doneNone", { a: imported, b: updated }),
     );
     refreshReferenceData();
+    // The import strip re-reads /api/import/clients so the "last import" line
+    // reflects this run without a page reload.
+    setImportPulse((p) => p + 1);
   };
   const [notifications, setNotifications] = useState<{ id: string; message: string; read: boolean; clientName?: string; createdAt: string; type: string }[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  /* Bumped after every committed import; passed to ImportStatusStrip as its
+     fetch key so the last-sync line refreshes in place. */
+  const [importPulse, setImportPulse] = useState(0);
   const [newClient] = useState<Partial<Client>>({
     name: "", phoneNumber: "", project: "", location: "",
     acquisitionChannel: "FACEBOOK", operationToTake: "",
@@ -911,15 +927,47 @@ export default function Home() {
     inUse: clients.some(c => c.acquisitionChannel === metric.channel),
   })), [metrics, clients]);
 
-  const openEdit = (client: Client) => setEditDraft({ ...client });
-  const openCreate = () => setEditDraft({
+  const openEdit = (client: Client) => { setPhoneDupes([]); setEditDraft({ ...client }); };
+  const openCreate = () => { setPhoneDupes([]); setEditDraft({
     id: "", createdAt: "", lastUpdateDate: "", name: "", phoneNumber: "",
     status: allStatuses[0] ?? "WAITING", project: "", location: "",
     acquisitionChannel: allChannels[0] ?? "FACEBOOK", operationToTake: "",
     firstContactPerson: users[0]?.name ?? "", secondContactPerson: "",
     notes: "",
-  });
-  const closeEdit = () => setEditDraft(null);
+  }); };
+  const closeEdit = () => { setPhoneDupes([]); setEditDraft(null); };
+
+  /**
+   * Debounced duplicate-phone check while the add/edit modal is open.
+   *
+   * As the rep types a number, ask the server whether it already belongs to a
+   * client (excluding the one being edited) and surface the match inline, so a
+   * duplicate can be opened instead of saved. `live` guards the state write so a
+   * slow response for an earlier number cannot overwrite a newer one — the same
+   * out-of-order race the command palette defends against. A closed modal or a
+   * too-short number clears the warning.
+   */
+  useEffect(() => {
+    const phone = (editDraft?.phoneNumber ?? "").trim();
+    if (!editDraft || phone.replace(/\D/g, "").length < 6) {
+      // Cleared on a microtask, not synchronously in the effect body, because a
+      // direct setState here is what the set-state-in-effect rule flags.
+      queueMicrotask(() => setPhoneDupes([]));
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ phone });
+      if (editDraft.id) params.set("excludeId", editDraft.id);
+      fetch(`/api/clients/check-phone?${params.toString()}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : { matches: [] }))
+        .then((d: { matches?: { id: string; name: string; status: string; archived: boolean }[] }) => {
+          if (live) setPhoneDupes(d.matches ?? []);
+        })
+        .catch(() => { if (live) setPhoneDupes([]); });
+    }, 350);
+    return () => { live = false; clearTimeout(timer); };
+  }, [editDraft]);
   const openDetail = (client: Client) => setDetailClient(client);
   const closeDetail = () => setDetailClient(null);
 
@@ -1083,27 +1131,69 @@ export default function Home() {
   };
 
   /**
-   * Applies a bulk-edit patch to the ticked rows via the same `{ ids, ... }`
-   * PATCH the bulk-status action uses — one transaction server-side.
+   * Applies a bulk-edit patch to the ticked rows.
+   *
+   * The patch is SPLIT: ownership fields (1st/2nd contact, and the operation
+   * note that usually travels with a hand-over) go to /api/crm/clients/reassign,
+   * which validates the names against the AppUser roster and forbids
+   * cross-book moves for non-admins. Everything else keeps the generic
+   * `{ ids, ... }` PATCH. Routing owners through the generic endpoint would
+   * silently skip those checks, which is exactly the hole this split closes.
    */
   const applyBulkEdit = async (patch: Record<string, string | null>) => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     setBulkBusy(true);
-    const res = await fetch("/api/crm/clients", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids, ...patch }),
-    }).catch(() => null);
+
+    const OWNER_KEYS = new Set(["firstContactPerson", "secondContactPerson", "operationToTake"]);
+    const ownerPatch: Record<string, string> = {};
+    const fieldPatch: Record<string, string | null> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (OWNER_KEYS.has(key)) {
+        if (typeof value === "string" && value !== null) ownerPatch[key] = value;
+      } else {
+        fieldPatch[key] = value;
+      }
+    }
+    // What the optimistic row update below applies locally once both calls land.
+    const merged: Record<string, string | null> = { ...fieldPatch };
+
+    // Ownership first: if the safe endpoint rejects the request, NOTHING has
+    // been written yet, so aborting here leaves the book untouched.
+    if (Object.keys(ownerPatch).length > 0) {
+      const res = await fetch("/api/crm/clients/reassign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, ...ownerPatch }),
+      }).catch(() => null);
+      if (!res || !res.ok) {
+        setBulkBusy(false);
+        setBulkEditOpen(false);
+        addToast("error", apiErrorMessage(t, res ? await readApiError(res) : undefined));
+        return;
+      }
+      Object.assign(merged, ownerPatch);
+    }
+
+    if (Object.keys(fieldPatch).length > 0) {
+      const res = await fetch("/api/crm/clients", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, ...fieldPatch }),
+      }).catch(() => null);
+      if (!res || !res.ok) {
+        setBulkBusy(false);
+        setBulkEditOpen(false);
+        addToast("error", apiErrorMessage(t, res ? await readApiError(res) : undefined));
+        return;
+      }
+    }
+
     setBulkBusy(false);
     setBulkEditOpen(false);
-    if (!res || !res.ok) {
-      addToast("error", apiErrorMessage(t, res ? await readApiError(res) : undefined));
-      return;
-    }
     const stamp = new Date().toISOString();
-    setClients(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, ...patch, lastUpdateDate: stamp } : c)));
-    setTableRows(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, ...patch, lastUpdateDate: stamp } : c)));
+    setClients(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, ...merged, lastUpdateDate: stamp } : c)));
+    setTableRows(prev => prev.map(c => (selectedIds.has(c.id) ? { ...c, ...merged, lastUpdateDate: stamp } : c)));
     setSelectedIds(new Set());
     refreshNotifications();
     addToast("success", t("bulkEdit.done", { n: ids.length }));
@@ -1336,7 +1426,13 @@ userAvatars={userAvatars}
             t={t}
           />
         ) : (
-          <ClientsView
+          <>
+            {/* Admin-only sync health above the table: last import time/status/
+                records plus whether rows moved on since that write. The component
+                itself renders nothing for non-admins (the API refuses them), so
+                no extra role check is needed here. */}
+            <ImportStatusStrip refreshKey={importPulse} />
+            <ClientsView
             clients={mode === "table" ? tableRows : filteredClients} allClients={clients} mode={mode} setMode={setMode}
             filters={filters} updateFilter={updateFilter}
             setMultiFilter={setMultiFilter}
@@ -1383,6 +1479,7 @@ userAvatars={userAvatars}
             pager={{ page: tablePage, pageCount: tablePageCount, total: tableTotal, loading: tableLoading, onPage: setTablePage, t }}
             t={t}
           />
+          </>
         )}
       </div>
 
@@ -1394,7 +1491,30 @@ userAvatars={userAvatars}
             <div className="modal-body">
               <div className="form-grid">
                 <Field label={t("form.name")}><input value={editDraft.name ?? ""} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} /></Field>
-                <Field label={t("form.phone")}><input dir="ltr" className="ltr-num" value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} /></Field>
+                <Field label={t("form.phone")}>
+                  <input dir="ltr" className="ltr-num" value={editDraft.phoneNumber ?? ""} onChange={e => setEditDraft({ ...editDraft, phoneNumber: e.target.value })} />
+                  {/* Inline duplicate-phone warning. Only shown when the number is
+                      already on another client; each match is a button that opens
+                      that client so the rep can continue there instead of saving a
+                      second row. Purely advisory — saving is still allowed, since a
+                      genuine re-entry (a returning lead) is legitimate. */}
+                  {phoneDupes.length > 0 && (
+                    <div className="dupe-phone-warning" role="status">
+                      <AlertCircle size={13} />
+                      <span>{t("form.phoneDupe", { n: phoneDupes.length })}</span>
+                      {phoneDupes.map(d => (
+                        <button
+                          key={d.id}
+                          type="button"
+                          className="dupe-phone-link"
+                          onClick={() => { const existing = clients.find(c => c.id === d.id); if (existing) { closeEdit(); openDetail(existing); } }}
+                        >
+                          {d.name}{d.archived ? ` · ${t("nav.archived")}` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </Field>
                 <Field label={t("form.project")} wide><textarea rows={3} value={editDraft.project ?? ""} onChange={e => setEditDraft({ ...editDraft, project: e.target.value })} placeholder={t("form.projectDetailsPh")} /></Field>
                 <Field label={t("form.location")}>
                   <RefPicker kind="locations" value={editDraft.location ?? ""} options={allLocations} onAdd={addLocation} onChange={v => setEditDraft({ ...editDraft, location: v })} render={v => locationLabel(t, v)} onRemove={user.role === "Admin" ? removeLocation : undefined} removable={removableLocations} removeUsage={locationUsage} placeholder={t("form.locationPh")} t={t} />
@@ -2028,11 +2148,19 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         <div className="panel channel-roi-panel">
           <h3>{t("roi.title")}</h3>
           <div className="roi-table">
-            <div className="roi-head"><span>{t("roi.channel")}</span><span>{t("roi.spend")}</span><span>{t("roi.won")}</span><span>{t("roi.cpa")}</span></div>
+            <div className="roi-head"><span>{t("roi.channel")}</span><span>{t("roi.spend")}</span><span>{t("roi.won")}</span><span>{t("roi.conversion")}</span><span>{t("roi.cpa")}</span></div>
             {metrics.filter((m: Metric)=>m.totalClients>0).map((m: Metric)=>(
-              <div className="roi-row" key={m.channel}>
+              /* Hover the row for the full status split behind the conversion
+                 figure — the drill-down the aggregate % alone cannot show. */
+              <div className="roi-row" key={m.channel}
+                title={t("roi.breakdown", {
+                  won: m.won, lost: m.lost, waiting: m.waiting,
+                  other: m.statusBreakdown?.other ?? 0,
+                  cpa: m.cpa > 0 ? sar(m.cpa) : "—",
+                })}>
                 <span className="chan-cell"><i className="dot" style={{background:optionColor("channels", m.channel, colors)}}/>{m.platform}</span>
                 <span>{sar(m.spend)}</span><span>{m.won}</span>
+                <span>{m.conversionRate !== undefined ? `${Math.round(m.conversionRate * 100)}%` : "—"}</span>
                 <span className={m.cpa<100?"good":m.cpa<500?"":"bad"}>{m.cpa > 0 ? sar(m.cpa) : "—"}</span>
               </div>
             ))}
@@ -2151,7 +2279,15 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
       <section className="panel channel-breakdown-panel">
         <h3>{t("brk.title")} <small>{t("loc.clients", { n: clients.length })}</small></h3>
         <div className="table-head-row"><span>{t("brk.platform")}</span><span>{t("roi.spend")}</span><span>{t("brk.reach")}</span><span>{t("brk.clients")}</span><span>{t("roi.cpa")}</span></div>
-        {metrics.map((item: Metric)=><div className="table-row" key={item.channel}>
+        {metrics.map((item: Metric)=>
+          /* Same drill-down hint as the ROI table: the status split behind the
+             client count, one hover away instead of one query away. */
+          <div className="table-row" key={item.channel}
+            title={t("roi.breakdown", {
+              won: item.won, lost: item.lost, waiting: item.waiting,
+              other: item.statusBreakdown?.other ?? 0,
+              cpa: item.cpa > 0 ? sar(item.cpa) : "—",
+            })}>
           <span className="chan-cell"><i className="dot" style={{background:optionColor("channels", item.channel, colors)}}/>{item.platform}</span>
           <span>{sar(item.spend)}</span><span>{MONEY.format(item.reach)}</span><span>{item.totalClients}</span><span>{item.cpa.toFixed(2)}</span>
         </div>)}
@@ -2197,14 +2333,19 @@ function KpiCard({ label, value, sub, accent, delta, t }: {
   );
 }
 
-/** The three triage views that share the collapsed Insights bar. */
-const INSIGHT_TABS = ["followup", "stale", "activity"] as const;
+/** The triage views that share the collapsed Insights bar. */
+const INSIGHT_TABS = ["followup", "stale", "activity", "team", "quality"] as const;
 type InsightTab = (typeof INSIGHT_TABS)[number];
 /** i18n key per tab, so the bar's label matches the panel it opens. */
 const INSIGHT_LABEL: Record<InsightTab, string> = {
   followup: "followupWorkspace.title",
   stale: "stale.title",
   activity: "activityFeed.title",
+  // Two reports rather than triage lists: who is carrying the book, and which
+  // rows are unusable. Both read from the API on mount and stay out of the way
+  // until their tab is opened.
+  team: "team.title",
+  quality: "dq.title",
 };
 
 function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, onSetFollowUp, followUpCounts, clearAllFilters, onApplyFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
@@ -2392,10 +2533,15 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
                 lang={lang ?? "en"}
               />
             )}
+            {/* Mounted only when their tab is open, like the panels above: each
+                fetches on mount, so mounting all five would fire five requests
+                for panels nobody opened. */}
+            {insightsTab === "team" && <TeamReportPanel t={t} lang={lang ?? "en"} />}
+            {insightsTab === "quality" && <DataQualityPanel t={t} canExport={isAdmin} />}
           </div>
         )}
       </section>
-      {mode==="table"? <ClientTable clients={clients} totalClients={allClients.length} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} columns={columns} onColumnsChange={onColumnsChange} rtl={rtl} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} columns={columns} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
+      {mode==="table"? <ClientTable clients={clients} totalClients={mode === "table" && pager ? pager.total : clients.length} startIndex={mode === "table" && pager ? (pager.page - 1) * 25 : 0} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} columns={columns} onColumnsChange={onColumnsChange} rtl={rtl} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} columns={columns} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
       {/* Pager. Only in table mode — kanban shows the whole book. */}
       {showPager && pager && (
         <div className="table-pager">

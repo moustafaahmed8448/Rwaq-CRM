@@ -530,6 +530,10 @@ export function describeActivity(
       return t("act.notesUpdated");
     case "FIELD_EDIT":
       return t("act.fieldUpdated", { field: activityFieldLabel(t, entry.field ?? "") });
+    case "WHATSAPP_REPLY":
+      /* The reply text itself is user content (a customer's message), so it is
+         shown verbatim inside a localized sentence rather than translated. */
+      return t("act.whatsappReply", { value: entry.newValue ?? "" });
     default:
       // Legacy rows written before localization keep their stored sentence.
       return entry.summary ?? t("act.unknown");
@@ -544,6 +548,16 @@ const NOTIFICATION_KEYS: Record<string, string> = {
   ASSIGNED: "notif.assigned",
   "ASSIGNED:1st": "notif.assignedFirst",
   "ASSIGNED:2nd": "notif.assignedSecond",
+  // Follow-up reminders (see /api/notifications/reminders). Localized here so the
+  // same notification reads correctly in Arabic and English, like the assignment ones.
+  FOLLOW_UP_DUE: "notif.followUpDue",
+  // Told to the PREVIOUS 1st/2nd contact when a client is handed to someone else
+  // (see updateClient in db.ts), so a rep whose client moved is not left guessing.
+  "REASSIGNED:1st": "notif.reassignedFirst",
+  "REASSIGNED:2nd": "notif.reassignedSecond",
+  // A customer replied on WhatsApp (see the Twilio webhook), so the owning reps
+  // are pulled back to the thread without anyone forwarding the message.
+  "WA_REPLY": "notif.waReply",
 };
 
 /** Localized notification text; unknown/legacy types keep the stored message. */
