@@ -5,7 +5,7 @@ import { Bell, CheckCheck, Trash2, Inbox } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import { useLang } from "@/lib/i18n";
-import { dateLocale } from "@/lib/format";
+import { formatDateTime, useTimeFormat } from "@/lib/time-format";
 import { notificationMessage } from "@/lib/reporting";
 
 type Notif = { id: string; message: string; read: boolean; recipient?: string; createdAt: string; type?: string; clientName?: string; clientId?: string | null };
@@ -13,6 +13,7 @@ type Notif = { id: string; message: string; read: boolean; recipient?: string; c
 export default function NotificationsPage() {
   const router = useRouter();
   const { t, lang } = useLang();
+  const [timeFormat] = useTimeFormat();
   const [user, setUser] = useState<{ name: string; initials: string; role: string } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [items, setItems] = useState<Notif[]>([]);
@@ -176,12 +177,12 @@ export default function NotificationsPage() {
                 {n.clientId ? (
                   <button type="button" className="notif-open" onClick={() => openClient(n)}>
                     <strong>{notificationMessage(t, n)}</strong>
-                    <small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small>
+                    <small>{formatDateTime(n.createdAt, lang, timeFormat)}</small>
                   </button>
                 ) : (
                   <>
                     <strong>{notificationMessage(t, n)}</strong>
-                    <small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small>
+                    <small>{formatDateTime(n.createdAt, lang, timeFormat)}</small>
                   </>
                 )}
               </div>

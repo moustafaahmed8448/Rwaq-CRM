@@ -14,6 +14,7 @@ import Select from "@/components/Select";
 import { num } from "@/lib/format";
 import { channelLabel, locationLabel, statusLabel } from "@/lib/reporting";
 import { useStatusLabels } from "@/lib/status-labels";
+import { UNASSIGNED_CONTACT_FILTER } from "@/lib/client-types";
 import {
   FOLLOW_UP_BUCKETS,
   SORT_LABELS,
@@ -87,7 +88,8 @@ export default function FilterBar({ filters, updateFilter, setMultiFilter, follo
         <MultiSelect label={t("filter.allLocations")} options={allLocations ?? []} selected={filters.location} onChange={v => setMultiFilter("location", v)} render={v => locationLabel(t, v)} onRemove={onRemoveLocation} removable={removableLocations} removeUsage={locationUsage} t={t} />
         {/* 1st and 2nd contact are separate dropdowns, and they AND together:
             picking one of each narrows to that exact pairing. */}
-        <MultiSelect label={t("filter.firstContact")} options={firstContacts} selected={filters.firstContact} onChange={v => setMultiFilter("firstContact", v)} t={t} />
+        <MultiSelect label={t("filter.firstContact")} options={firstContacts} selected={filters.firstContact} onChange={v => setMultiFilter("firstContact", v)}
+          render={v => v === UNASSIGNED_CONTACT_FILTER ? t("dash.unassigned") : v} t={t} />
         <MultiSelect label={t("filter.secondContact")} options={secondContacts} selected={filters.secondContact} onChange={v => setMultiFilter("secondContact", v)} t={t} />
         {/* Follow-up buckets as four toggle chips rather than a dropdown: they are
             the questions actually asked during a day ("what did I miss?", "what's
@@ -135,7 +137,7 @@ export default function FilterBar({ filters, updateFilter, setMultiFilter, follo
           {filters.status.map(s => <span key={`st-${s}`} className="filter-chip">{statusLabel(t, s, statusLabels)}<button onClick={() => setMultiFilter("status", filters.status.filter(x => x !== s))}>×</button></span>)}
           {filters.channel.map(c => <span key={`ch-${c}`} className="filter-chip">{channelLabel(t, c)}<button onClick={() => setMultiFilter("channel", filters.channel.filter(x => x !== c))}>×</button></span>)}
           {filters.location.map(l => <span key={`lo-${l}`} className="filter-chip">{l}<button onClick={() => setMultiFilter("location", filters.location.filter(x => x !== l))}>×</button></span>)}
-          {filters.firstContact.map(p => <span key={`fc-${p}`} className="filter-chip">{t("filter.firstContact")}: {p}<button onClick={() => setMultiFilter("firstContact", filters.firstContact.filter(x => x !== p))}>×</button></span>)}
+          {filters.firstContact.map(p => <span key={`fc-${p}`} className="filter-chip">{t("filter.firstContact")}: {p === UNASSIGNED_CONTACT_FILTER ? t("dash.unassigned") : p}<button onClick={() => setMultiFilter("firstContact", filters.firstContact.filter(x => x !== p))}>×</button></span>)}
           {filters.secondContact.map(p => <span key={`sc-${p}`} className="filter-chip">{t("filter.secondContact")}: {p}<button onClick={() => setMultiFilter("secondContact", filters.secondContact.filter(x => x !== p))}>×</button></span>)}
           {/* The follow-up bucket was the one filter with no chip here, so picking
               "Overdue" left the row silently empty for that filter: the toggle

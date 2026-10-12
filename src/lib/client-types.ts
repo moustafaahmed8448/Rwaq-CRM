@@ -24,6 +24,9 @@ export type Client = {
   index?: number;
 };
 
+/** Reserved contact-filter value used to find clients with no first contact. */
+export const UNASSIGNED_CONTACT_FILTER = "__unassigned__";
+
 export type Filters = {
   query: string;
   status: string[]; channel: string[]; location: string[];

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assigneeScope, getSessionUser, isAuthenticated, unauthorized } from "@/lib/auth";
 import { databaseErrorMessage, listClients, listMetrics, readSetting, readSettingObject } from "@/lib/db";
+import { businessDayKey } from "@/lib/business-days";
+import { coerceMonthlyTargets } from "@/lib/targets";
 import {
   BUCKETS_SETTING_KEY,
   channelLabels,
@@ -65,7 +67,7 @@ export async function GET(request: NextRequest) {
   };
 
   try {
-    const [metrics, periodClients, allClients, customStatuses, customLocations, customChannels, rawBuckets] = await Promise.all([
+    const [metrics, periodClients, allClients, customStatuses, customLocations, customChannels, rawBuckets, rawTargets] = await Promise.all([
       listMetrics({ from: period.fromStr, to: period.toStr }),
       // Deliberately NOT includeArchived: an archived client is out of the book, so
       // counting it inflated every figure on this page — the KPI cards, the stage
@@ -90,6 +92,7 @@ export async function GET(request: NextRequest) {
       // an untouched workspace, and then `classifyStatusWith` falls through to the
       // built-in pipeline, so every figure below is unchanged.
       readSettingObject(BUCKETS_SETTING_KEY),
+      readSettingObject("targets"),
     ]);
 
     /* Coerced once and threaded through every bucketing pass below — the KPI
@@ -128,12 +131,52 @@ export async function GET(request: NextRequest) {
       return counts;
     };
 
+    const daysToWin = (client: (typeof periodClients)[number]): number | null => {
+      if (classifyStatusWith(client.status, statusBuckets) !== "won") return null;
+      const created = businessDayKey(client.createdAt);
+      const updated = businessDayKey(client.lastUpdateDate);
+      if (!created || !updated || updated <= created) return null;
+      return (Date.parse(`${updated}T00:00:00Z`) - Date.parse(`${created}T00:00:00Z`)) / 86400000;
+    };
+    const summarizeDays = (values: number[]) => {
+      if (values.length === 0) return { count: 0, averageDays: null, medianDays: null };
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 === 0
+        ? (sorted[middle - 1] + sorted[middle]) / 2
+        : sorted[middle];
+      const round = (value: number) => Math.round(value * 10) / 10;
+      return {
+        count: values.length,
+        averageDays: round(values.reduce((sum, value) => sum + value, 0) / values.length),
+        medianDays: round(median),
+      };
+    };
+    const velocityFor = (
+      list: typeof periodClients,
+      pick: (client: (typeof periodClients)[number]) => string,
+    ) => {
+      const grouped = new Map<string, number[]>();
+      for (const client of list) {
+        const days = daysToWin(client);
+        const key = pick(client).trim();
+        if (days === null || !key) continue;
+        const values = grouped.get(key) ?? [];
+        values.push(days);
+        grouped.set(key, values);
+      }
+      return Object.fromEntries([...grouped.entries()].map(([key, values]) => [key, summarizeDays(values)]));
+    };
+
     const rows = [...channelSet].map((channel) => {
       const metric = metrics.find((m) => m.channel === channel);
       const channelClients = periodClients.filter((c) => c.acquisitionChannel === channel);
       // Registry-driven, so a new pipeline stage is picked up automatically
       // instead of silently landing in "other".
       const { won, lost, waiting, other } = bucket(channelClients);
+      const channelVelocity = summarizeDays(
+        channelClients.map(daysToWin).filter((days): days is number => days !== null),
+      );
       const spend = Number(metric?.spend ?? 0);
       const platform = channelLabels[channel] ?? channel;
 
@@ -160,6 +203,7 @@ export async function GET(request: NextRequest) {
         waiting,
         other,
         cpa: won ? spend / won : 0,
+        medianDaysToWin: channelVelocity.medianDays,
         /* Conversion = won ÷ this channel's clients in the period — the same
            numerator/denominator the funnel uses, so the ROI table and the funnel
            can never disagree about the same window. */
@@ -183,7 +227,6 @@ export async function GET(request: NextRequest) {
     // the full client list, which silently reverted them to all-time numbers.
     // `other` is what makes won + lost + waiting reconcile to `total`.
     const totals = { total: periodClients.length, ...bucket(periodClients) };
-
     /* The comparison figures for the KPI deltas.
        Same client query, same filters, same bucket assignments — only the date
        bounds differ. Run through the identical `bucket` helper rather than a
@@ -241,14 +284,19 @@ export async function GET(request: NextRequest) {
      * won + lost + waiting + other === total for every person.
      */
     const roleReport = (pick: (client: typeof periodClients[number]) => string) => {
-      const map = new Map<string, { won: number; lost: number; waiting: number; other: number; total: number }>();
+      const map = new Map<string, { won: number; lost: number; waiting: number; other: number; total: number; daysToWin: number[] }>();
       for (const client of periodClients) {
         const key = pick(client);
         if (!key) continue;
-        const row = map.get(key) ?? { won: 0, lost: 0, waiting: 0, other: 0, total: 0 };
+        const row = map.get(key) ?? { won: 0, lost: 0, waiting: 0, other: 0, total: 0, daysToWin: [] };
         row.total += 1;
         switch (classifyStatusWith(client.status, statusBuckets)) {
-          case "won": row.won += 1; break;
+          case "won": {
+            row.won += 1;
+            const days = daysToWin(client);
+            if (days !== null) row.daysToWin.push(days);
+            break;
+          }
           case "lost": row.lost += 1; break;
           case "progress": row.waiting += 1; break;
           default: row.other += 1;
@@ -257,13 +305,17 @@ export async function GET(request: NextRequest) {
       }
       // Busiest book first, so the people carrying the most clients are on top.
       return [...map.entries()]
-        .map(([name, values]) => ({
-          name,
-          ...values,
-          winRate: values.won + values.lost > 0
-            ? Math.round((values.won / (values.won + values.lost)) * 100)
-            : null,
-        }))
+        .map(([name, values]) => {
+          const { daysToWin: samples, ...outcomes } = values;
+          return {
+            name,
+            ...outcomes,
+            medianDaysToWin: summarizeDays(samples).medianDays,
+            winRate: values.won + values.lost > 0
+              ? Math.round((values.won / (values.won + values.lost)) * 100)
+              : null,
+          };
+        })
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "ar"));
     };
 
@@ -297,6 +349,25 @@ export async function GET(request: NextRequest) {
       const key = client.location;
       if (key) locationCounts[key] = (locationCounts[key] ?? 0) + 1;
     }
+    const locationRows = Object.entries(locationCounts).map(([location, total]) => {
+      const locationClients = periodClients.filter((client) => client.location === location);
+      const { won, lost, waiting, other } = bucket(locationClients);
+      return {
+        location,
+        total,
+        won,
+        lost,
+        waiting,
+        other,
+        winRate: won + lost > 0 ? won / (won + lost) : null,
+        share: periodClients.length > 0 ? total / periodClients.length : 0,
+      };
+    }).sort((a, b) => b.total - a.total || a.location.localeCompare(b.location, "ar"));
+    const velocity = {
+      overall: summarizeDays(periodClients.map(daysToWin).filter((days): days is number => days !== null)),
+      byOwner: velocityFor(periodClients, (client) => client.firstContactPerson),
+      byChannel: velocityFor(periodClients, (client) => client.acquisitionChannel),
+    };
 
     /** Per-channel counts inside the period, for the channel breakdown panel. */
     const channelCounts: Record<string, number> = {};
@@ -385,7 +456,10 @@ export async function GET(request: NextRequest) {
       // window as the KPI cards above them.
       statusCounts,
       locationCounts,
+      locationRows,
       channelCounts,
+      velocity,
+      targets: coerceMonthlyTargets(rawTargets),
       campaignNames,
       campaignCount: metrics.length,
       customStatuses,

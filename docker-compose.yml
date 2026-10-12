@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-rwaq_crm}"
+      POSTGRES_USER: "${POSTGRES_USER:-rwaq}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-rwaq-local-password}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-rwaq}:${POSTGRES_PASSWORD:-rwaq-local-password}@db:5432/${POSTGRES_DB:-rwaq_crm}?schema=public"
+      DATABASE_URL_UNPOOLED: "postgresql://${POSTGRES_USER:-rwaq}:${POSTGRES_PASSWORD:-rwaq-local-password}@db:5432/${POSTGRES_DB:-rwaq_crm}?schema=public"
+      GOOGLE_SHEET_ID: "${GOOGLE_SHEET_ID:-}"
+      GOOGLE_SHEET_GID: "${GOOGLE_SHEET_GID:-}"
+      TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN:-}"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres-data:

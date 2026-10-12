@@ -10,7 +10,7 @@
  */
 import { useMemo, useState } from "react";
 import { History } from "lucide-react";
-import { dateLocale } from "@/lib/format";
+import { formatDateTime, useTimeFormat } from "@/lib/time-format";
 import { describeActivity } from "@/lib/reporting";
 import type { Client, TFn } from "@/lib/client-types";
 import type { ActivityEntry } from "@/lib/types";
@@ -28,6 +28,7 @@ export default function ActivityFeedPanel({
   t: TFn;
   lang: string;
 }) {
+  const [timeFormat] = useTimeFormat();
   const [actor, setActor] = useState("");
   const entries = useMemo<FeedEntry[]>(() => {
     const all: FeedEntry[] = [];
@@ -81,7 +82,7 @@ export default function ActivityFeedPanel({
                 <b className="linked-name">{e.clientName}</b>
                 <span className="linked-sub">
                   {describeActivity(t, e)} · {e.actor} ·{" "}
-                  {new Date(e.timestamp).toLocaleString(dateLocale(lang))}
+                  {formatDateTime(e.timestamp, lang, timeFormat)}
                 </span>
               </span>
               <button type="button" className="btn-outline btn-sm" onClick={() => onOpenDetail(e.clientId)}>

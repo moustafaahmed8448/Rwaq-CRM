@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plus, Users, Check, Settings, Pencil, DatabaseBackup } from "lucide-react";
+import { UserRound, Mail, Key, Save, Trash2, LogOut, Eye, EyeOff, Camera, X, Plus, Users, Check, Settings, Pencil, DatabaseBackup, Sun, Moon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLang } from "@/lib/i18n";
 import { apiErrorMessage } from "@/lib/api-errors";
@@ -9,6 +9,8 @@ import { useBrand } from "@/lib/brand";
 import { initialsOf, readAvatarFile } from "@/lib/avatar";
 import { roleLabel } from "@/lib/reporting";
 import { downloadFile } from "@/lib/download";
+import { useTimeFormat } from "@/lib/time-format";
+import type { MonthlyTargets } from "@/lib/targets";
 import AppHeader from "@/components/AppHeader";
 import Select from "@/components/Select";
 
@@ -75,11 +77,19 @@ export default function SettingsPage() {
   const [savingBrand, setSavingBrand] = useState(false);
   const [brandErr, setBrandErr] = useState("");
   const [brandSaved, setBrandSaved] = useState(false);
+  const [targets, setTargets] = useState<MonthlyTargets | null>(null);
+  const [targetWonDraft, setTargetWonDraft] = useState("");
+  const [targetSpendDraft, setTargetSpendDraft] = useState("");
+  const [targetsLoading, setTargetsLoading] = useState(false);
+  const [savingTargets, setSavingTargets] = useState(false);
+  const [targetsErr, setTargetsErr] = useState("");
+  const [targetsSaved, setTargetsSaved] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   // Per-user notification preferences. `null` = not loaded yet, so the toggle
   // does not flash a wrong default before the stored value arrives.
   const [followUpReminders, setFollowUpReminders] = useState<boolean | null>(null);
   const [savingNotif, setSavingNotif] = useState(false);
+  const [timeFormat, setTimeFormat] = useTimeFormat();
 
   const loadUsers = async () => {
     const r = await fetch("/api/users");
@@ -124,6 +134,34 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (localStorage.getItem("rwaq-dark") === "1") setDarkMode(true);
   }, []);
+
+  useEffect(() => {
+    if (user?.role !== "Admin") return;
+    let active = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTargetsLoading(true);
+    fetch("/api/settings/targets", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({})) as { error?: unknown };
+          throw new Error(apiErrorMessage(t, body.error));
+        }
+        const data = await response.json() as { targets?: MonthlyTargets | null };
+        if (!active) return;
+        const value = data.targets ?? null;
+        setTargets(value);
+        setTargetWonDraft(value ? String(value.monthlyWon) : "");
+        setTargetSpendDraft(value?.monthlySpendCeiling == null ? "" : String(value.monthlySpendCeiling));
+        setTargetsErr("");
+      })
+      .catch((err: unknown) => {
+        if (active) setTargetsErr(err instanceof Error ? err.message : t("errors.generic"));
+      })
+      .finally(() => {
+        if (active) setTargetsLoading(false);
+      });
+    return () => { active = false; };
+  }, [user, t]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
@@ -274,6 +312,44 @@ export default function SettingsPage() {
       setBrandErr(t("errors.generic"));
     } finally {
       setSavingBrand(false);
+    }
+  };
+
+  const saveTargets = async () => {
+    const monthlyWon = Number(targetWonDraft);
+    const monthlySpendCeiling = targetSpendDraft.trim() ? Number(targetSpendDraft) : null;
+    if (!Number.isSafeInteger(monthlyWon) || monthlyWon < 1) {
+      setTargetsErr(t("errors.targetWon"));
+      return;
+    }
+    if (monthlySpendCeiling !== null && (!Number.isFinite(monthlySpendCeiling) || monthlySpendCeiling <= 0)) {
+      setTargetsErr(t("errors.targetSpend"));
+      return;
+    }
+    setSavingTargets(true);
+    setTargetsErr("");
+    setTargetsSaved(false);
+    try {
+      const response = await fetch("/api/settings/targets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ monthlyWon, monthlySpendCeiling }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: unknown };
+        setTargetsErr(apiErrorMessage(t, body.error));
+        return;
+      }
+      const data = await response.json() as { targets: MonthlyTargets };
+      setTargets(data.targets);
+      setTargetWonDraft(String(data.targets.monthlyWon));
+      setTargetSpendDraft(data.targets.monthlySpendCeiling == null ? "" : String(data.targets.monthlySpendCeiling));
+      setTargetsSaved(true);
+      setTimeout(() => setTargetsSaved(false), 2500);
+    } catch {
+      setTargetsErr(t("errors.generic"));
+    } finally {
+      setSavingTargets(false);
     }
   };
 
@@ -625,6 +701,34 @@ export default function SettingsPage() {
                 <button type="button" className={lang === "ar" ? "active" : ""} aria-pressed={lang === "ar"} onClick={() => setLang("ar")}>العربية</button>
                 <button type="button" className={lang === "en" ? "active" : ""} aria-pressed={lang === "en"} onClick={() => setLang("en")}>English</button>
               </div>
+              <div className="logo-actions" style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  aria-pressed={darkMode}
+                  onClick={() => setDarkMode((current) => !current)}
+                >
+                  {darkMode ? <Sun size={14} /> : <Moon size={14} />}
+                  {darkMode ? t("header.switchLight") : t("header.switchDark")}
+                </button>
+              </div>
+              <div className="form-grid-2" style={{ marginTop: 14 }}>
+                <Field label={t("settings.timeFormat")}>
+                  <select
+                    value={timeFormat}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (value === "locale" || value === "12h" || value === "24h") setTimeFormat(value);
+                    }}
+                    aria-describedby="time-format-hint"
+                  >
+                    <option value="locale">{t("settings.timeFormatLocale")}</option>
+                    <option value="12h">{t("settings.timeFormat12")}</option>
+                    <option value="24h">{t("settings.timeFormat24")}</option>
+                  </select>
+                </Field>
+              </div>
+              <p id="time-format-hint" className="muted" style={{ fontSize: 11 }}>{t("settings.timeFormatHint")}</p>
             </section>
             {/* ── Workspace name (admin only) ──
                 The white-label counterpart of the dashboard logo. One Setting
@@ -653,6 +757,32 @@ export default function SettingsPage() {
                   <p className="muted" style={{ fontSize: 11, margin: 0 }}>{t("settings.brandHint")}</p>
                   {brandSaved && <div className="settings-success">{t("settings.brandSaved")}</div>}
                   {brandErr && <div className="settings-error">{brandErr}</div>}
+                </div>
+              </section>
+            )}
+            {user.role === "Admin" && (
+              <section className="settings-section">
+                <div className="section-header">
+                  <h2>{t("settings.targetsSection")}</h2>
+                  <span className="section-sub">{t("settings.targetsSubtitle")}</span>
+                </div>
+                <div className="form-grid-2">
+                  <Field label={t("targets.monthlyWon")}>
+                    <input type="number" min="1" step="1" value={targetWonDraft}
+                      onChange={(event) => setTargetWonDraft(event.target.value)} />
+                  </Field>
+                  <Field label={t("targets.spendCeiling")}>
+                    <input type="number" min="0.01" step="0.01" value={targetSpendDraft}
+                      onChange={(event) => setTargetSpendDraft(event.target.value)} placeholder={t("targets.optional")} />
+                  </Field>
+                </div>
+                <div className="logo-actions">
+                  <button className="btn-primary" onClick={saveTargets} disabled={targetsLoading || savingTargets}>
+                    <Save size={14} />{savingTargets ? t("settings.saving") : t("common.saveChanges")}
+                  </button>
+                  {targets && <p className="muted" style={{ fontSize: 11, margin: 0 }}>{t("targets.configured")}</p>}
+                  {targetsSaved && <div className="settings-success">{t("settings.targetsSaved")}</div>}
+                  {targetsErr && <div className="settings-error">{targetsErr}</div>}
                 </div>
               </section>
             )}

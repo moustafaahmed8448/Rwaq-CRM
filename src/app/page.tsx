@@ -26,7 +26,7 @@ import {
   type StatusBuckets,
 } from "@/lib/reporting";
 import { downloadFile, exportQuery, EXPORT_FAILED } from "@/lib/download";
-import { dateInputValue, isOverdue, localDayKey, num, sar, dateLocale } from "@/lib/format";
+import { dateInputValue, isOverdue, localDayKey, num, sar } from "@/lib/format";
 import { addBusinessDays, businessDayKey } from "@/lib/business-days";
 import { useLogo } from "@/lib/logo";
 import StatusPill, { StatusDot } from "@/components/StatusPill";
@@ -39,22 +39,19 @@ import DashboardCharts, { type ChartView, type TrendPoint } from "@/components/D
 import {
   initialFilters,
   SORT_LABELS,
+  UNASSIGNED_CONTACT_FILTER,
   type Client,
   type DatePreset,
   type Filters,
   type SortField,
   type TFn,
 } from "@/lib/client-types";
+import type { MonthlyTargets } from "@/lib/targets";
 import ColumnPicker from "@/components/ColumnPicker";
 import ClientFilterBar from "@/components/ClientFilterBar";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import DuplicatesPanel from "@/components/DuplicatesPanel";
-import FollowUpWorkspace from "@/components/FollowUpWorkspace";
 import BulkEditModal from "@/components/BulkEditModal";
-import StaleClientsPanel from "@/components/StaleClientsPanel";
-import TeamReportPanel from "@/components/TeamReportPanel";
-import DataQualityPanel from "@/components/DataQualityPanel";
-import ActivityFeedPanel from "@/components/ActivityFeedPanel";
 import ArchiveReasonModal from "@/components/ArchiveReasonModal";
 import ContactButtons from "@/components/ContactButtons";
 import ClientTable from "@/components/ClientTable";
@@ -70,13 +67,30 @@ import { useColumnLayout } from "@/lib/use-column-layout";
 type Metric = { channel: string; platform: string; spend: number; reach: number; totalClients: number; won: number; lost: number; waiting: number; cpa: number;
   /* ROI drill-down detail, additive on /api/analytics/weekly (see that route). */
   conversionRate?: number; statusBreakdown?: { won: number; lost: number; waiting: number; other: number };
-  campaignCount?: number; impressions?: number; clicks?: number; ctr?: number; costPerClick?: number };
+  campaignCount?: number; impressions?: number; clicks?: number; ctr?: number; costPerClick?: number;
+  medianDaysToWin?: number | null };
 type User = { name: string; initials: string; role: string };
 type EditDraft = Partial<Client> & { id: string };
 type ConfirmDelete = { ids: string[]; names: string[] };
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 /** One salesperson's outcome breakdown for a single contact role. */
-type SpRow = { name: string; won: number; lost: number; waiting: number; other: number; total: number; winRate: number | null };
+type SpRow = { name: string; won: number; lost: number; waiting: number; other: number; total: number; winRate: number | null; medianDaysToWin?: number | null };
+type VelocityStats = { count: number; averageDays: number | null; medianDays: number | null };
+type DashboardVelocity = {
+  overall: VelocityStats;
+  byOwner: Record<string, VelocityStats>;
+  byChannel: Record<string, VelocityStats>;
+};
+type LocationPerformance = {
+  location: string;
+  total: number;
+  won: number;
+  lost: number;
+  waiting: number;
+  other: number;
+  winRate: number | null;
+  share: number;
+};
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
@@ -143,7 +157,6 @@ const buildDatePresets = (): DatePreset[] => {
     { label: "date.thisYear", startDate: `${todayKey.slice(0, 4)}-01-01` },
   ];
 };
-
 // Field key -> dictionary key, used by the "field updated" toast.
 const FIELD_KEYS: Record<string, string> = {
   name: "form.name", phoneNumber: "form.phone", project: "form.project", location: "form.location",
@@ -204,7 +217,9 @@ function matchesFilters(client: Client, filters: Filters) {
     // 1st and 2nd contact are SEPARATE filters that AND together: picking a 1st
     // and a 2nd contact narrows to clients held by that exact pairing, rather
     // than the union of "is either contact".
-    (filters.firstContact.length === 0 || filters.firstContact.includes(client.firstContactPerson)) &&
+    (filters.firstContact.length === 0 ||
+      (filters.firstContact.includes(UNASSIGNED_CONTACT_FILTER) && !client.firstContactPerson.trim()) ||
+      filters.firstContact.includes(client.firstContactPerson)) &&
     (filters.secondContact.length === 0 || filters.secondContact.includes(client.secondContactPerson)) &&
     (!filters.startDate || date >= filters.startDate) && (!filters.endDate || date <= filters.endDate) &&
     matchesFollowUp(client.nextFollowUpAt, filters.followUp) &&
@@ -282,6 +297,8 @@ export default function Home() {
    * disagree with the rows.
    */
   const [followUpCounts, setFollowUpCounts] = useState<Record<string, number>>({});
+  const [dataQualityCount, setDataQualityCount] = useState<number | null>(null);
+  const [dataQualityError, setDataQualityError] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [customStatuses, setCustomStatuses] = useState<string[]>([]);
   const [customChannels, setCustomChannels] = useState<string[]>([]);
@@ -329,7 +346,9 @@ export default function Home() {
     | {
         statusCounts?: Record<string, number>;
         locationCounts?: Record<string, number>;
+        locationRows?: LocationPerformance[];
         channelCounts?: Record<string, number>;
+        velocity?: DashboardVelocity;
         totals?: { total: number; won: number; lost: number; waiting: number; other: number };
       }
     // undefined until the first analytics response lands; the Dashboard falls
@@ -343,6 +362,7 @@ export default function Home() {
      Held in state rather than re-fetched so the funnel and stage panel describe
      exactly the same window and the same buckets as the KPI cards above them. */
   const [statusBuckets, setStatusBuckets] = useState<StatusBuckets>({});
+  const [dashboardTargets, setDashboardTargets] = useState<MonthlyTargets | null>(null);
   /* The comparison window's figures, for the KPI deltas. Null under "all time",
      which is what makes every card show a dash instead of a fake 0%. */
   const [previous, setPrevious] = useState<{
@@ -555,7 +575,9 @@ export default function Home() {
         setPeriodBreakdowns({
           statusCounts: d.statusCounts,
           locationCounts: d.locationCounts,
+          locationRows: d.locationRows,
           channelCounts: d.channelCounts,
+          velocity: d.velocity,
           totals: d.totals,
         });
         // Same response carries the per-salesperson breakdown, so the sales
@@ -572,10 +594,34 @@ export default function Home() {
         // Null under "all time" — the API omits the comparison window there.
         setPrevious(d.previous ?? null);
         setTimeline(d.timeline ?? []);
+        setDashboardTargets(d.targets ?? null);
       })
       .catch(() => undefined)
       .finally(() => setPeriodLoading(false));
   }, [user, periodKind, customFrom, customTo, dashFilters.status, dashFilters.channel, dashFilters.location]);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDataQualityCount(null);
+    setDataQualityError(false);
+    fetch("/api/analytics/data-quality", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Data-quality request failed");
+        const data = await response.json() as { total?: unknown };
+        if (typeof data.total !== "number" || !Number.isFinite(data.total)) {
+          throw new Error("Data-quality response was invalid");
+        }
+        if (active) setDataQualityCount(data.total);
+      })
+      .catch(() => {
+        if (active) setDataQualityError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   // Table scroll detection
   useEffect(() => {
@@ -679,7 +725,10 @@ export default function Home() {
   // The two contact roles are listed separately, because they are separate
   // filters: a merged list could not tell you who is the 1st and who the 2nd.
   const firstContacts = useMemo(
-    () => [...new Set(clients.map(c => c.firstContactPerson).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ar")),
+    () => [
+      ...new Set(clients.map(c => c.firstContactPerson).filter(Boolean)),
+      UNASSIGNED_CONTACT_FILTER,
+    ].sort((a, b) => a.localeCompare(b, "ar")),
     [clients],
   );
   const secondContacts = useMemo(
@@ -732,6 +781,12 @@ export default function Home() {
     setTablePage(1);
     setFilters(cur => ({ ...cur, followUp: bucket }));
   };
+  const showUnassignedClients = () => {
+    setView("clients");
+    setTablePage(1);
+    setFilters((cur) => ({ ...cur, firstContact: [UNASSIGNED_CONTACT_FILTER] }));
+  };
+  const showDataQuality = () => router.push("/insights?tab=quality");
 
   const updateFilter = (key: "query" | "startDate" | "endDate", value: string) => {
     // Any filter change restarts at page 1: staying on page 7 of a now much
@@ -1113,24 +1168,6 @@ export default function Home() {
   };
 
   /**
-   * Snoozes one follow-up by N days. Reuses updateClientField so the row, the
-   * detail panel and the toast stay consistent with every other field edit.
-   */
-  const snoozeFollowUp = async (id: string, days: number) => {
-    const next = new Date(Date.now() + days * 86400000).toISOString();
-    await updateClientField(id, { nextFollowUpAt: next });
-    const c = clients.find((x) => x.id === id);
-    if (c) addToast("success", t("followupWorkspace.snoozedToast", { name: c.name, n: days }));
-  };
-
-  /** Clears one follow-up (marks it done). */
-  const doneFollowUp = async (id: string) => {
-    await updateClientField(id, { nextFollowUpAt: null });
-    const c = clients.find((x) => x.id === id);
-    if (c) addToast("success", t("followupWorkspace.doneToast", { name: c.name }));
-  };
-
-  /**
    * Applies a bulk-edit patch to the ticked rows.
    *
    * The patch is SPLIT: ownership fields (1st/2nd contact, and the operation
@@ -1369,6 +1406,7 @@ const exportDashboard = () => {
           else if (tab === "clients") setView("clients");
           else if (tab === "archived") router.push("/archived");
           else if (tab === "marketing") router.push("/marketing");
+          else if (tab === "insights") router.push("/insights");
           // The options page is a separate route, not a view of this one — the
           // final `else` used to swallow it and land on Settings instead.
           else if (tab === "options") router.push("/options");
@@ -1404,6 +1442,11 @@ userAvatars={userAvatars}
             statusBuckets={statusBuckets}
             previous={previous}
             onShowFollowUp={showFollowUp}
+            onShowUnassigned={showUnassignedClients}
+            onShowDataQuality={showDataQuality}
+            dataQualityCount={dataQualityCount}
+            dataQualityError={dataQualityError}
+            targets={dashboardTargets}
             /* Rep names in Sales Performance open that person's profile. Encoded
                because the names are Arabic — an unencoded space or any reserved
                character would truncate or reshape the query. */
@@ -1454,9 +1497,7 @@ userAvatars={userAvatars}
             onArchive={askArchiveClient}
             onArchiveSelected={archiveSelected}
             onBulkStatus={bulkSetStatus}
-            onSnoozeFollowUp={snoozeFollowUp} onDoneFollowUp={doneFollowUp}
             onOpenBulkEdit={() => setBulkEditOpen(true)}
-            lang={lang}
             onSetFollowUp={setFollowUpFilter}
       followUpCounts={followUpCounts}
             onBulkDelete={() => { if (selectedIds.size === 0) return; setConfirmDelete({ ids: [...selectedIds], names: filteredClients.filter(c => selectedIds.has(c.id)).map(c => c.name) }); }}
@@ -1686,7 +1727,7 @@ userAvatars={userAvatars}
 
 /* ── Sub-components ─────────────────────────────────────────── */
 
-function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, userAvatars, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, periodBreakdowns, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, dashFilters, setDashFilter, clearDashFilters, dashFilterCount, statusBuckets, previous, onShowFollowUp, onOpenDetail, onOpenProfile, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] };
+function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclassified, clients, salespeople, spReports, userAvatars, timeline, chartView, onChartViewChange, updateStatus, updateClientField, allStatuses, allChannels, allLocations, onAddStatus, onAddChannel, onAddLocation, onExport, exporting, scoped, onToggleStageFilter, periodKind, periodInfo, periodBreakdowns, onPeriodChange, onCustomRange, customFrom, customTo, periodLoading, dashFilters, setDashFilter, clearDashFilters, dashFilterCount, statusBuckets, previous, onShowFollowUp, onShowUnassigned, onShowDataQuality, dataQualityCount, dataQualityError, targets, onOpenDetail, onOpenProfile, t }: { metrics: Metric[]; totalSpend: number; totalReach: number; won: number; lost: number; waiting: number; unclassified: number; clients: Client[]; salespeople: string[]; spReports: { first: SpRow[]; second: SpRow[] };
   /** Rep display name -> stored photo, for the Sales Performance rows. */
   userAvatars: Record<string, string>; timeline: TrendPoint[]; chartView: ChartView; onChartViewChange: (v: ChartView) => void; updateStatus: (id: string, s: string) => void; updateClientField: (id: string, patch: Partial<Client>) => void; allStatuses: string[]; allChannels: string[]; allLocations: string[]; onAddStatus?: (s: string) => Promise<string | void>; onAddChannel?: (s: string) => Promise<string | void>; onAddLocation?: (s: string) => Promise<string | void>; onExport: () => void; exporting: boolean; scoped: boolean; onToggleStageFilter: (status: string) => void; periodKind: PeriodKind; periodInfo: { from: string; to: string; campaignCount: number; campaignNames: string[]; totals: { total: number; won: number; lost: number; waiting: number; other: number } };
   /**
@@ -1694,7 +1735,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
    * panel, funnel, conversion rate and location bars describe the same window as
    * the KPI cards rather than all time.
    */
-  periodBreakdowns?: { statusCounts?: Record<string, number>; locationCounts?: Record<string, number>; channelCounts?: Record<string, number>; totals?: { total: number; won: number; lost: number; waiting: number; other: number } };
+  periodBreakdowns?: { statusCounts?: Record<string, number>; locationCounts?: Record<string, number>; locationRows?: LocationPerformance[]; channelCounts?: Record<string, number>; velocity?: DashboardVelocity; totals?: { total: number; won: number; lost: number; waiting: number; other: number } };
   onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean;
   /** Status/channel/location narrowing, applied on top of the period. */
   dashFilters: { status: string[]; channel: string[]; location: string[] };
@@ -1733,6 +1774,11 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
    * from `Home` so the dashboard owns no navigation state of its own.
    */
   onShowFollowUp: (bucket: string) => void;
+  onShowUnassigned: () => void;
+  onShowDataQuality: () => void;
+  dataQualityCount: number | null;
+  dataQualityError: boolean;
+  targets: MonthlyTargets | null;
   t: TFn }) {
   const recentClients = useMemo(() => [...clients].sort((a,b) => String(b.lastUpdateDate||"").localeCompare(String(a.lastUpdateDate||""))).slice(0,5), [clients]);
   // Same shared colour map the rest of the app resolves through.
@@ -1762,6 +1808,44 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
     return source.sort((a, b) => b[1] - a[1]).slice(0, 5);
   }, [periodCounts, clients]);
   const periodTotal = periodCounts?.totals?.total ?? clients.length;
+  const locationRows = useMemo(() => periodCounts?.locationRows ?? locationEntries.map(([location, total]) => {
+    const counts = { won: 0, lost: 0, waiting: 0, other: 0 };
+    for (const client of clients.filter((item) => item.location === location)) {
+      const outcome = classifyStatusWith(client.status, statusBuckets);
+      counts[outcome === "progress" ? "waiting" : outcome] += 1;
+    }
+    return {
+      location,
+      total,
+      ...counts,
+      winRate: counts.won + counts.lost > 0 ? counts.won / (counts.won + counts.lost) : null,
+      share: periodTotal > 0 ? total / periodTotal : 0,
+    };
+  }), [periodCounts, locationEntries, clients, statusBuckets, periodTotal]);
+  const velocity = periodCounts?.velocity ?? {
+    overall: { count: 0, averageDays: null, medianDays: null },
+    byOwner: {},
+    byChannel: {},
+  };
+  const unassignedCount = clients.filter((client) => !client.firstContactPerson.trim()).length;
+  const elapsedPeriodDays = (from: string, to: string) =>
+    Math.max(1, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1);
+  const monthLength = periodInfo.from && periodInfo.to ? elapsedPeriodDays(periodInfo.from, periodInfo.to) : 1;
+  const currentDay = businessDayKey(new Date());
+  const elapsedMonthDays = periodInfo.from
+    ? Math.min(monthLength, elapsedPeriodDays(periodInfo.from, currentDay))
+    : 1;
+  const wonPacePercent = targets
+    ? Math.round(((won / elapsedMonthDays) * monthLength / targets.monthlyWon) * 100)
+    : 0;
+  const spendUsePercent = targets?.monthlySpendCeiling
+    ? Math.round((totalSpend / targets.monthlySpendCeiling) * 100)
+    : 0;
+  const spendPacePercent = targets?.monthlySpendCeiling
+    ? Math.round(((totalSpend / elapsedMonthDays) * monthLength / targets.monthlySpendCeiling) * 100)
+    : 0;
+  const daysLabel = (days: number | null | undefined) =>
+    days == null ? "—" : `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(days)} ${t("velocity.daysShort")}`;
 
   // Which contact role the sales performance panel is reporting on. Defaults to
   // the 2nd contact: that is the number most reps could not previously see at
@@ -1975,7 +2059,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
       {/* KPI strip — the four outcome cards (won / lost / in progress / other)
           plus spend, reach and CPA. `other` is what makes the outcome cards sum
           to the period total instead of quietly under-reporting. */}
-      <section className="kpi-row kpi-row-7">
+      <section className="kpi-row kpi-row-8">
         {/* `previous` is null under "all time" (nothing to compare with), so every
             card renders a dash instead of a fake 0% — see KpiCard. Spend and reach
             compare against the previous window's spend/reach; the outcome cards
@@ -1998,6 +2082,8 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
             only moved from 40 to 35 would be actively misleading. */}
         <KpiCard label={t("kpi.avgCpa")} value={metrics.length ? sar(Math.round(totalSpend / (won || 1))) : "—"}
           sub={won>0?t("kpi.customersWon",{n:won}):t("kpi.noWins")} accent="#7c3aed" t={t}/>
+        <KpiCard label={t("velocity.medianDays")} value={daysLabel(velocity.overall.medianDays)}
+          sub={t("velocity.basedOn", { n: velocity.overall.count })} accent="#0f766e" t={t}/>
       </section>
 
       {/* Follow-up strip.
@@ -2006,23 +2092,69 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           today" is not a question about last week's registrations. Scoping it to
           the reporting period would show zero for any window that has ended.
           The tile switches to the clients view with the matching filter applied. */}
-      {(overdueCount > 0 || dueTodayCount > 0) && (
-        <section className="followup-strip">
-          {([
-            { key: "overdue" as const, n: overdueCount, tone: "danger" },
-            { key: "today" as const, n: dueTodayCount, tone: "warn" },
-          ]).map(({ key, n, tone }) => (
-            <button
-              key={key}
-              type="button"
-              className={`followup-tile is-${tone}`}
-              title={t("followUp.showTitle", { value: t(`followUp.${key}`) })}
-              onClick={() => onShowFollowUp(key)}
-            >
-              <strong>{num(n)}</strong>
-              <span>{t(`followUp.${key}`)}</span>
-            </button>
-          ))}
+      <section className="followup-strip attention-strip" aria-label={t("dash.attentionTitle")}>
+        <div className="attention-strip-title">{t("dash.attentionTitle")}</div>
+        {([
+          { key: "overdue" as const, n: overdueCount, tone: "danger" },
+          { key: "today" as const, n: dueTodayCount, tone: "warn" },
+        ]).map(({ key, n, tone }) => (
+          <button
+            key={key}
+            type="button"
+            className={`followup-tile is-${tone}`}
+            title={t("followUp.showTitle", { value: t(`followUp.${key}`) })}
+            onClick={() => onShowFollowUp(key)}
+          >
+            <strong>{num(n)}</strong>
+            <span>{t(`followUp.${key}`)}</span>
+          </button>
+        ))}
+        <button type="button" className="followup-tile is-warn" onClick={onShowUnassigned}
+          title={t("dash.showUnassigned")}>
+          <strong>{num(unassignedCount)}</strong>
+          <span>{t("dash.unassigned")}</span>
+        </button>
+        <button type="button" className="followup-tile is-danger" onClick={onShowDataQuality}
+          title={dataQualityError ? t("errors.generic") : t("dash.showDataQuality")}>
+          <strong>{dataQualityError ? "!" : dataQualityCount === null ? "…" : num(dataQualityCount)}</strong>
+          <span>{t("dash.dataQuality")}</span>
+        </button>
+      </section>
+
+      {periodKind === "month" && targets && (
+        <section className="panel target-progress-panel">
+          <div className="panel-heading">
+            <h3>{t("targets.progressTitle")}</h3>
+            <span className="muted">{periodInfo.from} — {periodInfo.to}</span>
+          </div>
+          <div className="target-progress-row">
+            <div className="target-progress-label">
+              <strong>{t("targets.monthlyWon")}</strong>
+              <span>{t("targets.actualOf", { actual: won, target: targets.monthlyWon })}</span>
+            </div>
+            <div className="target-progress-track">
+              <span style={{ width: `${Math.min(100, (won / targets.monthlyWon) * 100)}%` }} />
+            </div>
+            <div className="target-progress-meta">
+              <strong>{Math.round((won / targets.monthlyWon) * 100)}%</strong>
+              <span>{t("targets.pace", { n: wonPacePercent })}</span>
+            </div>
+          </div>
+          {targets.monthlySpendCeiling !== null && (
+            <div className="target-progress-row">
+              <div className="target-progress-label">
+                <strong>{t("targets.spendCeiling")}</strong>
+                <span>{t("targets.actualOf", { actual: sar(totalSpend), target: sar(targets.monthlySpendCeiling) })}</span>
+              </div>
+              <div className="target-progress-track is-spend">
+                <span style={{ width: `${Math.min(100, spendUsePercent)}%` }} />
+              </div>
+              <div className="target-progress-meta">
+                <strong>{spendUsePercent}%</strong>
+                <span>{t("targets.pace", { n: spendPacePercent })}</span>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -2044,7 +2176,8 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         t={t}
       />
 
-      {/* Client status — above Sales performance and Channel ROI */}
+      {/* Status and location performance share the same server-scoped period. */}
+      <div className="dashboard-grid-2 stage-location-grid">
       <section className="panel stage-panel">
         <div className="panel-heading">
           <h3>{t("stage.title")} <small>{scoped ? t("dash.scopeMine") : t("dash.scopeAll")}</small></h3>
@@ -2083,6 +2216,44 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
           <strong className="stage-total-value">{num(periodTotal)}</strong>
         </div>
       </section>
+      <section className="panel location-performance-panel">
+        <div className="panel-heading">
+          <h3>{t("loc.performance")}</h3>
+          <span className="muted" style={{ fontSize: 11 }}>{t("loc.clients", { n: periodTotal })}</span>
+        </div>
+        {locationRows.length === 0 && <div className="empty-state">{t("loc.noData")}</div>}
+        {locationRows.slice(0, 5).map((row) => (
+          <button
+            type="button"
+            className="loc-performance-row"
+            key={row.location}
+            onClick={() => setDashFilter("location", [row.location])}
+            title={t("loc.clickFilter")}
+          >
+            <span className="loc-performance-heading">
+              <span className="loc-performance-name">
+                <i className="dot" style={{ background: optionColor("locations", row.location, colors) }} />
+                {locationLabel(t, row.location)}
+              </span>
+              <span className="loc-performance-share">{Math.round(row.share * 100)}% {t("loc.share")}</span>
+              <strong>{row.winRate === null ? "—" : `${Math.round(row.winRate * 100)}%`}</strong>
+            </span>
+            <span className="loc-performance-stack" aria-label={t("roi.breakdown", {
+              won: row.won, lost: row.lost, waiting: row.waiting, other: row.other, cpa: "—",
+            })}>
+              <i className="loc-stack-won" style={{ width: `${row.total ? (row.won / row.total) * 100 : 0}%` }} />
+              <i className="loc-stack-lost" style={{ width: `${row.total ? (row.lost / row.total) * 100 : 0}%` }} />
+              <i className="loc-stack-waiting" style={{ width: `${row.total ? (row.waiting / row.total) * 100 : 0}%` }} />
+              <i className="loc-stack-other" style={{ width: `${row.total ? (row.other / row.total) * 100 : 0}%` }} />
+            </span>
+            <span className="loc-performance-counts">
+              {t("loc.outcomes", { won: row.won, lost: row.lost, waiting: row.waiting })}
+              <strong>{num(row.total)}</strong>
+            </span>
+          </button>
+        ))}
+      </section>
+      </div>
 
       {/* Funnel + ROI */}
       <section className="funnel-row">
@@ -2113,6 +2284,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
             <span className="sp-wait">{t("funnel.inProgress")}</span>
             <span className="sp-other">{t("kpi.otherStatus")}</span>
             <span className="sp-total">{t("sp.total")}</span>
+            <span className="sp-velocity">{t("velocity.medianDays")}</span>
           </div>
           {spRows.length === 0 && <div className="empty-state" style={{fontSize:12,padding:"16px 0"}}>{t("sp.noData")}</div>}
           {spRows.map(sp => (
@@ -2142,13 +2314,14 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
               </div>
               <div className="sp-perf-bar"><div className="sp-perf-fill" style={{width: String(sp.winRate ?? 0) + "%"}}/></div>
               <span className="sp-winrate">{sp.winRate === null ? "—" : sp.winRate + "%"}</span>
+              <span className="sp-perf-velocity">{daysLabel(sp.medianDaysToWin)}</span>
             </div>
           ))}
         </div>
         <div className="panel channel-roi-panel">
           <h3>{t("roi.title")}</h3>
           <div className="roi-table">
-            <div className="roi-head"><span>{t("roi.channel")}</span><span>{t("roi.spend")}</span><span>{t("roi.won")}</span><span>{t("roi.conversion")}</span><span>{t("roi.cpa")}</span></div>
+            <div className="roi-head"><span>{t("roi.channel")}</span><span>{t("roi.spend")}</span><span>{t("roi.won")}</span><span>{t("roi.conversion")}</span><span>{t("roi.cpa")}</span><span>{t("velocity.medianDays")}</span></div>
             {metrics.filter((m: Metric)=>m.totalClients>0).map((m: Metric)=>(
               /* Hover the row for the full status split behind the conversion
                  figure — the drill-down the aggregate % alone cannot show. */
@@ -2162,6 +2335,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
                 <span>{sar(m.spend)}</span><span>{m.won}</span>
                 <span>{m.conversionRate !== undefined ? `${Math.round(m.conversionRate * 100)}%` : "—"}</span>
                 <span className={m.cpa<100?"good":m.cpa<500?"":"bad"}>{m.cpa > 0 ? sar(m.cpa) : "—"}</span>
+                <span>{daysLabel(velocity.byChannel[m.channel]?.medianDays ?? m.medianDaysToWin)}</span>
               </div>
             ))}
           </div>
@@ -2214,27 +2388,8 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         )}
       </section>
 
-      {/* Top locations + Conversion funnel underneath */}
+      {/* Conversion funnel, retained below the recent-client table. */}
       <div className="dashboard-grid-2">
-        <section className="panel">
-          <div className="panel-heading"><h3>{t("loc.title")}</h3><span className="muted" style={{fontSize:11}}>{t("loc.clients", { n: periodTotal })}</span></div>
-          {locationEntries.length === 0 && <div className="empty-state">{t("loc.noData")}</div>}
-          {locationEntries.map(([loc, count], i) => (
-            <div className="loc-bar-row" key={loc}>
-              <span className="loc-rank">#{i+1}</span>
-              {/* Coloured by the location itself, not by rank. A rank palette made
-                  the bar colour change whenever a client moved between cities, so
-                  the same location wore a different colour from one render to the
-                  next — and could not match an admin-set colour at all. */}
-              <div className="loc-bar-track"><div className="loc-bar-fill" style={{width: `${periodTotal > 0 ? Math.round((count/periodTotal)*100) : 0}%`, background: optionColor("locations", loc, colors)}}/></div>
-              <span className="loc-name">
-                <i className="dot" style={{ background: optionColor("locations", loc, colors) }} />
-                {loc}
-              </span>
-              <span className="loc-count">{count}</span>
-            </div>
-          ))}
-        </section>
         <section className="panel funnel-panel">
           <div className="panel-heading">
             <h3>{t("funnel.newTitle")}</h3>
@@ -2333,21 +2488,6 @@ function KpiCard({ label, value, sub, accent, delta, t }: {
   );
 }
 
-/** The triage views that share the collapsed Insights bar. */
-const INSIGHT_TABS = ["followup", "stale", "activity", "team", "quality"] as const;
-type InsightTab = (typeof INSIGHT_TABS)[number];
-/** i18n key per tab, so the bar's label matches the panel it opens. */
-const INSIGHT_LABEL: Record<InsightTab, string> = {
-  followup: "followupWorkspace.title",
-  stale: "stale.title",
-  activity: "activityFeed.title",
-  // Two reports rather than triage lists: who is carrying the book, and which
-  // rows are unusable. Both read from the API on mount and stay out of the way
-  // until their tab is opened.
-  team: "team.title",
-  quality: "dq.title",
-};
-
 function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter, setMultiFilter, onSetFollowUp, followUpCounts, clearAllFilters, onApplyFilters, firstContacts, secondContacts, sortBy, setSortBy, columns, onColumnsChange, rtl, updateStatus, updateClientField, onAssigned, isAdmin, canEdit, refData, onArchive, onArchiveSelected,
   selectedIds, toggleSelect, toggleSelectAll, onOpenEdit, onOpenCreate, onOpenImport, onOpenDuplicates, onOpenDelete, onOpenDetail,
   exportExcel, exportSelected, bulkCount, onBulkDelete, allStatuses, allChannels,
@@ -2356,7 +2496,7 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   onClearSelection,
   onSelectAllMatching,
   onBulkStatus,
-  onSnoozeFollowUp, onDoneFollowUp, onOpenBulkEdit, lang,
+  onOpenBulkEdit,
   pager, t }: { clients: Client[]; allClients: Client[]; mode: "table"|"kanban"; setMode: (m: "table"|"kanban") => void; filters: Filters; updateFilter: (k: "query" | "startDate" | "endDate", v: string) => void; setMultiFilter: (k: "status" | "channel" | "location" | "firstContact" | "secondContact", values: string[]) => void; clearAllFilters: () => void;
   /**
    * Replaces the WHOLE filter state at once, for the saved-views bar. Separate
@@ -2377,11 +2517,8 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   /** Per-bucket client counts for the follow-up chip badges. */
   followUpCounts?: Record<string, number>;
   pager?: { page: number; pageCount: number; total: number; loading: boolean; onPage: (p: number) => void; t: TFn }; t: TFn;
-  /** Feature wiring: follow-up triage, stale list, bulk edit, contact actions. */
-  onSnoozeFollowUp?: (id: string, days: number) => void | Promise<void>;
-  onDoneFollowUp?: (id: string) => void | Promise<void>;
+  /** Feature wiring: bulk edit and contact actions. */
   onOpenBulkEdit?: () => void;
-  lang?: string;
 }) {
   // Page controls for the paged table. Supplied only in table mode — kanban
   // renders the whole book at once, so a pager there would be meaningless.
@@ -2393,11 +2530,6 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
   // For the bulk-status dropdown: moving a selection to a stage must name it the
   // same way the rest of the screen does.
   const statusLabels = useStatusLabels();
-  // Insights bar: collapsed by default so the clients page opens on the table,
-  // not on the triage panels. The tab it opens on is remembered while mounted.
-  const [insightsOpen, setInsightsOpen] = useState(false);
-  const [insightsTab, setInsightsTab] = useState<InsightTab>("followup");
-
   return (
     <div className="page">
       <div className="page-header">
@@ -2477,70 +2609,6 @@ function ClientsView({ clients, allClients, mode, setMode, filters, updateFilter
           </button>
         )}
       </div>
-      {/* Insights bar — the three triage panels behind ONE collapsed strip, so the
-          clients page still opens as a clients table. Collapsed by default; the
-          chevron or a tab click expands it, and only the active tab is mounted. */}
-      <section className={`panel insights-bar${insightsOpen ? " is-open" : ""}`}>
-        <div className="insights-bar-head">
-          <button
-            type="button"
-            className="insights-bar-toggle"
-            aria-expanded={insightsOpen}
-            onClick={() => setInsightsOpen((o) => !o)}
-          >
-            <ChevronDown size={14} />
-            <span>{t("insights.title")}</span>
-          </button>
-          <div className="segmented" role="tablist" aria-label={t("insights.title")}>
-            {INSIGHT_TABS.map((k) => (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={insightsTab === k}
-                className={insightsTab === k ? "seg-active" : ""}
-                onClick={() => { setInsightsTab(k); setInsightsOpen(true); }}
-              >
-                {t(INSIGHT_LABEL[k])}
-              </button>
-            ))}
-          </div>
-        </div>
-        {insightsOpen && (
-          <div className="insights-bar-body">
-            {insightsTab === "followup" && onSnoozeFollowUp && onDoneFollowUp && (
-              <FollowUpWorkspace
-                clients={allClients}
-                onSnooze={onSnoozeFollowUp}
-                onDone={onDoneFollowUp}
-                onOpenDetail={onOpenDetail}
-                t={t}
-                lang={lang ?? "en"}
-              />
-            )}
-            {insightsTab === "stale" && (
-              <StaleClientsPanel clients={allClients} onOpenDetail={onOpenDetail} t={t} lang={lang ?? "en"} />
-            )}
-            {/* The feed reads the FULL book in both modes: `clients` is the paged
-                table rows in table mode, and that endpoint carries no activityLog —
-                which is why the table view claimed "No activity yet" while kanban
-                (fed from the same full list) showed entries. */}
-            {insightsTab === "activity" && (
-              <ActivityFeedPanel
-                clients={allClients}
-                onOpenDetail={(id) => { const c = allClients.find(x => x.id === id); if (c) onOpenDetail(c); }}
-                t={t}
-                lang={lang ?? "en"}
-              />
-            )}
-            {/* Mounted only when their tab is open, like the panels above: each
-                fetches on mount, so mounting all five would fire five requests
-                for panels nobody opened. */}
-            {insightsTab === "team" && <TeamReportPanel t={t} lang={lang ?? "en"} />}
-            {insightsTab === "quality" && <DataQualityPanel t={t} canExport={isAdmin} />}
-          </div>
-        )}
-      </section>
       {mode==="table"? <ClientTable clients={clients} totalClients={mode === "table" && pager ? pager.total : clients.length} startIndex={mode === "table" && pager ? (pager.page - 1) * 25 : 0} selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} tableRef={null} columns={columns} onColumnsChange={onColumnsChange} rtl={rtl} t={t}/>:<Kanban clients={clients} updateStatus={updateStatus} updateClientField={updateClientField} onAssigned={onAssigned} selectedIds={selectedIds} onOpenEdit={onOpenEdit} onOpenDelete={onOpenDelete} onOpenDetail={onOpenDetail} isAdmin={isAdmin} canEdit={canEdit} onArchive={onArchive} columns={columns} allStatuses={allStatuses} allChannels={allChannels} allLocations={allLocations ?? []} users={users} onAddStatus={onAddStatus} onAddChannel={onAddChannel} onAddLocation={onAddLocation} t={t}/>}
       {/* Pager. Only in table mode — kanban shows the whole book. */}
       {showPager && pager && (
@@ -2637,4 +2705,3 @@ function Kanban({ clients, updateStatus, updateClientField, onAssigned, selected
 }
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
   return (<label className={wide?"field field-wide":"field"}><span>{label}</span>{children}</label>);}
-

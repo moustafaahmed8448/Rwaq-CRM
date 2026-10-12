@@ -7,6 +7,7 @@ import { sanitizePrefs, type ColumnPrefs } from "./client-columns";
 import { sanitizeMarketingPrefs } from "./marketing-columns";
 import { sanitizeUserPrefs } from "./user-columns";
 import { addBusinessDays, businessDayKey, startOfBusinessDay, startOfBusinessToday } from "./business-days";
+import { UNASSIGNED_CONTACT_FILTER } from "./client-types";
 
 /**
  * Postgres is the single source of truth. Every read and write in the app goes
@@ -45,7 +46,7 @@ export function databaseErrorMessage(error: unknown): string {
  * `"brand"` is the white-label workspace name (see /api/settings/brand): the
  * text beside the logo mark, which adapts the whole app to another company.
  */
-export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "brand" | "optionColors" | "statusBuckets" | "statusLabels";
+export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "brand" | "optionColors" | "statusBuckets" | "statusLabels" | "targets";
 
 export async function readSetting(key: SettingKey): Promise<string[]> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -536,7 +537,25 @@ export function clientWhere(filters: ClientFilters): Prisma.ClientWhereInput {
   // OR-of-equals treatment as status/channel — `in` plus `mode` is not a valid
   // Prisma filter, so it was silently ignored.
   const firstContacts = asList(filters.firstContact);
-  if (firstContacts.length > 0) where.firstContactPerson = { in: firstContacts };
+  if (firstContacts.length > 0) {
+    const includeUnassigned = firstContacts.includes(UNASSIGNED_CONTACT_FILTER);
+    const namedContacts = firstContacts.filter((value) => value !== UNASSIGNED_CONTACT_FILTER);
+    if (includeUnassigned && namedContacts.length > 0) {
+      where.AND = [
+        ...existingAnd(where),
+        {
+          OR: [
+            anyOf("firstContactPerson", namedContacts),
+            { firstContactPerson: "" },
+          ],
+        },
+      ];
+    } else if (includeUnassigned) {
+      where.firstContactPerson = "";
+    } else {
+      where.AND = [...existingAnd(where), anyOf("firstContactPerson", namedContacts)];
+    }
+  }
   const secondContacts = asList(filters.secondContact);
   if (secondContacts.length > 0) where.secondContactPerson = { in: secondContacts };
   /* Which ROLE the assignee holds: `first`, `second`, or neither.
@@ -2223,5 +2242,4 @@ export async function updateUser(
 export async function deleteUser(username: string): Promise<void> {
   await prisma.appUser.deleteMany({ where: { username: username.toLowerCase() } });
 }
-
 

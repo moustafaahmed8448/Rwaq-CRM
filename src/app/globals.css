@@ -431,6 +431,7 @@ button { cursor: pointer; }
    spend, reach and CPA. The old 6-up row could not hold the "other" card, and
    widening the shared rule would have reflowed the marketing page too. */
 .kpi-row-7 { grid-template-columns: repeat(7, 1fr); }
+.kpi-row-8 { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 .funnel-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; margin-bottom: 16px; }
 .funnel-panel { padding: 18px 20px; }
 .funnel-stages { display: flex; align-items: center; justify-content: center; gap: 0; padding: 10px 0; }
@@ -465,13 +466,18 @@ button { cursor: pointer; }
 .roi-head { display: grid; grid-template-columns: 1.3fr .8fr .6fr .7fr .8fr; gap: 8px; padding: 0 4px 8px; border-bottom: 1px solid #eef0f2; font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
 .roi-row { display: grid; grid-template-columns: 1.3fr .8fr .6fr .7fr .8fr; gap: 8px; padding: 9px 4px; border-bottom: 1px solid #f5f5f5; font-size: 11px; color: var(--ink-soft); align-items: center; }
 .roi-row:last-child { border-bottom: none; }
+.channel-roi-panel .roi-head,
+.channel-roi-panel .roi-row { grid-template-columns: 1.3fr .8fr .5fr .7fr .8fr .8fr; }
 .good { color: #16a34a; font-weight: 600; }
 .bad { color: #ef4444; font-weight: 600; }
 @media(max-width:900px){.kpi-row-6{grid-template-columns:repeat(3,1fr)}.funnel-row{grid-template-columns:1fr}.funnel-stages{flex-wrap:wrap;gap:8px}}
 @media(max-width:600px){.kpi-row-6{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:1100px){.kpi-row-7{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:1200px){.kpi-row-8{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:700px){.kpi-row-7{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:700px){.kpi-row-8{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:420px){.kpi-row-7{grid-template-columns:1fr}}
+@media(max-width:420px){.kpi-row-8{grid-template-columns:1fr}}
 
 /* ── Settings page ─────────────────────────────────────── */
 .settings-page { min-height: 100vh; background: var(--paper); }
@@ -1279,6 +1285,33 @@ button { cursor: pointer; }
 .sp-perf-legend span { padding: 2px 7px; border-radius: 6px; font-size: 10px; font-weight: 700; }
 .sp-perf-panel { min-width: 0; }
 .sp-perf-panel .sp-perf-name { font-size: 12px; }
+.sp-perf-legend .sp-velocity { margin-inline-start: auto; color: var(--muted); background: transparent; }
+.sp-perf-velocity { min-width: 42px; text-align: end; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+.stage-location-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.location-performance-panel { min-width: 0; }
+.loc-performance-row { display: flex; flex-direction: column; gap: 7px; width: 100%; padding: 10px 8px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: start; cursor: pointer; }
+.loc-performance-row:last-child { border-bottom: 0; }
+.loc-performance-row:hover { background: var(--paper-2, #f6f7f9); }
+.loc-performance-heading { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.loc-performance-name { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.loc-performance-share { color: var(--muted); font-size: 10px; }
+.loc-performance-heading > strong { min-width: 40px; text-align: end; font-size: 12px; }
+.loc-performance-stack { display: flex; height: 7px; width: 100%; overflow: hidden; border-radius: 8px; background: var(--line); }
+.loc-performance-stack i { display: block; height: 100%; }
+.loc-stack-won { background: #22c55e; }
+.loc-stack-lost { background: #ef4444; }
+.loc-stack-waiting { background: #f59e0b; }
+.loc-stack-other { background: #94a3b8; }
+.loc-performance-counts { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; }
+.loc-performance-counts strong { color: var(--ink); }
+[data-theme="dark"] .loc-performance-row:hover { background: #1c1c1f; }
+@media (max-width: 700px) {
+  .target-progress-row { grid-template-columns: 1fr auto; gap: 8px 12px; }
+  .target-progress-track { grid-column: 1 / -1; grid-row: 2; }
+  .target-progress-meta { grid-column: 2; grid-row: 1; }
+  .attention-strip-title { width: 100%; }
+}
 
 /* Conversion funnel now lives under Top locations in the right column of
    dashboard-grid-2, so the funnel row keeps only its two panels. */
@@ -2883,9 +2916,25 @@ input.ltr-num { text-align: left; }
 .followup-tile span { font-size: 11px; color: var(--muted); }
 .followup-tile.is-danger strong { color: #dc2626; }
 .followup-tile.is-warn strong { color: #b45309; }
+.attention-strip { align-items: center; flex-wrap: wrap; }
+.attention-strip-title { margin-inline-end: 4px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.followup-tile.is-danger:disabled,
+.followup-tile.is-warn:disabled { cursor: wait; opacity: .75; }
 .followup-tile:hover { border-color: var(--azure-300); }
 [data-theme="dark"] .followup-tile.is-danger strong { color: #f87171; }
 [data-theme="dark"] .followup-tile.is-warn strong { color: #fbbf24; }
+[data-theme="dark"] .attention-strip-title { color: #a1a1aa; }
+.target-progress-panel { margin-bottom: 16px; }
+.target-progress-row { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(100px, 2fr) minmax(120px, .7fr); align-items: center; gap: 14px; padding: 10px 0; }
+.target-progress-label, .target-progress-meta { display: flex; flex-direction: column; gap: 3px; }
+.target-progress-label strong { color: var(--ink); font-size: 12px; }
+.target-progress-label span, .target-progress-meta span { color: var(--muted); font-size: 10px; }
+.target-progress-meta { align-items: flex-end; }
+.target-progress-meta strong { color: var(--ink); font-size: 14px; }
+.target-progress-track { height: 8px; overflow: hidden; border-radius: 8px; background: var(--line); }
+.target-progress-track span { display: block; height: 100%; border-radius: inherit; background: #16a34a; transition: width .2s ease; }
+.target-progress-track.is-spend span { background: #7c3aed; }
+[data-theme="dark"] .target-progress-track { background: #2c2c31; }
 /* Follow-up date inside the shared detail panel. */
 .followup-panel { display: inline-flex; align-items: center; gap: 8px; }
 .followup-panel.is-overdue { color: #dc2626; font-weight: 600; }
@@ -3311,6 +3360,33 @@ input.ltr-num { text-align: left; }
 .insights-bar-toggle svg { color: var(--ink-faint); transition: transform .16s ease; }
 .insights-bar.is-open .insights-bar-toggle svg { transform: rotate(180deg); }
 .insights-bar-body { border-top: 1px solid var(--line); padding: 14px 14px 4px; }
+.insights-page-panel { padding: 0; overflow: hidden; }
+.insights-page-tabs {
+  display: flex;
+  justify-content: flex-start;
+  gap: 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 12px 16px;
+}
+.insights-page-tabs button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.insights-page-body { padding: 16px; }
+.insights-page-body > .panel { margin: 0; }
+.status-overview-list { display: grid; gap: 10px; }
+.status-overview-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(100px, 3fr) 44px 44px;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+.status-overview-track { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.status-overview-track i { display: block; height: 100%; background: var(--azure-600); border-radius: inherit; }
+@media (max-width: 600px) {
+  .insights-page-body { padding: 10px; }
+  .status-overview-row { grid-template-columns: minmax(88px, 1fr) minmax(65px, 2fr) 34px 34px; gap: 8px; }
+}
 /* The panels inside keep their content but lose their own card chrome: the bar
    is already a .panel, so a nested .panel would double-border and double-shadow
    and make the strip read as two stacked cards. */

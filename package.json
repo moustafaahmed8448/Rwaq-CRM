@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "prisma:clean": "node -e \"const fs=require('fs'); const path=require('path'); const targets=[path.join(process.cwd(),'node_modules','.prisma'), path.join(process.cwd(),'node_modules','@prisma','client')]; for (const target of targets) { if (!fs.existsSync(target)) continue; try { fs.rmSync(target, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 }); } catch (error) { console.warn('prisma:clean skipped ' + target + ': ' + error.message); } }\"",
+    "build": "npm run prisma:clean && npx prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",

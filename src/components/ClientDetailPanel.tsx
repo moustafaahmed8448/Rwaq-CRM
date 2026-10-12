@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 import StatusPill from "@/components/StatusPill";
 import ContactButtons from "@/components/ContactButtons";
 import { dateLocale, isOverdue } from "@/lib/format";
+import { formatDateTime, useTimeFormat } from "@/lib/time-format";
 import { useOptionColors } from "@/lib/option-colors";
 import { channelLabel } from "@/lib/reporting";
 import { optionColor } from "@/lib/ref-options";
@@ -54,6 +55,7 @@ export default function ClientDetailPanel({
   lang: string;
 }) {
   const router = useRouter();
+  const [timeFormat] = useTimeFormat();
   // Same shared colour map the table, kanban and dashboard resolve through, so
   // a status or channel recoloured on the options page matches here too.
   const colors = useOptionColors();
@@ -97,7 +99,7 @@ export default function ClientDetailPanel({
             </div>
             {client.notes && <div className="meta-item full"><span className="meta-label">{t("form.notes")}</span><p className="notes-text">{client.notes}</p></div>}
             <div className="meta-item full"><span className="meta-label">{t("client.field.created")}</span><span className="meta-value muted">{client.createdAt ? new Date(client.createdAt).toLocaleDateString(dateLocale(lang)) : "—"}</span></div>
-            <div className="meta-item full"><span className="meta-label">{t("detail.lastUpdate")}</span><span className="meta-value muted">{client.lastUpdateDate ? new Date(client.lastUpdateDate).toLocaleString(dateLocale(lang)) : "—"}</span></div>
+            <div className="meta-item full"><span className="meta-label">{t("detail.lastUpdate")}</span><span className="meta-value muted">{client.lastUpdateDate ? formatDateTime(client.lastUpdateDate, lang, timeFormat) : "—"}</span></div>
           </div>
           {/* Only the actions this host can actually perform are rendered, so the
               archived page never offers "Archive" on a client that is already

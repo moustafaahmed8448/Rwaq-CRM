@@ -4,25 +4,26 @@ import { useEffect, useRef, useState } from "react";
 import { useLang } from "@/lib/i18n";
 import { useLogo } from "@/lib/logo";
 import { useBrand } from "@/lib/brand";
-import { dateLocale } from "@/lib/format";
+import { formatDateTime, useTimeFormat } from "@/lib/time-format";
 import { notificationMessage } from "@/lib/reporting";
 import BrandMark from "@/components/BrandMark";
 import {
   Bell, ChevronDown, LayoutDashboard, UsersRound, Layers, Settings, LogOut,
   Sun, Moon, Menu, X as XIcon, Archive, CheckCheck, Globe, Palette, Settings2,
-  UserRound, UserCog, TableProperties,
+  UserRound, UserCog, TableProperties, BarChart3,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import CommandPalette from "@/components/CommandPalette";
 
 export type HeaderUser = { name: string; initials: string; role?: string };
-export type NavTab = "dashboard" | "clients" | "archived" | "marketing" | "metrics" | "users" | "options" | "profile" | "settings";
+export type NavTab = "dashboard" | "clients" | "insights" | "archived" | "marketing" | "metrics" | "users" | "options" | "profile" | "settings";
 
 type Notif = { id: string; message: string; read: boolean; createdAt: string; type?: string; clientName?: string; clientId?: string | null };
 
 const NAV: { key: NavTab; icon: React.ReactNode; adminOnly?: boolean }[] = [
   { key: "dashboard", icon: <LayoutDashboard size={16} /> },
   { key: "clients", icon: <UsersRound size={16} /> },
+  { key: "insights", icon: <BarChart3 size={16} /> },
   { key: "archived", icon: <Archive size={16} /> },
   { key: "marketing", icon: <Layers size={16} /> },
   // The metrics page is the same campaign data as /marketing but as a plain
@@ -65,6 +66,7 @@ export default function AppHeader({
   // The admin-set workspace name (white-label). Falls back to the original
   // brand inside the hook, so an untouched workspace renders exactly as before.
   const { brand } = useBrand();
+  const [timeFormat] = useTimeFormat();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -153,6 +155,7 @@ export default function AppHeader({
   // tab is admin-only in the UI too — /api/options enforces the same rule on
   // every write, so this mirrors the server rather than replacing it.
   const visibleNav = NAV.filter((item) => !item.adminOnly || user.role === "Admin");
+  const desktopNav = visibleNav.filter((item) => !["profile", "options", "settings"].includes(item.key));
   const go = (tab: NavTab) => {
     setMobileMenuOpen(false);
     setNotifOpen(false);
@@ -169,6 +172,7 @@ export default function AppHeader({
        looks similar enough to read as a bug report rather than a routing one. */
     if (tab === "profile") { router.push("/profile"); return; }
     if (tab === "users") { router.push("/users"); return; }
+    if (tab === "insights") { router.push("/insights"); return; }
     if (onNavigate) { onNavigate(tab); return; }
     if (tab === "dashboard") router.push("/");
     else if (tab === "clients") router.push("/?view=clients");
@@ -253,7 +257,7 @@ export default function AppHeader({
         </div>
 
         <nav className="topbar-nav">
-          {visibleNav.map((item) => (
+          {desktopNav.map((item) => (
             <button key={item.key} onClick={() => go(item.key)} className={active === item.key ? "nav-active" : ""} aria-current={active === item.key ? "page" : undefined}>
               {item.icon}{t("nav." + item.key)}
             </button>
@@ -329,12 +333,12 @@ export default function AppHeader({
                     onClick={() => openNotification(n)}
                   >
                     <span className="notif-new-dot" />
-                    <div><strong>{notificationMessage(t, n)}</strong><small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small></div>
+                    <div><strong>{notificationMessage(t, n)}</strong><small>{formatDateTime(n.createdAt, lang, timeFormat)}</small></div>
                   </button>
                 ) : (
                   <div key={n.id} className="notif-item unread">
                     <span className="notif-new-dot" />
-                    <div><strong>{notificationMessage(t, n)}</strong><small>{new Date(n.createdAt).toLocaleString(dateLocale(lang))}</small></div>
+                    <div><strong>{notificationMessage(t, n)}</strong><small>{formatDateTime(n.createdAt, lang, timeFormat)}</small></div>
                   </div>
                 )
               ))}

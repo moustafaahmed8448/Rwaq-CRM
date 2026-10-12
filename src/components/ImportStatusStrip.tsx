@@ -22,7 +22,7 @@
 import { useEffect, useState } from "react";
 import { CloudDownload } from "lucide-react";
 import { useLang } from "@/lib/i18n";
-import { dateLocale } from "@/lib/format";
+import { formatDateTime, useTimeFormat } from "@/lib/time-format";
 
 type SyncRun = {
   status: string;
@@ -48,6 +48,7 @@ const STATUS_KEY: Record<string, string> = {
 
 export default function ImportStatusStrip({ refreshKey = 0 }: { refreshKey?: number }) {
   const { t, lang } = useLang();
+  const [timeFormat] = useTimeFormat();
   // `null` = still loading. `{}` = loaded with nothing to show (or refused).
   const [health, setHealth] = useState<Health | null>(null);
 
@@ -88,7 +89,7 @@ export default function ImportStatusStrip({ refreshKey = 0 }: { refreshKey?: num
         {t("import.lastImport")}{" "}
         {Number.isNaN(new Date(finished).getTime())
           ? "—"
-          : new Date(finished).toLocaleString(dateLocale(lang))}
+          : formatDateTime(finished, lang, timeFormat)}
       </span>
       <span className={run.status === "error" ? "import-status-bad" : ""}>{statusLabel}</span>
       <span className="muted">
