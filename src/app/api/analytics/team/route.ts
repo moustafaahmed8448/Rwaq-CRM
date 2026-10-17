@@ -12,10 +12,18 @@ import { BUCKETS_SETTING_KEY, classifyStatusWith, coerceStatusBuckets } from "@/
  * while another owns 12 â€” the imbalance that makes follow-ups get missed.
  *
  * Deliberately built from `listClients` + `listUsers` rather than new queries:
- * the ownership rule (`firstContactPerson`, exact match) and the scoping rule
- * (`assigneeScope`) are the same ones every other screen uses, so these numbers
- * cannot disagree with the clients table. `classifyStatusWith` is what the funnel
- * uses too, so an admin's status-bucket choice is honoured here as well.
+ * the ownership rule (exact match on the chosen contact field) and the scoping
+ * rule (`assigneeScope`) are the same ones every other screen uses, so these
+ * numbers cannot disagree with the clients table. `classifyStatusWith` is what
+ * the funnel uses too, so an admin's status-bucket choice is honoured here as well.
+ *
+ * Two optional query params, both handled by that same shared machinery:
+ *   - `contact=first|second` picks which contact field defines an owner.
+ *     Default `first` — the field the clients table, the export and the
+ *     reassignment endpoint treat as the owner.
+ *   - `from` / `to` (YYYY-MM-DD) bound `createdAt` through listClients'
+ *     createdFrom/createdTo: the same window the dashboard period uses, with
+ *     business-day boundaries and the end date included in full.
  *
  * Read-only and scoped: a Sales/CRM user gets their OWN row only. Admin and
  * Visitor see the whole team.
@@ -51,8 +59,16 @@ export async function GET(request: NextRequest) {
     if (!session) return unauthorized();
 
     const scope = assigneeScope(session);
+
+    const query = request.nextUrl.searchParams;
+    // Anything but an explicit `contact=second` falls back to the 1st contact, so
+    // a missing or garbled param degrades to the historical report, not a 500.
+    const contact: "first" | "second" = query.get("contact") === "second" ? "second" : "first";
+    const createdFrom = day(query.get("from"));
+    const createdTo = day(query.get("to"));
+
     const [clients, users, bucketsRaw] = await Promise.all([
-      listClients({ includeArchived: true, assignee: scope }),
+      listClients({ includeArchived: true, assignee: scope, createdFrom, createdTo }),
       listUsers(),
       readSettingObject(BUCKETS_SETTING_KEY),
     ]);
@@ -79,9 +95,10 @@ export async function GET(request: NextRequest) {
     };
 
     for (const client of clients) {
-      // Ownership is the 1st contact, the same field the clients table, the
-      // export and the reassignment endpoint treat as the owner.
-      const owner = String(client.firstContactPerson ?? "").trim();
+      // Ownership is an exact match on the chosen contact field — the 1st by
+      // default, the same field the clients table, the export and the
+      // reassignment endpoint treat as the owner.
+      const owner = String((contact === "second" ? client.secondContactPerson : client.firstContactPerson) ?? "").trim();
       if (!owner) continue;
       const row = rowFor(owner);
       row.total += 1;
@@ -128,8 +145,19 @@ export async function GET(request: NextRequest) {
       source: "postgres",
       // Echoed so the UI can say whether it is looking at one rep or the team.
       scope: scope ?? null,
+      // Echoed so the panel can rebuild the exact window it just asked for.
+      contact,
+      from: createdFrom ?? null,
+      to: createdTo ?? null,
     });
   } catch (error) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }
+}
+
+/** `YYYY-MM-DD` or undefined — the same guard /api/crm/clients uses, so a
+ *  malformed bound silently means "no bound" instead of failing the report. */
+function day(value: string | null): string | undefined {
+  const raw = (value ?? "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
 }

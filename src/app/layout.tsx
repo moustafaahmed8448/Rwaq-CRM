@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,8 +8,14 @@ export const metadata: Metadata = {
      workspace during first paint. */
   title: "CRM",
   description: "Weekly marketing ROI and CRM workflow dashboard",
-  // Matches --navy so the browser chrome (address bar, notch) blends with the
-  // dark theme's base rather than flashing a separate grey.
+};
+
+/* themeColor is a VIEWPORT field, not a metadata one — Next 16 prints
+   "Unsupported metadata themeColor is configured in metadata export" and drops
+   the meta tag when it lives in `metadata`. Matches --navy so the browser
+   chrome (address bar, notch) blends with the dark theme's base rather than
+   flashing a separate grey. */
+export const viewport: Viewport = {
   themeColor: "#13223C",
 };
 

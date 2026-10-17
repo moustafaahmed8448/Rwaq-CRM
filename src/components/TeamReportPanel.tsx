@@ -10,6 +10,12 @@
  *
  * Read-only and self-scoping: the API returns one row for a rep and the whole
  * team for an admin, so nothing here needs a role check.
+ *
+ * The two controls above the table are passed straight through as query params:
+ * which contact field counts as the owner (1st or 2nd) and an optional created-
+ * date window. The date bounds ride the API's createdFrom/createdTo — the same
+ * window the dashboard period uses — so this report and the dashboard can never
+ * disagree about what "From–To" means.
  */
 import { useEffect, useState } from "react";
 import { AlertTriangle, Users } from "lucide-react";
@@ -37,16 +43,31 @@ type TFn = (key: string, vars?: Record<string, string | number>) => string;
 /** Busiest-book share above which the row is called out. */
 const LOAD_FLAG = 0.4;
 
+/** Which contact field the report treats as the owner of a client. */
+type ContactField = "first" | "second";
+
 export default function TeamReportPanel({ t, lang }: { t: TFn; lang: string }) {
   const [owners, setOwners] = useState<Owner[] | null>(null);
   const [error, setError] = useState("");
+  const [contact, setContact] = useState<ContactField>("first");
+  // Both empty by default: the API treats a missing bound as "all of time".
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   useEffect(() => {
     let active = true;
-    fetch("/api/analytics/team", { cache: "no-store" })
+    const query = new URLSearchParams({ contact });
+    if (from) query.set("from", from);
+    if (to) query.set("to", to);
+    fetch(`/api/analytics/team?${query.toString()}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
       .then((d: { owners?: Owner[] }) => {
-        if (active) setOwners(d.owners ?? []);
+        if (!active) return;
+        // Cleared here so a failed refresh doesn't mask the next success.
+        setError("");
+        // Previous rows stay on screen during a refetch; only the very first
+        // load shows the loading line, so changing a filter never blanks the table.
+        setOwners(d.owners ?? []);
       })
       .catch(() => {
         if (active) setError(t("errors.generic"));
@@ -54,7 +75,7 @@ export default function TeamReportPanel({ t, lang }: { t: TFn; lang: string }) {
     return () => {
       active = false;
     };
-  }, [t]);
+  }, [t, contact, from, to]);
 
   if (error) return <p className="muted" style={{ fontSize: 12 }}>{error}</p>;
   if (!owners) return <p className="muted" style={{ fontSize: 12 }}>{t("common.loading")}</p>;
@@ -76,11 +97,42 @@ export default function TeamReportPanel({ t, lang }: { t: TFn; lang: string }) {
         </span>
       </div>
 
+      <div className="team-controls">
+        <div className="segmented" role="group" aria-label={t("team.groupBy")}>
+          <button
+            type="button"
+            className={contact === "first" ? "seg-active" : ""}
+            aria-pressed={contact === "first"}
+            title={t("form.firstContact")}
+            onClick={() => setContact("first")}
+          >
+            {t("th.first")}
+          </button>
+          <button
+            type="button"
+            className={contact === "second" ? "seg-active" : ""}
+            aria-pressed={contact === "second"}
+            title={t("form.secondContact")}
+            onClick={() => setContact("second")}
+          >
+            {t("th.second")}
+          </button>
+        </div>
+        <div className="metrics-date">
+          <label htmlFor="team-date-from">{t("common.from")}</label>
+          <input id="team-date-from" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+        </div>
+        <div className="metrics-date">
+          <label htmlFor="team-date-to">{t("common.to")}</label>
+          <input id="team-date-to" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+        </div>
+      </div>
+
       <div className="team-table-wrap">
         <table className="team-table">
           <thead>
             <tr>
-              <th>{t("th.first")}</th>
+              <th>{contact === "second" ? t("th.second") : t("th.first")}</th>
               <th>{t("team.role")}</th>
               <th className="r-num">{t("team.leads")}</th>
               <th className="r-num">{t("team.won")}</th>

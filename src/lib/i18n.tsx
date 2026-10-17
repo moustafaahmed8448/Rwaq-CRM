@@ -986,6 +986,8 @@ const ar: Record<string, string> = {
   "team.empty": "لا يوجد مسؤولون مع عملاء بعد.",
   "team.loadHint": "هذا المسؤول يحمل أكثر من ٤٠٪ من العملاء الأحياء.",
   "team.notOnTeam": "هذا الاسم غير موجود في فريق العمل.",
+  // Accessible label for the 1st/2nd contact toggle above the team table.
+  "team.groupBy": "التجميع حسب جهة التواصل",
   // Dashboard follow-up actions and conversion speed.
   "dash.attentionTitle": "ما يحتاج إلى متابعة",
   "dash.unassigned": "عملاء بلا مسؤول",
@@ -2016,6 +2018,8 @@ const en: Record<string, string> = {
   "team.empty": "No owners have clients yet.",
   "team.loadHint": "This owner carries more than 40% of the live book.",
   "team.notOnTeam": "This name is not on the team roster.",
+  // Accessible label for the 1st/2nd contact toggle above the team table.
+  "team.groupBy": "Group by contact",
   // Dashboard follow-up actions and conversion speed.
   "dash.attentionTitle": "What needs attention",
   "dash.unassigned": "Unassigned clients",

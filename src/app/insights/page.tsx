@@ -61,8 +61,13 @@ export default function InsightsPage() {
         setUser(data.user);
       })
       .catch(() => router.replace("/login"));
+    // Only ever set TRUE here, exactly like every other page: the [darkMode]
+    // effect below writes `rwaq-dark=0` + data-theme=light on its first (mount)
+    // run before this state flushes, so an unconditional `setDarkMode(x === "1")`
+    // would re-read that just-clobbered "0" on a StrictMode re-run and pin the
+    // page to light for the rest of the visit.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDarkMode(localStorage.getItem("rwaq-dark") === "1");
+    if (localStorage.getItem("rwaq-dark") === "1") setDarkMode(true);
   }, [router]);
 
   useEffect(() => {
