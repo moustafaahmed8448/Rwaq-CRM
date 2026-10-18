@@ -59,7 +59,6 @@ const MESSAGES: Record<string, string> = {
   "Read-only role": "errors.readOnly",
   "Current password is incorrect": "settings.wrongPassword",
   "Current and new password are required": "settings.passwordFieldsRequired",
-  "The demo account cannot change its password": "settings.demoNoPassword",
   "Too many attempts": "errors.tooManyAttempts",
   "Cannot remove a built-in location": "errors.builtinLocation",
   "Cannot remove a built-in channel": "errors.builtinChannel",

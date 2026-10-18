@@ -46,7 +46,7 @@ export function databaseErrorMessage(error: unknown): string {
  * `"brand"` is the white-label workspace name (see /api/settings/brand): the
  * text beside the logo mark, which adapts the whole app to another company.
  */
-export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "brand" | "optionColors" | "statusBuckets" | "statusLabels" | "targets";
+export type SettingKey = "channels" | "statuses" | "locations" | "logo" | "brand" | "optionColors" | "statusBuckets" | "statusLabels" | "targets" | "menuLocation";
 
 export async function readSetting(key: SettingKey): Promise<string[]> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -2242,4 +2242,3 @@ export async function updateUser(
 export async function deleteUser(username: string): Promise<void> {
   await prisma.appUser.deleteMany({ where: { username: username.toLowerCase() } });
 }
-

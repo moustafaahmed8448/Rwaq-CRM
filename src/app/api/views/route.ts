@@ -14,8 +14,7 @@ import type { SavedView, SavedViewFilters } from "@/lib/db";
  */
 async function currentUsername(request: NextRequest): Promise<string | null> {
   const user = await getSessionUser(request);
-  // The built-in demo account has no AppUser row and so nowhere to persist to.
-  if (!user?.username || user.username === "amira") return null;
+  if (!user?.username) return null;
   return user.username;
 }
 
@@ -23,7 +22,7 @@ export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   const username = await currentUsername(request);
   if (!username) {
-    return NextResponse.json({ error: "Demo session cannot save views" }, { status: 400 });
+    return NextResponse.json({ error: "A valid user session is required" }, { status: 400 });
   }
   try {
     return NextResponse.json({ views: await readSavedViews(username) });
@@ -36,7 +35,7 @@ export async function POST(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   const username = await currentUsername(request);
   if (!username) {
-    return NextResponse.json({ error: "Demo session cannot save views" }, { status: 400 });
+    return NextResponse.json({ error: "A valid user session is required" }, { status: 400 });
   }
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -74,7 +73,7 @@ export async function DELETE(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   const username = await currentUsername(request);
   if (!username) {
-    return NextResponse.json({ error: "Demo session cannot save views" }, { status: 400 });
+    return NextResponse.json({ error: "A valid user session is required" }, { status: 400 });
   }
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;

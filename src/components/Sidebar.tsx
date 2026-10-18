@@ -24,16 +24,22 @@ const NAV: { key: NavTab; icon: React.ReactNode; adminOnly?: boolean }[] = [
 ];
 
 export default function Sidebar({
-  user, active,
+  user, active, onLogout, onNavigate,
 }: {
   user: { name: string; initials: string; role?: string };
   active?: NavTab;
+  onLogout: () => void;
+  onNavigate?: (tab: NavTab) => void;
 }) {
   const router = useRouter();
   const { t } = useLang();
   const visibleNav = NAV.filter((item) => !item.adminOnly || user.role === "Admin");
 
   const go = (key: NavTab) => {
+    if (onNavigate && (key === "dashboard" || key === "clients")) {
+      onNavigate(key);
+      return;
+    }
     if (key === "profile") { router.push("/profile"); return; }
     if (key === "users") { router.push("/users"); return; }
     if (key === "insights") { router.push("/insights"); return; }
@@ -47,7 +53,7 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar app-sidebar" aria-label={t("header.menu")}>
       <div className="sidebar-wrap">
         <nav className="sidebar-nav">
           {visibleNav.map((item) => (
@@ -64,7 +70,7 @@ export default function Sidebar({
           ))}
         </nav>
         <div className="sidebar-footer">
-          <button type="button" className="sidebar-logout" onClick={() => router.push("/login")}>
+          <button type="button" className="sidebar-logout" onClick={onLogout}>
             <LogOut size={16} />
             <span>{t("header.signOut")}</span>
           </button>

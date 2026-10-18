@@ -7,6 +7,8 @@ import { useBrand } from "@/lib/brand";
 import { formatDateTime, useTimeFormat } from "@/lib/time-format";
 import { notificationMessage } from "@/lib/reporting";
 import BrandMark from "@/components/BrandMark";
+import Sidebar from "@/components/Sidebar";
+import { useMenuLocation } from "@/lib/menu-location";
 import {
   Bell, ChevronDown, LayoutDashboard, UsersRound, Layers, Settings, LogOut,
   Sun, Moon, Menu, X as XIcon, Archive, CheckCheck, Globe, Palette, Settings2,
@@ -62,6 +64,7 @@ export default function AppHeader({
 }) {
   const router = useRouter();
   const { t, lang, setLang } = useLang();
+  const { menuLocation } = useMenuLocation();
   const { logo } = useLogo();
   // The admin-set workspace name (white-label). Falls back to the original
   // brand inside the hook, so an untouched workspace renders exactly as before.
@@ -256,13 +259,15 @@ export default function AppHeader({
           {badge}
         </div>
 
-        <nav className="topbar-nav">
-          {desktopNav.map((item) => (
-            <button key={item.key} onClick={() => go(item.key)} className={active === item.key ? "nav-active" : ""} aria-current={active === item.key ? "page" : undefined}>
-              {item.icon}{t("nav." + item.key)}
-            </button>
-          ))}
-        </nav>
+        {menuLocation === "header" && (
+          <nav className="topbar-nav">
+            {desktopNav.map((item) => (
+              <button key={item.key} onClick={() => go(item.key)} className={active === item.key ? "nav-active" : ""} aria-current={active === item.key ? "page" : undefined}>
+                {item.icon}{t("nav." + item.key)}
+              </button>
+            ))}
+          </nav>
+        )}
 
         <div className="topbar-right">
           {/* Global client search. Mounted here rather than on each page so it is
@@ -375,6 +380,8 @@ export default function AppHeader({
           </div>
         </div>
       </header>
+
+      {menuLocation === "sidebar" && <Sidebar user={user} active={active} onLogout={logout} onNavigate={go} />}
 
       {/* Responsive mobile menu drawer */}
       <div

@@ -41,7 +41,11 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Invalid menu location" }, { status: 400 });
   }
 
-  const menuLocation = coerceMenuLocation((body as Record<string, unknown>).menuLocation);
+  const requestedLocation = (body as Record<string, unknown>).menuLocation;
+  if (requestedLocation !== "header" && requestedLocation !== "sidebar") {
+    return NextResponse.json({ error: "Invalid menu location" }, { status: 400 });
+  }
+  const menuLocation: MenuLocation = requestedLocation;
   try {
     await writeSettingObject("menuLocation", { menuLocation });
     return NextResponse.json({ ok: true, menuLocation });

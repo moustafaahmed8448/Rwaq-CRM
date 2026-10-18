@@ -91,6 +91,7 @@ type LocationPerformance = {
   winRate: number | null;
   share: number;
 };
+type ChannelPerformance = Omit<LocationPerformance, "location"> & { channel: string };
 
 const MONEY = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const CHANNEL_VALUES = ["FACEBOOK", "INSTAGRAM", "X", "TIKTOK", "GOOGLE_ADS", "WHATSAPP", "CALLS", "SALES"] as const;
@@ -348,6 +349,7 @@ export default function Home() {
         locationCounts?: Record<string, number>;
         locationRows?: LocationPerformance[];
         channelCounts?: Record<string, number>;
+        channelRows?: ChannelPerformance[];
         velocity?: DashboardVelocity;
         totals?: { total: number; won: number; lost: number; waiting: number; other: number };
       }
@@ -496,8 +498,7 @@ export default function Home() {
     fetch("/api/auth/me").then(async r => { if (!r.ok) { router.replace("/login"); return null; } return r.json(); }).then(d => {
       if (!d?.user) return;
       setUser(d.user);
-      // Adopt the signed-in user's saved column layout. The demo session has no
-      // row, so it keeps the registry defaults.
+      // Adopt the signed-in user's saved column layout.
       if (d.user.clientColumns) hydrate(d.user.clientColumns);
     });
     // `hydrate` is a stable useCallback (its only dep is the module-level
@@ -577,6 +578,7 @@ export default function Home() {
           locationCounts: d.locationCounts,
           locationRows: d.locationRows,
           channelCounts: d.channelCounts,
+          channelRows: d.channelRows,
           velocity: d.velocity,
           totals: d.totals,
         });
@@ -1402,8 +1404,14 @@ const exportDashboard = () => {
         darkMode={darkMode}
         onToggleDark={() => setDarkMode(d => !d)}
         onNavigate={(tab) => {
-          if (tab === "dashboard") setView("dashboard");
-          else if (tab === "clients") setView("clients");
+         if (tab === "dashboard") {
+           setView("dashboard");
+          window.history.replaceState(null, "", "/");
+         }
+         else if (tab === "clients") {
+           setView("clients");
+          window.history.replaceState(null, "", "/?view=clients");
+         }
           else if (tab === "archived") router.push("/archived");
           else if (tab === "marketing") router.push("/marketing");
           else if (tab === "insights") router.push("/insights");
@@ -1735,7 +1743,7 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
    * panel, funnel, conversion rate and location bars describe the same window as
    * the KPI cards rather than all time.
    */
-  periodBreakdowns?: { statusCounts?: Record<string, number>; locationCounts?: Record<string, number>; locationRows?: LocationPerformance[]; channelCounts?: Record<string, number>; velocity?: DashboardVelocity; totals?: { total: number; won: number; lost: number; waiting: number; other: number } };
+  periodBreakdowns?: { statusCounts?: Record<string, number>; locationCounts?: Record<string, number>; locationRows?: LocationPerformance[]; channelCounts?: Record<string, number>; channelRows?: ChannelPerformance[]; velocity?: DashboardVelocity; totals?: { total: number; won: number; lost: number; waiting: number; other: number } };
   onPeriodChange: (k: PeriodKind) => void; onCustomRange: (from: string, to: string) => void; customFrom: string; customTo: string; periodLoading: boolean;
   /** Status/channel/location narrowing, applied on top of the period. */
   dashFilters: { status: string[]; channel: string[]; location: string[] };
@@ -1822,6 +1830,32 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
       share: periodTotal > 0 ? total / periodTotal : 0,
     };
   }), [periodCounts, locationEntries, clients, statusBuckets, periodTotal]);
+  const channelOutcomes = useMemo(() => {
+    const rows = periodCounts?.channelRows ?? (() => {
+      const grouped = new Map<string, ChannelPerformance>();
+      for (const client of clients) {
+        if (!client.acquisitionChannel) continue;
+        const row = grouped.get(client.acquisitionChannel) ?? {
+          channel: client.acquisitionChannel,
+          total: 0,
+          won: 0,
+          lost: 0,
+          waiting: 0,
+          other: 0,
+          winRate: null,
+          share: 0,
+        };
+        const outcome = classifyStatusWith(client.status, statusBuckets);
+        row.total += 1;
+        row[outcome === "progress" ? "waiting" : outcome] += 1;
+        row.winRate = row.won + row.lost > 0 ? row.won / (row.won + row.lost) : null;
+        row.share = periodTotal > 0 ? row.total / periodTotal : 0;
+        grouped.set(client.acquisitionChannel, row);
+      }
+      return [...grouped.values()];
+    })();
+    return Object.fromEntries(rows.map(({ channel, ...row }) => [channel, row]));
+  }, [periodCounts, clients, statusBuckets, periodTotal]);
   const velocity = periodCounts?.velocity ?? {
     overall: { count: 0, averageDays: null, medianDays: null },
     byOwner: {},
@@ -2388,8 +2422,47 @@ function Dashboard({ metrics, totalSpend, totalReach, won, lost, waiting, unclas
         )}
       </section>
 
-      {/* Conversion funnel, retained below the recent-client table. */}
-      <div className="dashboard-grid-2">
+      {/* Channel performance and follow-up funnel share a row. */}
+      <div className="dashboard-grid-2 channel-followup-grid">
+        <section className="panel location-performance-panel">
+          <div className="panel-heading">
+            <h3>{t("channel.performance")}</h3>
+            <span className="muted" style={{ fontSize: 11 }}>{t("channel.clients", { n: periodTotal })}</span>
+          </div>
+          {Object.entries(channelOutcomes).length === 0 && <div className="empty-state">{t("channel.noData")}</div>}
+          {Object.entries(channelOutcomes)
+            .sort((a, b) => b[1].total - a[1].total)
+            .map(([channel, row]) => (
+              <button
+                type="button"
+                className="loc-performance-row"
+                key={channel}
+                onClick={() => setDashFilter("channel", [channel])}
+                title={t("channel.clickFilter")}
+              >
+                <span className="loc-performance-heading">
+                  <span className="loc-performance-name">
+                    <i className="dot" style={{ background: optionColor("channels", channel, colors) }} />
+                    {channelLabel(t, channel)}
+                  </span>
+                  <span className="loc-performance-share">{Math.round(row.total / Math.max(periodTotal, 1) * 100)}% {t("channel.share")}</span>
+                  <strong>{row.won + row.lost > 0 ? `${Math.round((row.won / (row.won + row.lost)) * 100)}%` : "—"}</strong>
+                </span>
+                <span className="loc-performance-stack" aria-label={t("roi.breakdown", {
+                  won: row.won, lost: row.lost, waiting: row.waiting, other: row.other, cpa: "—",
+                })}>
+                  <i className="loc-stack-won" style={{ width: `${row.total ? (row.won / row.total) * 100 : 0}%` }} />
+                  <i className="loc-stack-lost" style={{ width: `${row.total ? (row.lost / row.total) * 100 : 0}%` }} />
+                  <i className="loc-stack-waiting" style={{ width: `${row.total ? (row.waiting / row.total) * 100 : 0}%` }} />
+                  <i className="loc-stack-other" style={{ width: `${row.total ? (row.other / row.total) * 100 : 0}%` }} />
+                </span>
+                <span className="loc-performance-counts">
+                  {t("channel.outcomes", { won: row.won, lost: row.lost, waiting: row.waiting })}
+                  <strong>{num(row.total)}</strong>
+                </span>
+              </button>
+            ))}
+        </section>
         <section className="panel funnel-panel">
           <div className="panel-heading">
             <h3>{t("funnel.newTitle")}</h3>

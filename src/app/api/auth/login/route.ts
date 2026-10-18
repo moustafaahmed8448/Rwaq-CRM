@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { DEMO_SESSION, SESSION_COOKIE, normalizeRole, sessionCookieOptions, sessionCookieValue } from "@/lib/auth";
+import { SESSION_COOKIE, normalizeRole, sessionCookieOptions, sessionCookieValue } from "@/lib/auth";
 import { databaseErrorMessage, findUser } from "@/lib/db";
 import { ensureUsersBootstrapped } from "@/lib/bootstrap";
 import { checkLock, clearFailures, recordFailure } from "@/lib/login-throttle";
@@ -24,16 +24,6 @@ export async function POST(request: NextRequest) {
       { error: "Too many attempts", retryAfterMinutes: minutes },
       { status: 429, headers: { "Retry-After": String(Math.ceil(lockedFor / 1000)) } },
     );
-  }
-
-  // Built-in demo user
-  if (username === "amira" && password === "rwaq2026") {
-    clearFailures(username, ip);
-    const response = NextResponse.json({
-      user: { name: "Amira Mansour", initials: "AM", role: "Admin" },
-    });
-    response.cookies.set(SESSION_COOKIE, DEMO_SESSION, sessionCookieOptions);
-    return response;
   }
 
   try {
@@ -69,4 +59,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: databaseErrorMessage(error) }, { status: 500 });
   }
 }
-

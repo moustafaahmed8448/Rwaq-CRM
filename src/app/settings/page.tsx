@@ -7,6 +7,7 @@ import { apiErrorMessage } from "@/lib/api-errors";
 import { readLogoFile, useLogo } from "@/lib/logo";
 import { useBrand } from "@/lib/brand";
 import { initialsOf, readAvatarFile } from "@/lib/avatar";
+import { useMenuLocation, type MenuLocation } from "@/lib/menu-location";
 import { roleLabel } from "@/lib/reporting";
 import { downloadFile } from "@/lib/download";
 import { useTimeFormat } from "@/lib/time-format";
@@ -90,6 +91,18 @@ export default function SettingsPage() {
   const [followUpReminders, setFollowUpReminders] = useState<boolean | null>(null);
   const [savingNotif, setSavingNotif] = useState(false);
   const [timeFormat, setTimeFormat] = useTimeFormat();
+  // Workspace-wide navigation placement: "header" (topbar tabs) or "sidebar".
+  const { menuLocation, setMenuLocation: setMenuLocationState } = useMenuLocation();
+  const [menuLocationDraft, setMenuLocationDraft] = useState<MenuLocation>("header");
+  const [savingMenuLocation, setSavingMenuLocation] = useState(false);
+  const [menuSaved, setMenuSaved] = useState(false);
+  const [menuErr, setMenuErr] = useState("");
+
+  // Keep the draft in sync with the loaded value.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMenuLocationDraft(menuLocation);
+  }, [menuLocation]);
 
   const loadUsers = async () => {
     const r = await fetch("/api/users");
@@ -350,6 +363,33 @@ export default function SettingsPage() {
       setTargetsErr(t("errors.generic"));
     } finally {
       setSavingTargets(false);
+    }
+  };
+
+  const saveMenuLocation = async () => {
+    setError(""); setMenuErr(""); setMenuSaved(false);
+    setSavingMenuLocation(true);
+    try {
+      const response = await fetch("/api/settings/menu-location", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ menuLocation: menuLocationDraft }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: unknown };
+        setMenuErr(apiErrorMessage(t, body.error));
+        return;
+      }
+      const data = await response.json() as { menuLocation?: unknown };
+      const savedLocation: MenuLocation = data.menuLocation === "sidebar" ? "sidebar" : "header";
+      setMenuLocationState(savedLocation);
+      setMenuLocationDraft(savedLocation);
+      setMenuSaved(true);
+      setTimeout(() => setMenuSaved(false), 2500);
+    } catch {
+      setMenuErr(t("errors.generic"));
+    } finally {
+      setSavingMenuLocation(false);
     }
   };
 
@@ -729,6 +769,39 @@ export default function SettingsPage() {
                 </Field>
               </div>
               <p id="time-format-hint" className="muted" style={{ fontSize: 11 }}>{t("settings.timeFormatHint")}</p>
+              {user.role === "Admin" && (
+                <div className="menu-location-preference">
+                  <div className="section-header">
+                    <h2>{t("settings.menuLocation")}</h2>
+                    <span className="section-sub">{t("settings.menuLocationSubtitle")}</span>
+                  </div>
+                  <div className="form-grid-2">
+                    <Field label={t("settings.menuLocation")}>
+                      <select
+                        value={menuLocationDraft}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (value === "header" || value === "sidebar") setMenuLocationDraft(value);
+                        }}
+                      >
+                        <option value="header">{t("settings.menuLocationHeader")}</option>
+                        <option value="sidebar">{t("settings.menuLocationSidebar")}</option>
+                      </select>
+                    </Field>
+                  </div>
+                  <div className="logo-actions" style={{ marginTop: 8 }}>
+                    <button
+                      className="btn-primary"
+                      onClick={saveMenuLocation}
+                      disabled={savingMenuLocation || menuLocationDraft === menuLocation}
+                    >
+                      <Save size={14} />{savingMenuLocation ? t("settings.saving") : t("common.saveChanges")}
+                    </button>
+                    {menuSaved && <div className="settings-success">{t("settings.menuSaved")}</div>}
+                    {menuErr && <div className="settings-error">{menuErr}</div>}
+                  </div>
+                </div>
+              )}
             </section>
             {/* ── Workspace name (admin only) ──
                 The white-label counterpart of the dashboard logo. One Setting

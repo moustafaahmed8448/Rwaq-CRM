@@ -23,8 +23,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
   const user = await getSessionUser(request);
-  // The built-in demo account has no database row to key preferences on.
-  if (!user?.username || user.username === "amira") return unauthorized();
+  if (!user?.username) return unauthorized();
 
   const body = await request.json().catch(() => ({}));
   // Only the known key is read, and only a real boolean is accepted, so an

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DEMO_SESSION, SESSION_COOKIE, SESSION_PREFIX, normalizeRole } from "@/lib/auth";
+import { SESSION_COOKIE, SESSION_PREFIX, normalizeRole } from "@/lib/auth";
 import { databaseErrorMessage, findUser, saveUserColumnPrefs, updateUser } from "@/lib/db";
 import { readAvatar } from "@/lib/avatar-payload";
 import type { ColumnPrefs } from "@/lib/client-columns";
@@ -9,14 +9,6 @@ export async function GET(request: NextRequest) {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
 
   if (!session) return NextResponse.json({ authenticated: false }, { status: 401 });
-
-  // Built-in demo user
-  if (session === DEMO_SESSION) {
-    return NextResponse.json({
-      authenticated: true,
-      user: { name: "Amira Mansour", initials: "AM", role: "Admin", email: "demo@rwaq.app", language: "ar" },
-    });
-  }
 
   if (session.startsWith("rwaq-session-")) {
     const username = session.slice("rwaq-session-".length);
@@ -82,10 +74,6 @@ export async function PATCH(request: NextRequest) {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // The built-in demo account has no AppUser row, so there is nowhere to save.
-  if (session === DEMO_SESSION) {
-    return NextResponse.json({ error: "Demo session cannot save preferences" }, { status: 400 });
-  }
   if (!session.startsWith(SESSION_PREFIX)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -30,21 +30,7 @@ export async function PATCH(request: NextRequest) {
     avatar = read;
   }
 
-  // The built-in demo account has no database row — accept the change in-memory.
-  if (!sessionUser.username || sessionUser.username === "amira") {
-    return NextResponse.json({
-      ok: true,
-      // The demo account has nowhere to persist a photo, so it is NOT echoed as
-      // stored. Saying otherwise is what made a save look successful on an
-      // account that can never hold one.
-      user: {
-        name: name || sessionUser.name,
-        email: email || sessionUser.email,
-        ...(language === "ar" || language === "en" ? { language } : {}),
-      },
-      ...(avatar ? { avatar: null } : {}),
-    });
-  }
+  if (!sessionUser.username) return unauthorized();
 
   try {
     const updated = await updateUser(sessionUser.username, {

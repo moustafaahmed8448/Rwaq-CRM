@@ -46,7 +46,6 @@ export function assigneeScope(user: SessionUser | null): string | undefined {
 
 export const SESSION_COOKIE = "rwaq_session";
 export const SESSION_PREFIX = "rwaq-session-";
-export const DEMO_SESSION = "rwaq-demo-session";
 
 /** Cookie value for a given username. */
 export const sessionCookieValue = (username: string) =>
@@ -70,7 +69,6 @@ export type SessionUser = { username?: string; name: string; initials: string; r
 export async function isAuthenticated(request: NextRequest): Promise<boolean> {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
   if (!session) return false;
-  if (session === DEMO_SESSION) return true;
   if (session.startsWith(SESSION_PREFIX)) {
     const username = session.slice(SESSION_PREFIX.length);
     try {
@@ -85,9 +83,6 @@ export async function isAuthenticated(request: NextRequest): Promise<boolean> {
 
 export async function getSessionUser(request: NextRequest): Promise<SessionUser | null> {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
-  if (session === DEMO_SESSION) {
-    return { username: "amira", name: "Amira Mansour", initials: "AM", role: "Admin", email: "demo@rwaq.app" };
-  }
   if (session?.startsWith(SESSION_PREFIX)) {
     const username = session.slice(SESSION_PREFIX.length);
     try {
@@ -123,4 +118,3 @@ export const sessionCookieOptions = {
   maxAge: 60 * 60 * 8,
   path: "/",
 };
-

@@ -375,6 +375,20 @@ export async function GET(request: NextRequest) {
       const key = client.acquisitionChannel;
       if (key) channelCounts[key] = (channelCounts[key] ?? 0) + 1;
     }
+    const channelRows = Object.entries(channelCounts).map(([channel, total]) => {
+      const channelClients = periodClients.filter((client) => client.acquisitionChannel === channel);
+      const { won, lost, waiting, other } = bucket(channelClients);
+      return {
+        channel,
+        total,
+        won,
+        lost,
+        waiting,
+        other,
+        winRate: won + lost > 0 ? won / (won + lost) : null,
+        share: periodClients.length > 0 ? total / periodClients.length : 0,
+      };
+    }).sort((a, b) => b.total - a.total || a.channel.localeCompare(b.channel, "ar"));
 
     /**
      * Outcome-split timeline for the dashboard trend chart.
@@ -458,6 +472,7 @@ export async function GET(request: NextRequest) {
       locationCounts,
       locationRows,
       channelCounts,
+      channelRows,
       velocity,
       targets: coerceMonthlyTargets(rawTargets),
       campaignNames,

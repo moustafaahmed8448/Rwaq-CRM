@@ -11,9 +11,8 @@ import { databaseErrorMessage, findUser, updateUser } from "@/lib/db";
  * verifies the current password with bcrypt before writing the new hash, so a
  * stolen session cookie alone cannot change the password.
  *
- * The built-in demo account (`amira`) has no database row and therefore no hash
- * to check against or rewrite, so it is rejected with an explicit message rather
- * than a confusing "incorrect current password".
+ * Accounts must have a database row so the current password can be verified
+ * before the new hash is stored.
  */
 export async function POST(request: NextRequest) {
   if (!(await isAuthenticated(request))) return unauthorized();
@@ -31,10 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
   }
 
-  // The demo account is in-memory only — there is no row to update.
-  if (!sessionUser.username || sessionUser.username === "amira") {
-    return NextResponse.json({ error: "The demo account cannot change its password" }, { status: 400 });
-  }
+  if (!sessionUser.username) return unauthorized();
 
   try {
     const user = await findUser(sessionUser.username);
