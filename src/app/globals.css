@@ -1911,6 +1911,7 @@ input.ltr-num { text-align: left; }
 .sort-picker select:focus{border-color:#a5b884;box-shadow:0 0 0 3px #eaf4d7}
 [data-theme="dark"] .sort-picker select{background:#18181b;color:var(--ink);border-color:#2b2b30}
 @media (max-width:640px){.sort-picker{margin-inline-start:0;width:100%;justify-content:space-between}}
+.sort-picker .ms-menu{inset-inline-start:auto;inset-inline-end:0}
 
 /* Sales performance: role toggle + hint, so it is always clear which contact
    role the numbers describe. Without it the two lists look identical.
