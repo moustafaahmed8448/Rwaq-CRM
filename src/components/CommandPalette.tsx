@@ -116,6 +116,14 @@ export default function CommandPalette({ t }: { t: TFn }) {
       setActive((i) => (i - 1 + hits.length) % hits.length);
     } else if (e.key === "Enter") {
       e.preventDefault();
+      const q = query.trim();
+      // Submit the free-text search to the clients table so the user can see
+      // all matching results instead of opening a single client.
+      if (q.length >= 2) {
+        close();
+        router.push(`/?view=clients&q=${encodeURIComponent(q)}`);
+        return;
+      }
       const hit = hits[active];
       if (hit) go(hit.id);
     }

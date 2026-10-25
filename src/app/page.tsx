@@ -505,11 +505,26 @@ export default function Home() {
     // registry), so listing it costs nothing and keeps the lint honest.
   }, [router, hydrate]);
 
+  // Track client-side navigations to the same route (header search from the
+  // dashboard, for example). `router.push` updates `window.location` but does
+  // not remount this component, so a plain mount effect would never see a new
+  // `?q=`. Re-reading on every navigation keeps header search and the clients
+  // table linked without a full page reload.
+  const prevHref = useRef("");
   useEffect(() => {
-    const v = new URLSearchParams(window.location.search).get("view");
+    const href = window.location.href;
+    if (prevHref.current === href) return;
+    prevHref.current = href;
+    const params = new URLSearchParams(window.location.search);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (v === "clients") setView("clients");
-  }, []);
+    if (params.get("view") === "clients") setView("clients");
+    // Header search lands here as `/?view=clients&q=...`; adopt the free-text
+    // query so the clients table shows matching results and the search input
+    // reflects what was typed. Linked to the header search in CommandPalette.
+    const q = params.get("q") ?? "";
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q) setFilters(cur => ({ ...cur, query: q }));
+  });
 
   useEffect(() => {
     const stored = localStorage.getItem("rwaq-dark");
